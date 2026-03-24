@@ -1532,6 +1532,291 @@ class SearchMixin:
             logger.error(f"Named-vector search failed: {e}")
             return []
 
+    # =========================================================================
+    # SHARED HELPERS — used by learned, recursive, and multidim search
+    # =========================================================================
+
+    def _build_prefetch_list(
+        self,
+        query_colbert,
+        query_minilm,
+        candidate_pool_size: int,
+        include_classes: bool = True,
+        content_feedback: Optional[str] = None,
+        form_feedback: Optional[str] = None,
+    ) -> list:
+        """Build the Qdrant prefetch pipeline (shared by multidim/learned/recursive)."""
+        from qdrant_client.models import (
+            FieldCondition, Filter, MatchValue, Prefetch,
+        )
+
+        prefetch_list = []
+
+        # Prefetch 1: Components (classes)
+        comp_filter = (
+            Filter(must=[FieldCondition(key="type", match=MatchValue(value="class"))])
+            if include_classes else None
+        )
+        prefetch_list.append(
+            Prefetch(query=query_colbert, using="components",
+                     limit=candidate_pool_size, filter=comp_filter)
+        )
+
+        # Prefetch 2: Inputs (instance patterns + content feedback filter)
+        inp_conditions = [
+            FieldCondition(key="type", match=MatchValue(value="instance_pattern"))
+        ]
+        if content_feedback:
+            inp_conditions.append(
+                FieldCondition(key="content_feedback", match=MatchValue(value=content_feedback))
+            )
+        prefetch_list.append(
+            Prefetch(query=query_colbert, using="inputs",
+                     limit=candidate_pool_size, filter=Filter(must=inp_conditions))
+        )
+
+        # Prefetch 3: Relationships (form feedback filter)
+        rel_conditions = [
+            FieldCondition(key="type", match=MatchValue(value="instance_pattern"))
+        ]
+        if form_feedback:
+            rel_conditions.append(
+                FieldCondition(key="form_feedback", match=MatchValue(value=form_feedback))
+            )
+        prefetch_list.append(
+            Prefetch(query=query_minilm, using="relationships",
+                     limit=candidate_pool_size, filter=Filter(must=rel_conditions))
+        )
+
+        return prefetch_list
+
+    def _infer_component_paths(self, points) -> Optional[List[str]]:
+        """Infer component_paths from instance_pattern payloads in Qdrant results.
+
+        For NL queries (no DSL/component_paths), extracts parent_paths from
+        top instance_pattern candidates and returns the consensus set.
+        """
+        from collections import Counter
+        comp_counts = Counter()
+        for point in points:
+            payload = point.payload or {}
+            if payload.get("type") == "instance_pattern":
+                pp = payload.get("parent_paths") or payload.get("component_paths") or []
+                if isinstance(pp, list):
+                    comp_counts.update(pp)
+        if not comp_counts:
+            return None
+        threshold = 2 if len(comp_counts) > 5 else 1
+        raw_paths = [c for c, n in comp_counts.most_common() if n >= threshold]
+        # Normalize to short names (DAG uses "Button" not "card_framework.v2.Button")
+        paths = list({p.rsplit(".", 1)[-1] for p in raw_paths})
+        if paths:
+            logger.info(
+                "Inferred component_paths from %d pattern entries: %s",
+                sum(comp_counts.values()), paths[:10],
+            )
+        return paths or None
+
+    def _compute_structural_features(
+        self, cand_name: str, query_components: set,
+    ) -> tuple:
+        """Compute 5 structural DAG features for a candidate.
+
+        Returns: (is_parent, is_child, is_sibling, depth_ratio, n_shared_ancestors)
+        """
+        self._ensure_learned_dag()
+
+        cand_children = self._learned_dag_children.get(cand_name, set())
+        cand_parents = self._learned_dag_parents.get(cand_name, set())
+
+        is_parent = 1.0 if (cand_children & query_components) else 0.0
+        is_child = 1.0 if (cand_parents & query_components) else 0.0
+
+        is_sibling = 0.0
+        for qc in query_components:
+            if self._learned_dag_parents.get(qc, set()) & cand_parents:
+                is_sibling = 1.0
+                break
+
+        max_depth = max(self._learned_dag_depth.values()) if self._learned_dag_depth else 1
+        depth_ratio = self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
+
+        def _ancestors(name):
+            anc = set()
+            q = list(self._learned_dag_parents.get(name, []))
+            while q:
+                p = q.pop(0)
+                if p not in anc:
+                    anc.add(p)
+                    q.extend(self._learned_dag_parents.get(p, []))
+            return anc
+
+        cand_anc = _ancestors(cand_name)
+        query_anc = set()
+        for qc in query_components:
+            query_anc.update(_ancestors(qc))
+        total = len(cand_anc | query_anc) or 1
+        n_shared = len(cand_anc & query_anc) / total
+
+        return (is_parent, is_child, is_sibling, depth_ratio, n_shared)
+
+    def _compute_learned_features(
+        self,
+        points,
+        query_colbert,
+        query_minilm,
+        component_paths: Optional[List[str]] = None,
+    ) -> tuple:
+        """Compute features for all candidate points and return (features_list, points_data).
+
+        Handles V1 (norms), V2 (structural), and V3 (decomposed MaxSim) features.
+        Returns:
+            features_list: List of feature vectors (one per candidate)
+            points_data: List of (sim_c, sim_r, sim_i, point) tuples
+        """
+        import math
+
+        features_list = []
+        points_data = []
+        query_components = set(component_paths) if component_paths else set()
+
+        for point in points:
+            vectors = point.vector or {}
+            comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
+            inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
+            rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
+
+            # Compute similarities
+            sim_c = 0.0
+            sim_i = 0.0
+            sim_r = 0.0
+
+            if comp_vec and query_colbert:
+                sim_c = self._maxsim(query_colbert, comp_vec) if isinstance(comp_vec[0], list) else self._cosine_similarity(query_colbert[0], comp_vec)
+            if inp_vec and query_colbert:
+                sim_i = self._maxsim(query_colbert, inp_vec) if isinstance(inp_vec[0], list) else self._cosine_similarity(query_colbert[0], inp_vec)
+            if rel_vec and query_minilm:
+                if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
+                    sim_r = self._cosine_similarity(query_minilm, rel_vec)
+
+            if self._learned_feature_version == 3:
+                # V3: decomposed MaxSim + structural
+                cand_name = (point.payload or {}).get("name", "")
+                is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+                    self._compute_structural_features(cand_name, query_components)
+
+                if comp_vec and query_colbert and isinstance(comp_vec[0], list):
+                    sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                else:
+                    sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+
+                if inp_vec and query_colbert and isinstance(inp_vec[0], list):
+                    si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                else:
+                    si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+
+                features_list.append([
+                    sc_m, sc_x, sc_s, sc_cv,
+                    si_m, si_x, si_s, si_cv,
+                    sim_r,
+                    is_parent, is_child, is_sibling, depth_ratio, n_shared,
+                ])
+
+            elif self._learned_feature_version == 2:
+                # V2: scalar MaxSim + structural
+                cand_name = (point.payload or {}).get("name", "")
+                is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+                    self._compute_structural_features(cand_name, query_components)
+                features_list.append([sim_c, sim_i, sim_r, is_parent, is_child, is_sibling, depth_ratio, n_shared])
+
+            else:
+                # V1: norm features (legacy)
+                def _vec_norm(v):
+                    if not v:
+                        return 0.0
+                    flat = []
+                    if isinstance(v[0], list):
+                        for sub in v:
+                            flat.extend(sub)
+                    else:
+                        flat = v
+                    return math.sqrt(sum(x * x for x in flat))
+
+                features_list.append([
+                    sim_c, sim_i, sim_r,
+                    _vec_norm(query_colbert), _vec_norm(query_colbert),
+                    _vec_norm(query_minilm) if query_minilm else 0.0,
+                    _vec_norm(comp_vec), _vec_norm(inp_vec), _vec_norm(rel_vec),
+                ])
+
+            points_data.append((sim_c, sim_r, sim_i, point))
+
+        return features_list, points_data
+
+    def _categorize_scored_results(
+        self,
+        scored: list,
+        limit: int,
+        extra_fields: Optional[dict] = None,
+    ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+        """Categorize scored candidates into class, pattern, and relationship buckets.
+
+        Args:
+            scored: List of (score, sim_c, sim_r, sim_i, point) tuples, sorted by score desc.
+            limit: Max results per bucket.
+            extra_fields: Additional fields to add to each result dict.
+
+        Returns:
+            (class_results, pattern_results, relationship_results)
+        """
+        class_results = []
+        pattern_results = []
+        relationship_results = []
+
+        for score, sim_c, sim_r, sim_i, point in scored:
+            payload = point.payload or {}
+            result = {
+                "id": point.id,
+                "score": score,
+                "sim_components": sim_c,
+                "sim_relationships": sim_r,
+                "sim_inputs": sim_i,
+                "name": payload.get("name"),
+                "type": payload.get("type"),
+                "full_path": payload.get("full_path"),
+                "symbol": payload.get("symbol"),
+                "docstring": payload.get("docstring", "")[:200],
+                "content_feedback": payload.get("content_feedback"),
+                "form_feedback": payload.get("form_feedback"),
+                "parent_paths": payload.get("parent_paths", []),
+                "structure_description": payload.get("structure_description", ""),
+                "card_description": payload.get("card_description", ""),
+                "relationship_text": payload.get("relationship_text", ""),
+                "instance_params": payload.get("instance_params", {}),
+            }
+            if extra_fields:
+                result.update(extra_fields)
+
+            point_type = payload.get("type")
+            if point_type == "class":
+                class_results.append(result)
+            elif point_type == "instance_pattern":
+                if payload.get("content_feedback") == "positive":
+                    pattern_results.append(result)
+                if payload.get("form_feedback") == "positive":
+                    relationship_results.append(result)
+                if result not in pattern_results:
+                    if payload.get("content_feedback") != "positive" and payload.get("form_feedback") != "positive":
+                        pattern_results.append(result)
+            else:
+                class_results.append(result)
+
+        return (
+            class_results[:limit],
+            pattern_results[:limit],
+            relationship_results[:limit],
+        )
+
     def search_hybrid_dispatch(
         self,
         description: str,
@@ -2413,14 +2698,12 @@ class SearchMixin:
         Search using the trained SimilarityScorerMW for reranking.
 
         Same prefetch pipeline as search_hybrid_multidim, but replaces
-        multiplicative scoring (sim_c × sim_r × sim_i) with a learned
-        MLP on [sim_c, sim_i, sim_r, norms].
+        multiplicative scoring with a trained MLP reranker.
 
-        Architecture: MLP(9 → 32 → 32 → 1), 1,409 params, trained on
-        gchat card data with listwise contrastive loss.
+        Architecture: MLP(input_dim → 32 → 32 → 1), ~1,569 params (V3).
+        Feature versions: V1=9D (norms), V2=8D (structural), V3=14D (decomposed MaxSim).
+        Trained with listwise contrastive loss on gchat card + real user data.
         """
-        import math
-
         try:
             import torch
         except ImportError:
@@ -2462,42 +2745,13 @@ class SearchMixin:
                 logger.warning("Could not embed query for learned search")
                 return [], [], []
 
-            # --- Step 2: Prefetch candidates from Qdrant (same as multidim) ---
-            from qdrant_client.models import (
-                FieldCondition,
-                Filter,
-                Fusion,
-                FusionQuery,
-                MatchValue,
-                Prefetch,
-            )
+            # --- Step 2: Prefetch + query Qdrant ---
+            from qdrant_client.models import Fusion, FusionQuery
 
-            prefetch_list = []
-            comp_filter = Filter(must=[FieldCondition(key="type", match=MatchValue(value="class"))]) if include_classes else None
-            prefetch_list.append(
-                Prefetch(query=query_colbert, using="components", limit=candidate_pool_size, filter=comp_filter)
+            prefetch_list = self._build_prefetch_list(
+                query_colbert, query_minilm, candidate_pool_size,
+                include_classes, content_feedback, form_feedback,
             )
-
-            inp_filter = None
-            if content_feedback:
-                inp_filter = Filter(must=[
-                    FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
-                    FieldCondition(key="content_feedback", match=MatchValue(value=content_feedback)),
-                ])
-            prefetch_list.append(
-                Prefetch(query=query_colbert, using="inputs", limit=candidate_pool_size, filter=inp_filter)
-            )
-
-            rel_filter = None
-            if form_feedback:
-                rel_filter = Filter(must=[
-                    FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
-                    FieldCondition(key="form_feedback", match=MatchValue(value=form_feedback)),
-                ])
-            prefetch_list.append(
-                Prefetch(query=query_minilm, using="relationships", limit=candidate_pool_size, filter=rel_filter)
-            )
-
             results = self.client.query_points(
                 collection_name=self.collection_name,
                 prefetch=prefetch_list,
@@ -2511,145 +2765,21 @@ class SearchMixin:
                 logger.info("Learned search: no candidates found")
                 return [], [], []
 
-            # --- Step 2.5: Infer component_paths from instance_pattern results ---
-            # When no component_paths are provided (NL query), extract them
-            # from the top instance_pattern candidates returned by Qdrant.
-            # These patterns have parent_paths in their payload — the components
-            # they actually use. Aggregate across top patterns for coverage.
+            # --- Step 2.5: Infer component_paths for NL queries ---
             if not component_paths and self._learned_feature_version in (2, 3):
-                from collections import Counter
-                comp_counts = Counter()
-                for point in results.points:
-                    payload = point.payload or {}
-                    if payload.get("type") == "instance_pattern":
-                        pp = payload.get("parent_paths") or payload.get("component_paths") or []
-                        if isinstance(pp, list):
-                            comp_counts.update(pp)
-                # Use components that appear in at least 2 patterns (consensus)
-                # or all if few patterns found
-                if comp_counts:
-                    threshold = 2 if len(comp_counts) > 5 else 1
-                    raw_paths = [c for c, n in comp_counts.most_common() if n >= threshold]
-                    # Normalize to short names (DAG uses "Button" not "card_framework.v2.Button")
-                    component_paths = list({p.rsplit(".", 1)[-1] for p in raw_paths})
-                    if component_paths:
-                        logger.info(f"Inferred component_paths from {sum(comp_counts.values())} pattern entries: {component_paths[:10]}")
+                component_paths = self._infer_component_paths(results.points)
 
-            # --- Step 3: Compute similarity features + learned scoring ---
-            features_list = []
-            points_list = []
+            # --- Step 3: Compute features + MLP scoring ---
+            features_list, points_list = self._compute_learned_features(
+                results.points, query_colbert, query_minilm, component_paths,
+            )
 
-            for point in results.points:
-                vectors = point.vector or {}
-                comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
-                inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
-                rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
-
-                sim_c = 0.0
-                sim_i = 0.0
-                sim_r = 0.0
-
-                if comp_vec and query_colbert:
-                    sim_c = self._maxsim(query_colbert, comp_vec) if isinstance(comp_vec[0], list) else self._cosine_similarity(query_colbert[0], comp_vec)
-                if inp_vec and query_colbert:
-                    sim_i = self._maxsim(query_colbert, inp_vec) if isinstance(inp_vec[0], list) else self._cosine_similarity(query_colbert[0], inp_vec)
-                if rel_vec and query_minilm:
-                    if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
-                        sim_r = self._cosine_similarity(query_minilm, rel_vec)
-
-                if self._learned_feature_version in (2, 3):
-                    # V2/V3: structural features from DAG (no norms)
-                    self._ensure_learned_dag()
-                    cand_name = (point.payload or {}).get("name", "")
-
-                    # Structural features (shared by V2 and V3)
-                    cand_children = self._learned_dag_children.get(cand_name, set())
-                    cand_parents = self._learned_dag_parents.get(cand_name, set())
-                    query_components = set(component_paths) if component_paths else set()
-
-                    is_parent = 1.0 if (cand_children & query_components) else 0.0
-                    is_child = 1.0 if (cand_parents & query_components) else 0.0
-
-                    is_sibling = 0.0
-                    for qc in query_components:
-                        qc_parents = self._learned_dag_parents.get(qc, set())
-                        if qc_parents & cand_parents:
-                            is_sibling = 1.0
-                            break
-
-                    max_depth = max(self._learned_dag_depth.values()) if self._learned_dag_depth else 1
-                    depth_ratio = self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
-
-                    # Shared ancestors
-                    def _get_ancestors(name):
-                        ancestors = set()
-                        q = list(self._learned_dag_parents.get(name, []))
-                        while q:
-                            p = q.pop(0)
-                            if p not in ancestors:
-                                ancestors.add(p)
-                                q.extend(self._learned_dag_parents.get(p, []))
-                        return ancestors
-
-                    cand_ancestors = _get_ancestors(cand_name)
-                    query_ancestors = set()
-                    for qc in query_components:
-                        query_ancestors.update(_get_ancestors(qc))
-                    total_anc = len(cand_ancestors | query_ancestors) or 1
-                    n_shared_ratio = len(cand_ancestors & query_ancestors) / total_anc
-
-                    if self._learned_feature_version == 3:
-                        # V3: decomposed MaxSim (4 stats per ColBERT vector)
-                        if comp_vec and query_colbert and isinstance(comp_vec[0], list):
-                            sc_mean, sc_max, sc_std, sc_cov = self._maxsim_decomposed(query_colbert, comp_vec)
-                        else:
-                            sc_mean, sc_max, sc_std, sc_cov = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
-
-                        if inp_vec and query_colbert and isinstance(inp_vec[0], list):
-                            si_mean, si_max, si_std, si_cov = self._maxsim_decomposed(query_colbert, inp_vec)
-                        else:
-                            si_mean, si_max, si_std, si_cov = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
-
-                        features_list.append([
-                            sc_mean, sc_max, sc_std, sc_cov,
-                            si_mean, si_max, si_std, si_cov,
-                            sim_r,
-                            is_parent, is_child, is_sibling, depth_ratio, n_shared_ratio,
-                        ])
-                    else:
-                        # V2: scalar MaxSim + structural
-                        features_list.append([sim_c, sim_i, sim_r, is_parent, is_child, is_sibling, depth_ratio, n_shared_ratio])
-                else:
-                    # V1: norm features (legacy)
-                    def _vec_norm(v):
-                        if not v:
-                            return 0.0
-                        flat = []
-                        if isinstance(v[0], list):
-                            for sub in v:
-                                flat.extend(sub)
-                        else:
-                            flat = v
-                        return math.sqrt(sum(x * x for x in flat))
-
-                    q_c_norm = _vec_norm(query_colbert)
-                    q_i_norm = _vec_norm(query_colbert)
-                    q_r_norm = _vec_norm(query_minilm) if query_minilm else 0.0
-                    c_c_norm = _vec_norm(comp_vec)
-                    c_i_norm = _vec_norm(inp_vec)
-                    c_r_norm = _vec_norm(rel_vec)
-
-                    features_list.append([sim_c, sim_i, sim_r, q_c_norm, q_i_norm, q_r_norm, c_c_norm, c_i_norm, c_r_norm])
-
-                points_list.append((sim_c, sim_r, sim_i, point))
-
-            # Batch score all candidates through the MLP
             features_tensor = torch.tensor(features_list, dtype=torch.float32)
             with torch.no_grad():
                 scores_tensor = model(features_tensor).squeeze(-1)
             learned_scores = scores_tensor.tolist()
 
-            # Apply feedback boost on top of learned scores
+            # Apply feedback boost
             scored = []
             for idx, (sim_c, sim_r, sim_i, point) in enumerate(points_list):
                 score = learned_scores[idx]
@@ -2675,76 +2805,25 @@ class SearchMixin:
                     import hashlib
                     _qh = hashlib.md5(description.encode()).hexdigest()[:12]
                     _top20 = [
-                        {
-                            "rank": i + 1,
-                            "name": (p.payload or {}).get("name", "?"),
-                            "type": (p.payload or {}).get("type", "?"),
-                            "score": round(sc, 4),
-                            "sim_c": round(s_c, 4),
-                            "sim_i": round(s_i, 4),
-                            "sim_r": round(s_r, 4),
-                        }
-                        for i, (sc, s_c, s_r, s_i, p) in enumerate(scored[:20])
+                        {"rank": i + 1, "name": (p.payload or {}).get("name", "?"),
+                         "score": round(sc, 4), "sim_c": round(s_c, 4)}
+                        for i, (sc, s_c, _sr, _si, p) in enumerate(scored[:20])
                     ]
-                    logger.info(
-                        "Learned scorer candidates | query=%s | top20=%s",
-                        _qh, _top20,
-                    )
+                    logger.info("Learned scorer candidates | query=%s | top20=%s", _qh, _top20)
             except Exception:
                 pass
 
-            # --- Step 4: Categorize results (same as multidim) ---
-            class_results = []
-            pattern_results = []
-            relationship_results = []
-
-            for score, sim_c, sim_r, sim_i, point in scored:
-                payload = point.payload or {}
-                result = {
-                    "id": point.id,
-                    "score": score,
-                    "sim_components": sim_c,
-                    "sim_relationships": sim_r,
-                    "sim_inputs": sim_i,
-                    "name": payload.get("name"),
-                    "type": payload.get("type"),
-                    "full_path": payload.get("full_path"),
-                    "symbol": payload.get("symbol"),
-                    "docstring": payload.get("docstring", "")[:200],
-                    "content_feedback": payload.get("content_feedback"),
-                    "form_feedback": payload.get("form_feedback"),
-                    "parent_paths": payload.get("parent_paths", []),
-                    "structure_description": payload.get("structure_description", ""),
-                    "card_description": payload.get("card_description", ""),
-                    "relationship_text": payload.get("relationship_text", ""),
-                    "instance_params": payload.get("instance_params", {}),
-                }
-
-                point_type = payload.get("type")
-                if point_type == "class":
-                    class_results.append(result)
-                elif point_type == "instance_pattern":
-                    if payload.get("content_feedback") == "positive":
-                        pattern_results.append(result)
-                    if payload.get("form_feedback") == "positive":
-                        relationship_results.append(result)
-                    if result not in pattern_results:
-                        if payload.get("content_feedback") != "positive" and payload.get("form_feedback") != "positive":
-                            pattern_results.append(result)
-                else:
-                    class_results.append(result)
+            # --- Step 4: Categorize and return ---
+            class_results, pattern_results, relationship_results = \
+                self._categorize_scored_results(scored, limit)
 
             logger.info(
-                f"Learned search: {len(class_results)} classes, "
-                f"{len(pattern_results)} patterns, {len(relationship_results)} relationships "
-                f"(from {len(results.points)} candidates)"
+                "Learned search: %d classes, %d patterns, %d relationships (from %d candidates)",
+                len(class_results), len(pattern_results),
+                len(relationship_results), len(results.points),
             )
 
-            return (
-                class_results[:limit],
-                pattern_results[:limit],
-                relationship_results[:limit],
-            )
+            return class_results, pattern_results, relationship_results
 
         except Exception as e:
             logger.error(f"Learned search failed: {e}", exc_info=True)
@@ -2818,9 +2897,8 @@ class SearchMixin:
             )
 
         try:
-            from qdrant_client.models import (
-                FieldCondition, Filter, Fusion, FusionQuery, MatchValue, Prefetch,
-            )
+            import numpy as np
+            from qdrant_client.models import Fusion, FusionQuery
 
             # --- Embed original query ---
             query_colbert_orig = self._embed_with_colbert(description, token_ratio)
@@ -2832,42 +2910,20 @@ class SearchMixin:
             if not query_colbert_orig or not query_minilm_orig:
                 return [], [], []
 
-            # Current query vectors (will be refined each cycle)
             query_colbert = query_colbert_orig
             query_minilm = query_minilm_orig
-
             cycle_log = []
-            best_result = None
+            best_scored = None
             prev_top1_name = None
 
             for cycle in range(max_cycles):
                 t0 = time.monotonic()
 
-                # --- Prefetch with current query vectors ---
-                prefetch_list = []
-                comp_filter = Filter(must=[FieldCondition(key="type", match=MatchValue(value="class"))]) if include_classes else None
-                prefetch_list.append(
-                    Prefetch(query=query_colbert, using="components", limit=candidate_pool_size, filter=comp_filter)
+                # --- Prefetch + query Qdrant ---
+                prefetch_list = self._build_prefetch_list(
+                    query_colbert, query_minilm, candidate_pool_size,
+                    include_classes, content_feedback, form_feedback,
                 )
-                inp_filter = None
-                if content_feedback:
-                    inp_filter = Filter(must=[
-                        FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
-                        FieldCondition(key="content_feedback", match=MatchValue(value=content_feedback)),
-                    ])
-                prefetch_list.append(
-                    Prefetch(query=query_colbert, using="inputs", limit=candidate_pool_size, filter=inp_filter)
-                )
-                rel_filter = None
-                if form_feedback:
-                    rel_filter = Filter(must=[
-                        FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
-                        FieldCondition(key="form_feedback", match=MatchValue(value=form_feedback)),
-                    ])
-                prefetch_list.append(
-                    Prefetch(query=query_minilm, using="relationships", limit=candidate_pool_size, filter=rel_filter)
-                )
-
                 results = self.client.query_points(
                     collection_name=self.collection_name,
                     prefetch=prefetch_list,
@@ -2880,104 +2936,29 @@ class SearchMixin:
                 if not results.points:
                     break
 
-                # --- Infer component_paths if needed (first cycle only) ---
+                # --- Infer component_paths (first cycle only) ---
                 if cycle == 0 and not component_paths and self._learned_feature_version in (2, 3):
-                    from collections import Counter
-                    comp_counts = Counter()
-                    for point in results.points:
-                        payload = point.payload or {}
-                        if payload.get("type") == "instance_pattern":
-                            pp = payload.get("parent_paths") or payload.get("component_paths") or []
-                            if isinstance(pp, list):
-                                comp_counts.update(pp)
-                    if comp_counts:
-                        threshold = 2 if len(comp_counts) > 5 else 1
-                        raw_paths = [c for c, n in comp_counts.most_common() if n >= threshold]
-                        component_paths = list({p.rsplit(".", 1)[-1] for p in raw_paths})
+                    component_paths = self._infer_component_paths(results.points)
 
-                # --- Score candidates through MLP (same logic as search_hybrid_learned) ---
-                features_list = []
-                points_data = []  # (sim_c, sim_r, sim_i, point)
-
-                for point in results.points:
-                    vectors = point.vector or {}
-                    comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
-                    inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
-                    rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
-
-                    sim_c = self._maxsim(query_colbert, comp_vec) if (comp_vec and query_colbert and isinstance(comp_vec[0], list)) else 0.0
-                    sim_i = self._maxsim(query_colbert, inp_vec) if (inp_vec and query_colbert and isinstance(inp_vec[0], list)) else 0.0
-                    sim_r = self._cosine_similarity(query_minilm, rel_vec) if (rel_vec and query_minilm and isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list)) else 0.0
-
-                    if self._learned_feature_version == 3:
-                        self._ensure_learned_dag()
-                        cand_name = (point.payload or {}).get("name", "")
-                        cand_children = self._learned_dag_children.get(cand_name, set())
-                        cand_parents = self._learned_dag_parents.get(cand_name, set())
-                        query_components = set(component_paths) if component_paths else set()
-
-                        is_parent = 1.0 if (cand_children & query_components) else 0.0
-                        is_child = 1.0 if (cand_parents & query_components) else 0.0
-                        is_sibling = 0.0
-                        for qc in query_components:
-                            if self._learned_dag_parents.get(qc, set()) & cand_parents:
-                                is_sibling = 1.0
-                                break
-                        max_depth = max(self._learned_dag_depth.values()) if self._learned_dag_depth else 1
-                        depth_ratio = self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
-
-                        def _anc(name):
-                            a = set()
-                            q = list(self._learned_dag_parents.get(name, []))
-                            while q:
-                                p = q.pop(0)
-                                if p not in a:
-                                    a.add(p)
-                                    q.extend(self._learned_dag_parents.get(p, []))
-                            return a
-                        cand_anc = _anc(cand_name)
-                        q_anc = set()
-                        for qc in query_components:
-                            q_anc.update(_anc(qc))
-                        total_a = len(cand_anc | q_anc) or 1
-                        n_shared = len(cand_anc & q_anc) / total_a
-
-                        if comp_vec and query_colbert and isinstance(comp_vec[0], list):
-                            sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
-                        else:
-                            sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
-                        if inp_vec and query_colbert and isinstance(inp_vec[0], list):
-                            si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
-                        else:
-                            si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
-
-                        features_list.append([
-                            sc_m, sc_x, sc_s, sc_cv,
-                            si_m, si_x, si_s, si_cv,
-                            sim_r,
-                            is_parent, is_child, is_sibling, depth_ratio, n_shared,
-                        ])
-                    else:
-                        # Fallback to scalar features for V1/V2
-                        features_list.append([sim_c, sim_i, sim_r] + [0.0] * (self._learned_feature_version == 2 and 5 or 6))
-
-                    points_data.append((sim_c, sim_r, sim_i, point))
+                # --- Compute features + MLP scoring ---
+                features_list, points_data = self._compute_learned_features(
+                    results.points, query_colbert, query_minilm, component_paths,
+                )
 
                 if not features_list:
                     break
 
-                # Batch MLP scoring
                 features_tensor = torch.tensor(features_list, dtype=torch.float32)
                 with torch.no_grad():
                     scores_tensor = model(features_tensor).squeeze(-1)
                 scores = scores_tensor.tolist()
 
-                # Sort by score
                 scored = sorted(
                     zip(scores, points_data),
                     key=lambda x: x[0], reverse=True,
                 )
 
+                # Track cycle metrics
                 top1_name = (scored[0][1][3].payload or {}).get("name", "?") if scored else "?"
                 top1_score = scored[0][0] if scored else 0.0
                 top2_score = scored[1][0] if len(scored) > 1 else 0.0
@@ -2985,136 +2966,67 @@ class SearchMixin:
                 elapsed = round((time.monotonic() - t0) * 1000)
 
                 cycle_log.append({
-                    "cycle": cycle,
-                    "top1": top1_name,
+                    "cycle": cycle, "top1": top1_name,
                     "top1_score": round(top1_score, 4),
                     "margin": round(margin, 4),
-                    "n_candidates": len(scored),
-                    "latency_ms": elapsed,
+                    "n_candidates": len(scored), "latency_ms": elapsed,
                 })
 
-                # Store best result for final categorization
-                best_result = (scored, query_colbert, query_minilm)
+                # Reformat scored to match _categorize_scored_results format:
+                # (score, sim_c, sim_r, sim_i, point)
+                best_scored = [
+                    (sc, s_c, s_r, s_i, pt)
+                    for sc, (s_c, s_r, s_i, pt) in scored
+                ]
 
                 # --- Halting checks ---
                 if margin > halt_margin:
-                    logger.info(
-                        "Recursive search halted at cycle %d: margin %.4f > %.4f",
-                        cycle, margin, halt_margin,
-                    )
+                    logger.info("Recursive search halted at cycle %d: margin %.4f > %.4f",
+                                cycle, margin, halt_margin)
                     break
-
                 if top1_name == prev_top1_name and cycle > 0:
-                    logger.info(
-                        "Recursive search converged at cycle %d: top1=%s unchanged",
-                        cycle, top1_name,
-                    )
+                    logger.info("Recursive search converged at cycle %d: top1=%s unchanged",
+                                cycle, top1_name)
                     break
                 prev_top1_name = top1_name
 
                 # --- Refine query vectors for next cycle ---
                 if cycle < max_cycles - 1:
-                    alpha = alpha_init * (0.9 ** cycle)  # decay alpha each cycle
+                    alpha = alpha_init * (0.9 ** cycle)
                     top_k = min(5, len(scored))
 
-                    # Average top-K component vectors
                     top_comp_vecs = []
-                    top_inp_vecs = []
                     for _, (_, _, _, pt) in scored[:top_k]:
                         vecs = pt.vector or {}
                         cv = vecs.get("components") if isinstance(vecs, dict) else None
-                        iv = vecs.get("inputs") if isinstance(vecs, dict) else None
                         if cv and isinstance(cv[0], list):
-                            # Average multi-vector tokens into single vector for blending
-                            import numpy as np
-                            avg = np.mean(cv, axis=0).tolist()
-                            top_comp_vecs.append(avg)
-                        if iv and isinstance(iv[0], list):
-                            import numpy as np
-                            avg = np.mean(iv, axis=0).tolist()
-                            top_inp_vecs.append(avg)
+                            top_comp_vecs.append(np.mean(cv, axis=0).tolist())
 
                     if top_comp_vecs:
-                        import numpy as np
-                        # Blend: create a single "refined" token from top-K mean
                         top_mean = np.mean(top_comp_vecs, axis=0)
-                        # For ColBERT multi-vector: append the refined token to original query
-                        # This adds context without destroying original tokens
-                        refined_token = (alpha * np.array(query_colbert_orig[0]) + (1 - alpha) * top_mean).tolist()
-                        # Replace first token (most important in ColBERT) with blend
-                        query_colbert = [refined_token] + query_colbert_orig[1:]
-
-                    if top_inp_vecs:
-                        import numpy as np
-                        top_mean = np.mean(top_inp_vecs, axis=0)
-                        refined_token = (alpha * np.array(query_colbert_orig[0]) + (1 - alpha) * top_mean).tolist()
-                        # Input vectors also get refinement via the same blended token
+                        refined = (alpha * np.array(query_colbert_orig[0]) + (1 - alpha) * top_mean).tolist()
+                        query_colbert = [refined] + query_colbert_orig[1:]
 
             # Log cycle summary
-            logger.info(
-                "Recursive search completed: %d cycles | %s",
-                len(cycle_log),
-                cycle_log,
-            )
+            logger.info("Recursive search completed: %d cycles | %s", len(cycle_log), cycle_log)
 
-            # --- Categorize final results (same as search_hybrid_learned) ---
-            if best_result is None:
+            if best_scored is None:
                 return [], [], []
 
-            scored_final, _, _ = best_result
-            class_results = []
-            pattern_results = []
-            relationship_results = []
-
-            for score, (sim_c, sim_r, sim_i, point) in scored_final:
-                payload = point.payload or {}
-                result = {
-                    "id": point.id,
-                    "score": score,
-                    "sim_components": sim_c,
-                    "sim_relationships": sim_r,
-                    "sim_inputs": sim_i,
-                    "name": payload.get("name"),
-                    "type": payload.get("type"),
-                    "full_path": payload.get("full_path"),
-                    "symbol": payload.get("symbol"),
-                    "docstring": payload.get("docstring", "")[:200],
-                    "content_feedback": payload.get("content_feedback"),
-                    "form_feedback": payload.get("form_feedback"),
-                    "parent_paths": payload.get("parent_paths", []),
-                    "structure_description": payload.get("structure_description", ""),
-                    "card_description": payload.get("card_description", ""),
-                    "relationship_text": payload.get("relationship_text", ""),
-                    "instance_params": payload.get("instance_params", {}),
-                    "recursive_cycles": len(cycle_log),
-                }
-
-                point_type = payload.get("type")
-                if point_type == "class":
-                    class_results.append(result)
-                elif point_type == "instance_pattern":
-                    if payload.get("content_feedback") == "positive":
-                        pattern_results.append(result)
-                    if payload.get("form_feedback") == "positive":
-                        relationship_results.append(result)
-                    if result not in pattern_results:
-                        if payload.get("content_feedback") != "positive" and payload.get("form_feedback") != "positive":
-                            pattern_results.append(result)
-                else:
-                    class_results.append(result)
+            # --- Categorize and return ---
+            class_results, pattern_results, relationship_results = \
+                self._categorize_scored_results(
+                    best_scored, limit,
+                    extra_fields={"recursive_cycles": len(cycle_log)},
+                )
 
             logger.info(
-                "Recursive search: %d classes, %d patterns, %d relationships "
-                "(from %d cycles)",
+                "Recursive search: %d classes, %d patterns, %d relationships (from %d cycles)",
                 len(class_results), len(pattern_results),
                 len(relationship_results), len(cycle_log),
             )
 
-            return (
-                class_results[:limit],
-                pattern_results[:limit],
-                relationship_results[:limit],
-            )
+            return class_results, pattern_results, relationship_results
 
         except Exception as e:
             logger.error(f"Recursive search failed: {e}", exc_info=True)
