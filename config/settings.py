@@ -319,8 +319,32 @@ class Settings(BaseSettings):
 
     search_mode: str = Field(
         default="rrf",
-        description="Search scoring mode: 'rrf' (legacy), 'multidim' (multiplicative), 'learned' (trained MLP)",
+        description="Search scoring mode: 'rrf' (legacy), 'multidim' (multiplicative), 'learned' (trained MLP), 'recursive' (iterative refinement)",
         json_schema_extra={"env": "SEARCH_MODE"},
+    )
+
+    # Shadow A/B scoring — runs all 3 search modes on every query, logs comparison
+    search_shadow_scoring: bool = Field(
+        default=False,
+        description="Enable shadow A/B scoring: run all search modes and log comparison metrics",
+        json_schema_extra={"env": "SEARCH_SHADOW_SCORING"},
+    )
+
+    # Recursive refinement settings (H3 bridge)
+    recursive_max_cycles: int = Field(
+        default=3,
+        description="Max refinement cycles for recursive search mode",
+        json_schema_extra={"env": "RECURSIVE_MAX_CYCLES"},
+    )
+    recursive_halt_margin: float = Field(
+        default=0.5,
+        description="Score margin between #1 and #2 to stop recursion early",
+        json_schema_extra={"env": "RECURSIVE_HALT_MARGIN"},
+    )
+    recursive_alpha_init: float = Field(
+        default=0.7,
+        description="Initial query blend weight for recursive refinement (alpha * original + (1-alpha) * top-K mean)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_INIT"},
     )
 
     # Response Limiting Configuration

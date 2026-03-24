@@ -1294,6 +1294,23 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 splitThreadKey=split_thread,
             )
 
+            # Log card render feedback for A/B scoring correlation
+            try:
+                from config.settings import Settings as _CfgS
+                if _CfgS().search_shadow_scoring:
+                    import hashlib as _hl
+                    _qh = _hl.md5(card_description.encode()).hexdigest()[:12]
+                    logger.info(
+                        "Card render feedback | query=%s | success=%s | search_score=%s | component=%s | dsl=%s",
+                        _qh,
+                        delivery.success,
+                        best_match.get("score"),
+                        best_match.get("name"),
+                        rendered_dsl,
+                    )
+            except Exception:
+                pass
+
             if delivery.success:
                 msg = (
                     f"Card message sent successfully via {delivery_method}"

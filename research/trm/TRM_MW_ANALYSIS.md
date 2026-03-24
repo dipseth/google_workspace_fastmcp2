@@ -707,8 +707,9 @@ This is exactly TRM's "self-improving patterns" — but operating in embedding s
 |---------|------------|--------|---------|-----------|
 | **H0** | Wrapper-Agnosticism | **Complete 2026-03-22** | None | — (prerequisite for H3) |
 | **H1** | Multi-Dimensional Scoring | **Live-tested 2026-03-22** | None | Comparative A/B metrics (multidim vs RRF) in production |
-| **H2** | Learned Similarity Scorer | **MW validated 2026-03-22: 100% val acc** | None | Integrate into `search_hybrid_dispatch()` |
-| **H3** | Full Recursive Embedding Network | Vision | Needs H2 | Domain-agnosticism prerequisite met (H0) |
+| **H2** | Learned Similarity Scorer | **V3 production-validated 2026-03-24** | None | Production A/B comparison (shadow scoring live) |
+| **H2.5** | Recursive Refinement POC | **Implemented 2026-03-24** | None | Tune alpha/cycles, evaluate on larger query set |
+| **H3** | Full Recursive Embedding Network | Design | Needs H2.5 evaluation | See Section 19 for readiness assessment |
 
 ### H1 Implementation Details
 
@@ -1409,6 +1410,136 @@ issues — this is a pre-existing card builder limitation, not a scorer regressi
 
 ---
 
+## 18. H2 EVOLUTION — V1 → V2 → V3 Feature Engineering (2026-03-23)
+
+### 18.1 V1 → V2: Fixing Shortcut Learning
+
+**Problem discovered:** Ablation study on V1 (9 features: 3 similarities + 6 norms) revealed
+the model was **fingerprinting component types by embedding magnitude** instead of learning
+meaningful relationships. `c_inp_norm` had 23% ablation impact — removing it collapsed accuracy
+because the model used L2 norms as a lookup table, not the similarity features.
+
+**Fix:** Replaced 6 norm features with 5 **structural DAG features** computed from the
+component hierarchy graph:
+
+| Feature | Source | Signal |
+|---------|--------|--------|
+| `is_parent` | DAG | Candidate contains query components |
+| `is_child` | DAG | Candidate is contained by query components |
+| `is_sibling` | DAG | Candidate shares parent with query components |
+| `depth_ratio` | DAG BFS | Position in hierarchy (0=root, 1=leaf) |
+| `n_shared_ancestors` | DAG traversal | Overlap in ancestry chains |
+
+**V2 result:** MLP(8→32→32→1), 1,377 params, 100% val accuracy on 140 groups (698 total,
+80/20 split). Separation margin: 5.60 (up from 0.63 in V1). No single feature dominates.
+
+**Component path inference:** For NL queries (no DSL/component_paths), V2 infers
+`component_paths` from instance_pattern `parent_paths` in Qdrant prefetch results,
+enabling structural feature computation without explicit user input.
+
+### 18.2 V2 → V3: MaxSim Decomposition
+
+**Problem:** `sim_components` and `sim_inputs` are each a single MaxSim scalar that collapses
+all token-level information. The model can't distinguish:
+- "3/10 query tokens match perfectly, rest don't" → peaked structural/keyword hit
+- "All 10 tokens match moderately well" → genuine broad semantic alignment
+
+**Fix:** Decompose each ColBERT MaxSim into 4 statistics from the per-query-token
+max-similarity vector:
+
+| Feature | What it captures |
+|---------|-----------------|
+| `sim_c_mean` / `sim_i_mean` | Average token alignment (= original MaxSim) |
+| `sim_c_max` / `sim_i_max` | Peak single-token match |
+| `sim_c_std` / `sim_i_std` | Consistency — low=semantic, high=peaked/structural |
+| `sim_c_coverage` / `sim_i_coverage` | Fraction of query tokens with max_sim > 0.4 |
+
+**V3 features (14):** 4 components + 4 inputs + 1 relationships + 5 structural
+
+**V3 result:** MLP(14→32→32→1), 1,569 params, 100% val accuracy, separation margin 5.76.
+Key ablation finding: `sim_i_max` (peak input token alignment) has highest ablation impact
+(3.6%) — it provides the unique semantic signal that other features can't reconstruct.
+`sim_c_std` has notable weight magnitude (0.094) — the model IS using distributional info.
+
+### 18.3 Training Data Evolution
+
+| Version | Groups | Source | Positive Rate |
+|---------|--------|--------|---------------|
+| V1 | 72 | Qdrant instance patterns + classes | 13.5% |
+| V2 | 698 | Synthetic (DAGStructureGenerator × 800 random structures) | 63.6% |
+| V3 | 698 | Same structures, recomputed with decomposed MaxSim | 63.6% |
+
+### 18.4 Diagnostic UI
+
+Built a React + FastAPI diagnostic dashboard (`tools/diagnostic-ui/`) with 5 ML panels:
+
+1. **Score Distribution** — Positive vs negative score histograms with threshold
+2. **Feature Importance** — Weight magnitude + zero-out ablation per feature
+3. **Per-Group Performance** — Which groups the model gets right/wrong
+4. **Weight Heatmap** — Layer weight matrices as color grids
+5. **Inference Inspector** — Live query with full feature + activation breakdown
+
+Auto-detects V1/V2/V3 from checkpoint metadata. Colors and labels adapt to feature version.
+
+### 18.5 Files Changed (H2 V2→V3)
+
+| File | What |
+|------|------|
+| `search_mixin.py` | `_maxsim_decomposed()`, V3 inference branch in `search_hybrid_learned()` |
+| `generate_training_data.py` | `maxsim_decomposed()`, `FEATURE_NAMES_V3`, `compute_features_v3()` |
+| `train_mw.py` | V3 feature loading, `input_dim=14`, `--feature-version 3` |
+| `ml_eval.py` | `FEATURE_NAMES_V3`, dynamic version detection, dynamic layer labels |
+| `FeatureImportance.tsx` | V3 color map (blue=components, purple=inputs), version detection |
+| `checkpoints/best_model_mw.pt` | V3 checkpoint: `feature_version=3, input_dim=14` |
+| `mw_synthetic_groups_v3.json` | 698 groups with 14 decomposed features |
+
+### 18.6 Production Validation (2026-03-23)
+
+Tested `send_dynamic_card` via MCP execute sandbox:
+- **DSL query** `§[δ×2, Ƀ[ᵬ×3]]` → Card sent, all components mapped correctly
+- **NL query** "a status dashboard with 2 service checks and 3 action buttons" → Scorer
+  inferred `§[Ƀ[ᵬ×3], ℊ[ǵ×2]]`, card sent successfully
+- Checkpoint loaded: `feature_version=3, input_dim=14, params=1,569`
+- DAG loaded: 100 components, max_depth=4
+- Component paths inferred from 185 Qdrant pattern entries
+
+## 19. H3 READINESS ASSESSMENT — What's Left Before Horizon 3
+
+### 19.1 What H2 Has Proven
+
+1. **Learned scoring works.** 1,569 params, 100% val accuracy, production-validated.
+2. **Feature engineering matters.** V1→V2→V3 progression showed norms cause shortcuts,
+   structural features provide robustness, MaxSim decomposition adds semantic sensitivity.
+3. **The scaffold exists.** `search_hybrid_learned()` with feature-version dispatch,
+   checkpoint auto-loading, DAG computation, component path inference — all production-ready.
+4. **Diagnostic tooling.** React dashboard for ablation, score distribution, per-group analysis.
+
+### 19.2 Open Items Before H3
+
+| Item | Priority | Status | Why It Matters for H3 |
+|------|----------|--------|-----------------------|
+| **Grouped ablation** | Medium | Not started | Single-feature ablation shows redundancy masking. Need to ablate feature groups (all 4 sim_c_*, all 5 structural) to understand real contribution. |
+| **Production A/B: learned vs multidim vs RRF** | High | Not started | H2 validated on synthetic data. Need production accuracy comparison on real `send_dynamic_card` calls to confirm the learned scorer outperforms H1. |
+| **Text index fusion** | Medium | Implemented but not wired | `search_by_text()` and `search_by_relationship_text()` exist but aren't prefetch sources. Could improve recall for exact-match queries. |
+| **More training data diversity** | Medium | Partially done | 698 groups from synthetic structures. Could add: real user card sends, cross-domain patterns (email), adversarial hard negatives. |
+| **Multi-domain validation** | High | Not started | H2 only tested on gchat cards. H3 needs domain-agnostic scoring. Test on Gmail MJML email components to validate the architecture generalizes. |
+| **Recursive refinement prototype** | High | Not started | H3's core: can the scorer improve its own output through iteration? Prototype: score → re-embed top candidates → re-score. Does accuracy improve with cycles? |
+| **Halting mechanism** | Low | Not started | When to stop recursion. Could use score margin or confidence delta between cycles. |
+
+### 19.3 Recommended Path to H3
+
+1. **Production A/B** — Run learned scorer alongside RRF/multidim on real traffic. Measure
+   Top-1 accuracy on card generation success (did the card render correctly?).
+2. **Grouped ablation** — Understand which feature *categories* drive decisions. If structural
+   features alone get 95%+, the recursive network can focus on refining similarity features.
+3. **Multi-domain test** — Wrap a second module (e.g., Gmail MJML templates), generate training
+   data, train V3 scorer. If it works without architecture changes → domain-agnostic confirmed.
+4. **Recursive refinement POC** — Using the V3 scorer, iterate: score → take top-5 → use their
+   vectors as new query context → re-score full candidate pool. Measure if Top-1 improves with
+   1-3 cycles. This is the minimal TRM analog.
+
+---
+
 ## References
 
 - TRM Paper: "Less is More: Recursive Reasoning with Tiny Networks" (arXiv:2510.04871)
@@ -1431,9 +1562,13 @@ issues — this is a pre-existing card builder limitation, not a scorer regressi
 - H2 SimilarityScorer: research/trm/h2/model.py — SimilarityScorer (4,865 params, +21.4% Top-1 on Mancala)
 - H2 TinyProjectionNetwork: research/trm/h2/model.py — TinyProjectionNetwork (529K params, failed — see Section 16.5)
 - H2 MW Extractor: research/trm/h2/mw_extract.py — Qdrant data extraction with MaxSim scoring
-- H2 MW Training: research/trm/h2/train_mw.py — SimilarityScorerMW (1,409 params, 100% val acc on gchat cards)
-- H2 MW Checkpoint: research/trm/h2/checkpoints/best_model_mw.pt
-- H2 MW Data: research/trm/h2/mw_groups.json — 72 query groups from mcp_gchat_cards_v8
+- H2 MW Training: research/trm/h2/train_mw.py — SimilarityScorerMW (V3: 1,569 params, 14D, 100% val acc)
+- H2 MW Checkpoint: research/trm/h2/checkpoints/best_model_mw.pt (V3: feature_version=3, input_dim=14)
+- H2 MW Data V1: research/trm/h2/mw_groups.json — 72 query groups from Qdrant
+- H2 MW Data V2: research/trm/h2/mw_synthetic_groups_v2.json — 698 groups, 8 structural features
+- H2 MW Data V3: research/trm/h2/mw_synthetic_groups_v3.json — 698 groups, 14 decomposed features
+- H2 Training Data Generator: research/trm/h2/generate_training_data.py — DAGStructureGenerator + V2/V3 features
+- H2 Diagnostic UI: tools/diagnostic-ui/ — React + FastAPI dashboard (5 ML panels, auto-detects V1/V2/V3)
 - H2 Retrospective: research/trm/h2/RETRO.md
 - H2 Training: research/trm/h2/train.py (listwise contrastive loss, MPS-accelerated)
 - H2 Evaluation: research/trm/h2/evaluate.py (comparison table: RRF vs multi-dim vs learned)

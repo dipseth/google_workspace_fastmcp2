@@ -263,6 +263,117 @@ async def feature_importance():
 
 
 # ---------------------------------------------------------------------------
+# Endpoint 2b: Grouped Feature Ablation
+# ---------------------------------------------------------------------------
+_FEATURE_GROUPS_V3 = {
+    "sim_c": {"indices": [0, 1, 2, 3], "label": "Components ColBERT (sim_c_*)"},
+    "sim_i": {"indices": [4, 5, 6, 7], "label": "Inputs ColBERT (sim_i_*)"},
+    "sim_r": {"indices": [8], "label": "Relationships MiniLM (sim_r)"},
+    "structural": {"indices": [9, 10, 11, 12, 13], "label": "Structural DAG"},
+}
+
+_FEATURE_GROUPS_V2 = {
+    "similarities": {"indices": [0, 1, 2], "label": "Similarities"},
+    "structural": {"indices": [3, 4, 5, 6, 7], "label": "Structural DAG"},
+}
+
+_FEATURE_GROUPS_V1 = {
+    "similarities": {"indices": [0, 1, 2], "label": "Similarities"},
+    "query_norms": {"indices": [3, 4, 5], "label": "Query norms"},
+    "candidate_norms": {"indices": [6, 7, 8], "label": "Candidate norms"},
+}
+
+
+@router.get("/ml/group-ablation")
+async def group_ablation():
+    """Grouped feature ablation — zero entire feature groups and pairwise combos."""
+    torch = _load_torch()
+    model = _load_model()
+    val_groups, _ = _load_groups()
+
+    if _feature_version == 3:
+        groups = _FEATURE_GROUPS_V3
+    elif _feature_version == 2:
+        groups = _FEATURE_GROUPS_V2
+    else:
+        groups = _FEATURE_GROUPS_V1
+
+    def compute_accuracy_masked(mask_indices):
+        correct = 0
+        total_g = 0
+        for group in val_groups:
+            candidates = group.get("candidates", [])
+            if not candidates:
+                continue
+            features = [_candidate_features(c) for c in candidates]
+            x = torch.tensor(features, dtype=torch.float32)
+            if mask_indices:
+                x[:, mask_indices] = 0.0
+            with torch.no_grad():
+                scores = model(x).squeeze(-1)
+            top_idx = scores.argmax().item()
+            labels = [c.get("label", 0.0) for c in candidates]
+            if labels[top_idx] > 0.5:
+                correct += 1
+            total_g += 1
+        return correct / total_g if total_g > 0 else 0.0
+
+    baseline = compute_accuracy_masked([])
+
+    # Single-group ablation
+    single_results = []
+    for name, info in groups.items():
+        acc = compute_accuracy_masked(info["indices"])
+        single_results.append({
+            "group": name,
+            "label": info["label"],
+            "indices": info["indices"],
+            "features_zeroed": [FEATURE_NAMES[i] for i in info["indices"]],
+            "accuracy": round(acc, 4),
+            "accuracy_drop": round(baseline - acc, 4),
+        })
+
+    # Pairwise group ablation
+    group_names = list(groups.keys())
+    pairwise_results = []
+    for i in range(len(group_names)):
+        for j in range(i + 1, len(group_names)):
+            g1, g2 = group_names[i], group_names[j]
+            combined = groups[g1]["indices"] + groups[g2]["indices"]
+            acc = compute_accuracy_masked(combined)
+            pairwise_results.append({
+                "groups": [g1, g2],
+                "labels": [groups[g1]["label"], groups[g2]["label"]],
+                "indices": combined,
+                "accuracy": round(acc, 4),
+                "accuracy_drop": round(baseline - acc, 4),
+            })
+
+    # "Only this group" ablation — zero everything EXCEPT this group
+    only_results = []
+    all_indices = list(range(len(FEATURE_NAMES)))
+    for name, info in groups.items():
+        keep = set(info["indices"])
+        mask = [i for i in all_indices if i not in keep]
+        acc = compute_accuracy_masked(mask)
+        only_results.append({
+            "group": name,
+            "label": info["label"],
+            "accuracy_with_only_this_group": round(acc, 4),
+        })
+
+    return {
+        "feature_version": _feature_version,
+        "baseline_accuracy": round(baseline, 4),
+        "n_features": len(FEATURE_NAMES),
+        "n_groups": len(groups),
+        "single_group_ablation": single_results,
+        "pairwise_group_ablation": pairwise_results,
+        "only_group_ablation": only_results,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Endpoint 3: Per-Group Performance
 # ---------------------------------------------------------------------------
 @router.get("/ml/per-group-performance")

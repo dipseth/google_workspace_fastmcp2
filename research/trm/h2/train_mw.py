@@ -301,6 +301,8 @@ def main():
                         help="Gaussian noise std for feature augmentation")
     parser.add_argument("--feature-dropout", type=float, default=0.1,
                         help="Probability of zeroing a feature during training")
+    parser.add_argument("--domain", type=str, default="card", choices=["card", "email", "combined"],
+                        help="Domain label saved in checkpoint and used for naming")
     parser.add_argument("--feature-version", type=int, default=1, choices=[1, 2, 3],
                         help="Feature version: 1=9D norms, 2=8D structural, 3=14D decomposed")
     args = parser.parse_args()
@@ -428,7 +430,10 @@ def main():
         if v_acc > best_val_acc:
             best_val_acc = v_acc
             patience_counter = 0
-            ckpt = ckpt_dir / "best_model_mw.pt"
+            # Domain-specific checkpoint filename to avoid overwriting
+            domain = getattr(args, "domain", "card")
+            ckpt_name = f"best_model_{domain}.pt" if domain != "card" else "best_model_mw.pt"
+            ckpt = ckpt_dir / ckpt_name
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "model_type": "similarity_mw",
@@ -439,6 +444,7 @@ def main():
                 "epoch": epoch,
                 "val_accuracy": v_acc,
                 "collection": args.collection,
+                "domain": domain,
             }, ckpt)
             logger.info(f"  New best val_acc={v_acc:.3f} → {ckpt}")
         else:
