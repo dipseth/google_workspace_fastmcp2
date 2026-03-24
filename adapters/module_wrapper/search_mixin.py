@@ -1847,6 +1847,62 @@ class SearchMixin:
         return sum(scores) / len(scores)
 
     @staticmethod
+    def _maxsim_decomposed(
+        query_vecs: List[List[float]],
+        doc_vecs: List[List[float]],
+        coverage_threshold: float = 0.4,
+    ) -> tuple:
+        """ColBERT MaxSim decomposed into (mean, max, std, coverage).
+
+        Returns 4 statistics from the per-query-token max-similarity vector,
+        giving the model distributional information about how tokens match.
+
+        - mean: average token alignment (= standard MaxSim)
+        - max: peak single-token match
+        - std: matching consistency (low=uniform/semantic, high=peaked/structural)
+        - coverage: fraction of query tokens with max_sim > coverage_threshold
+
+        Args:
+            query_vecs: List of query token embeddings (ColBERT multi-vector)
+            doc_vecs: List of document token embeddings (ColBERT multi-vector)
+            coverage_threshold: min similarity for a token to count as "covered"
+
+        Returns:
+            Tuple of (mean, max, std, coverage) floats
+        """
+        import math
+
+        if not query_vecs or not doc_vecs:
+            return (0.0, 0.0, 0.0, 0.0)
+
+        def _cosine(a: List[float], b: List[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            if norm_a == 0.0 or norm_b == 0.0:
+                return 0.0
+            return dot / (norm_a * norm_b)
+
+        per_token_max = []
+        for q in query_vecs:
+            best = max(_cosine(q, d) for d in doc_vecs)
+            per_token_max.append(best)
+
+        n = len(per_token_max)
+        mean_val = sum(per_token_max) / n
+        max_val = max(per_token_max)
+
+        # Std deviation
+        variance = sum((x - mean_val) ** 2 for x in per_token_max) / n
+        std_val = math.sqrt(variance)
+
+        # Coverage: fraction of tokens above threshold
+        covered = sum(1 for x in per_token_max if x > coverage_threshold)
+        coverage_val = covered / n
+
+        return (mean_val, max_val, std_val, coverage_val)
+
+    @staticmethod
     def _cosine_similarity(a: List[float], b: List[float]) -> float:
         """Compute cosine similarity between two dense vectors.
 
@@ -2151,6 +2207,11 @@ class SearchMixin:
     # =========================================================================
 
     _learned_model = None  # class-level cache for the trained model
+    _learned_feature_version = 1  # 1=9D norms, 2=8D structural
+    _learned_dag_children: dict = {}
+    _learned_dag_parents: dict = {}
+    _learned_dag_depth: dict = {}
+    _learned_dag_loaded = False
 
     @classmethod
     def _load_learned_model(cls):
@@ -2167,10 +2228,10 @@ class SearchMixin:
 
         class _ScorerMLP(nn.Module):
             """Minimal MLP matching SimilarityScorerMW architecture."""
-            def __init__(self, hidden_dim=32, dropout=0.15):
+            def __init__(self, input_dim=9, hidden_dim=32, dropout=0.15):
                 super().__init__()
                 self.mlp = nn.Sequential(
-                    nn.Linear(9, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(input_dim, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
                     nn.Linear(hidden_dim, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
                     nn.Linear(hidden_dim, 1),
                 )
@@ -2181,7 +2242,6 @@ class SearchMixin:
         import os
         checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
         if not checkpoint_path:
-            # Default: relative to project root
             from pathlib import Path
             candidates = [
                 Path(__file__).parent.parent.parent / "research" / "trm" / "h2" / "checkpoints" / "best_model_mw.pt",
@@ -2200,15 +2260,70 @@ class SearchMixin:
             ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
             hidden_dim = ckpt.get("hidden_dim", 32)
             dropout = ckpt.get("dropout", 0.15)
-            model = _ScorerMLP(hidden_dim=hidden_dim, dropout=dropout)
+            input_dim = ckpt.get("input_dim", 9)
+            cls._learned_feature_version = ckpt.get("feature_version", 1)
+
+            model = _ScorerMLP(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout)
             model.load_state_dict(ckpt["model_state_dict"])
             model.eval()
             cls._learned_model = model
-            logger.info(f"Loaded learned scorer from {checkpoint_path} (params={sum(p.numel() for p in model.parameters())})")
+            logger.info(
+                f"Loaded learned scorer from {checkpoint_path} "
+                f"(params={sum(p.numel() for p in model.parameters())}, "
+                f"feature_version={cls._learned_feature_version}, input_dim={input_dim})"
+            )
             return model
         except Exception as e:
             logger.error(f"Failed to load learned scorer: {e}")
             return None
+
+    def _ensure_learned_dag(self):
+        """Lazily load DAG for structural feature computation (V2 only)."""
+        cls = type(self)
+        if cls._learned_dag_loaded:
+            return
+        try:
+            # Use self (the wrapper instance) directly — it has the graph
+            # Force graph build if needed
+            graph = self.get_relationship_graph() if hasattr(self, 'get_relationship_graph') else None
+            all_names = list(self._name_to_idx.keys()) if hasattr(self, '_name_to_idx') else []
+
+            if not all_names:
+                # Fallback: try external wrapper
+                try:
+                    from gchat.card_framework_wrapper import get_card_framework_wrapper
+                    wrapper = get_card_framework_wrapper()
+                    wrapper.get_relationship_graph()
+                    all_names = list(wrapper._name_to_idx.keys()) if hasattr(wrapper, '_name_to_idx') else []
+                    source = wrapper
+                except Exception:
+                    source = self
+            else:
+                source = self
+
+            for comp_name in all_names:
+                cls._learned_dag_children[comp_name] = set(source.get_children(comp_name))
+                cls._learned_dag_parents[comp_name] = set(source.get_parents(comp_name))
+
+            # BFS depth
+            roots = [n for n in all_names if not cls._learned_dag_parents.get(n)]
+            if not roots:
+                roots = [n for n in all_names if len(cls._learned_dag_parents.get(n, set())) <= 1]
+            visited = {}
+            queue = [(r, 0) for r in roots]
+            while queue:
+                node, depth = queue.pop(0)
+                if node in visited:
+                    continue
+                visited[node] = depth
+                for child in cls._learned_dag_children.get(node, set()):
+                    queue.append((child, depth + 1))
+            cls._learned_dag_depth = visited
+            cls._learned_dag_loaded = True
+            logger.info(f"Loaded DAG for learned scorer: {len(all_names)} components, max_depth={max(visited.values()) if visited else 0}")
+        except Exception as e:
+            logger.warning(f"Could not load DAG for structural features: {e}")
+            cls._learned_dag_loaded = True  # prevent retries
 
     def search_hybrid_learned(
         self,
@@ -2323,6 +2438,30 @@ class SearchMixin:
                 logger.info("Learned search: no candidates found")
                 return [], [], []
 
+            # --- Step 2.5: Infer component_paths from instance_pattern results ---
+            # When no component_paths are provided (NL query), extract them
+            # from the top instance_pattern candidates returned by Qdrant.
+            # These patterns have parent_paths in their payload — the components
+            # they actually use. Aggregate across top patterns for coverage.
+            if not component_paths and self._learned_feature_version in (2, 3):
+                from collections import Counter
+                comp_counts = Counter()
+                for point in results.points:
+                    payload = point.payload or {}
+                    if payload.get("type") == "instance_pattern":
+                        pp = payload.get("parent_paths") or payload.get("component_paths") or []
+                        if isinstance(pp, list):
+                            comp_counts.update(pp)
+                # Use components that appear in at least 2 patterns (consensus)
+                # or all if few patterns found
+                if comp_counts:
+                    threshold = 2 if len(comp_counts) > 5 else 1
+                    raw_paths = [c for c, n in comp_counts.most_common() if n >= threshold]
+                    # Normalize to short names (DAG uses "Button" not "card_framework.v2.Button")
+                    component_paths = list({p.rsplit(".", 1)[-1] for p in raw_paths})
+                    if component_paths:
+                        logger.info(f"Inferred component_paths from {sum(comp_counts.values())} pattern entries: {component_paths[:10]}")
+
             # --- Step 3: Compute similarity features + learned scoring ---
             features_list = []
             points_list = []
@@ -2345,26 +2484,90 @@ class SearchMixin:
                     if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
                         sim_r = self._cosine_similarity(query_minilm, rel_vec)
 
-                # Compute norms
-                def _vec_norm(v):
-                    if not v:
-                        return 0.0
-                    flat = []
-                    if isinstance(v[0], list):
-                        for sub in v:
-                            flat.extend(sub)
+                if self._learned_feature_version in (2, 3):
+                    # V2/V3: structural features from DAG (no norms)
+                    self._ensure_learned_dag()
+                    cand_name = (point.payload or {}).get("name", "")
+
+                    # Structural features (shared by V2 and V3)
+                    cand_children = self._learned_dag_children.get(cand_name, set())
+                    cand_parents = self._learned_dag_parents.get(cand_name, set())
+                    query_components = set(component_paths) if component_paths else set()
+
+                    is_parent = 1.0 if (cand_children & query_components) else 0.0
+                    is_child = 1.0 if (cand_parents & query_components) else 0.0
+
+                    is_sibling = 0.0
+                    for qc in query_components:
+                        qc_parents = self._learned_dag_parents.get(qc, set())
+                        if qc_parents & cand_parents:
+                            is_sibling = 1.0
+                            break
+
+                    max_depth = max(self._learned_dag_depth.values()) if self._learned_dag_depth else 1
+                    depth_ratio = self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
+
+                    # Shared ancestors
+                    def _get_ancestors(name):
+                        ancestors = set()
+                        q = list(self._learned_dag_parents.get(name, []))
+                        while q:
+                            p = q.pop(0)
+                            if p not in ancestors:
+                                ancestors.add(p)
+                                q.extend(self._learned_dag_parents.get(p, []))
+                        return ancestors
+
+                    cand_ancestors = _get_ancestors(cand_name)
+                    query_ancestors = set()
+                    for qc in query_components:
+                        query_ancestors.update(_get_ancestors(qc))
+                    total_anc = len(cand_ancestors | query_ancestors) or 1
+                    n_shared_ratio = len(cand_ancestors & query_ancestors) / total_anc
+
+                    if self._learned_feature_version == 3:
+                        # V3: decomposed MaxSim (4 stats per ColBERT vector)
+                        if comp_vec and query_colbert and isinstance(comp_vec[0], list):
+                            sc_mean, sc_max, sc_std, sc_cov = self._maxsim_decomposed(query_colbert, comp_vec)
+                        else:
+                            sc_mean, sc_max, sc_std, sc_cov = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+
+                        if inp_vec and query_colbert and isinstance(inp_vec[0], list):
+                            si_mean, si_max, si_std, si_cov = self._maxsim_decomposed(query_colbert, inp_vec)
+                        else:
+                            si_mean, si_max, si_std, si_cov = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+
+                        features_list.append([
+                            sc_mean, sc_max, sc_std, sc_cov,
+                            si_mean, si_max, si_std, si_cov,
+                            sim_r,
+                            is_parent, is_child, is_sibling, depth_ratio, n_shared_ratio,
+                        ])
                     else:
-                        flat = v
-                    return math.sqrt(sum(x * x for x in flat))
+                        # V2: scalar MaxSim + structural
+                        features_list.append([sim_c, sim_i, sim_r, is_parent, is_child, is_sibling, depth_ratio, n_shared_ratio])
+                else:
+                    # V1: norm features (legacy)
+                    def _vec_norm(v):
+                        if not v:
+                            return 0.0
+                        flat = []
+                        if isinstance(v[0], list):
+                            for sub in v:
+                                flat.extend(sub)
+                        else:
+                            flat = v
+                        return math.sqrt(sum(x * x for x in flat))
 
-                q_c_norm = _vec_norm(query_colbert)
-                q_i_norm = _vec_norm(query_colbert)
-                q_r_norm = _vec_norm(query_minilm) if query_minilm else 0.0
-                c_c_norm = _vec_norm(comp_vec)
-                c_i_norm = _vec_norm(inp_vec)
-                c_r_norm = _vec_norm(rel_vec)
+                    q_c_norm = _vec_norm(query_colbert)
+                    q_i_norm = _vec_norm(query_colbert)
+                    q_r_norm = _vec_norm(query_minilm) if query_minilm else 0.0
+                    c_c_norm = _vec_norm(comp_vec)
+                    c_i_norm = _vec_norm(inp_vec)
+                    c_r_norm = _vec_norm(rel_vec)
 
-                features_list.append([sim_c, sim_i, sim_r, q_c_norm, q_i_norm, q_r_norm, c_c_norm, c_i_norm, c_r_norm])
+                    features_list.append([sim_c, sim_i, sim_r, q_c_norm, q_i_norm, q_r_norm, c_c_norm, c_i_norm, c_r_norm])
+
                 points_list.append((sim_c, sim_r, sim_i, point))
 
             # Batch score all candidates through the MLP

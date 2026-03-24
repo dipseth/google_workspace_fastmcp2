@@ -1376,16 +1376,36 @@ used by `search_hybrid_multidim()` in production.
    - Adding a `search_hybrid_learned()` method to `search_mixin.py`
    - Extending `search_hybrid_dispatch()` with `SEARCH_MODE=learned`
 
-### 17.7 Caveats
+### 17.7 Production Integration (Complete 2026-03-22)
+
+Integration into the MCP server is done. Three files changed:
+
+- **`search_mixin.py`** — Added `search_hybrid_learned()` (same prefetch pipeline as
+  multidim, MLP replaces multiplicative scoring) and `_load_learned_model()` (lazy
+  class-level cache). Updated `search_hybrid_dispatch()` to read `SEARCH_MODE` env var.
+- **`config/settings.py`** — Added `search_mode` field (default: `"rrf"`, env: `SEARCH_MODE`).
+  Backwards-compatible with `ENABLE_MULTIDIM_SEARCH`.
+- **`pyproject.toml`** — Added `torch>=2.0` dependency.
+
+**Activation:** `SEARCH_MODE=learned` in `.env`. Graceful fallback to multidim if torch
+missing or checkpoint not found.
+
+**Production test:** Sent 15+ cards via `send_dynamic_card` with `SEARCH_MODE=learned`.
+All DSL validations passed, correct components found every time. Cards with structured
+`card_params` rendered correctly. Cards relying on NL param extraction had rendering
+issues — this is a pre-existing card builder limitation, not a scorer regression.
+
+### 17.8 Caveats
 
 - **Small validation set** (15 groups). Need more instance patterns with feedback
   to validate at scale. The 100% may partially reflect the small sample.
 - **Training labels from path matching** (is class X in pattern's parent_paths?),
   not from end-to-end card generation success. Production integration should
   use actual card generation feedback as the training signal.
-- **No comparison to production multidim scoring** on the same queries yet —
-  the 100% tells us the model can rank correctly, but we need A/B with the
-  existing system to measure the real improvement.
+- **Card builder param injection** is a separate concern — the scorer finds the
+  right components but the builder sometimes fails to map `card_params` to
+  widget properties (generic "Item 1", "Button 1" instead of provided values).
+  This needs investigation in `builder_v2.py`, not the scorer.
 
 ---
 

@@ -89,18 +89,30 @@ not semantics — text embeddings are the wrong tool for this domain.
    (DecoratedText vs ButtonList vs Section) have very different text descriptions.
    Mancala states ("pit 3 has 4 stones" vs "pit 3 has 5 stones") don't.
 
-## Recommended Next Steps (Ranked by Expected Impact)
+## What Happened Next (Same Session)
 
-### 1. Port to Module Wrapper domain (HIGH impact, MEDIUM effort)
-Test the SimilarityScorer on the ACTUAL MW data — gchat card components, email
-templates. This is where RIC was designed to work. The cosine similarities will
-be much more discriminative (0.3-0.9 range vs 0.99+ for Mancala).
+### Port to MW domain — DONE, 100% val accuracy
+Extracted 500 points from `mcp_gchat_cards_v8` (cloud Qdrant). Trained
+SimilarityScorerMW (1,409 params) with listwise contrastive loss. Hit 100%
+validation accuracy on 15 held-out groups by epoch 18.
 
-**How:** Extract training data from existing Qdrant collections (card_framework
-components with feedback labels). Train SimilarityScorer on MW's real
-`search_hybrid_multidim` candidates. Compare against production RRF/multidim.
+**Why it worked:** MW component similarity range is 0.35-0.99 (vs Mancala's
+0.99+). Real semantic differences between Section, Button, DecoratedText, etc.
 
-### 2. Direct position evaluation (HIGH impact, HIGH effort)
+### Production integration — DONE
+Added `search_hybrid_learned()` to `search_mixin.py`. Activated via
+`SEARCH_MODE=learned`. Sent 15+ cards via `send_dynamic_card` — all validations
+passed, correct components found every time. Graceful fallback to multidim if
+torch missing.
+
+### Card builder param issue identified
+Scorer finds correct components but builder's `SmartCardBuilder` sometimes fails
+to map `card_params` to widget properties (generic "Item 1", "Button 1"). This
+is a pre-existing builder issue, not a scorer regression. Needs separate investigation.
+
+## Remaining Next Steps
+
+### 1. Direct position evaluation (HIGH impact, HIGH effort)
 Instead of retrieval-based prediction ("find similar states"), train a model to
 directly evaluate board positions ("is this a good position for current player?").
 Use the game outcome as the label, not the optimal move.
@@ -149,7 +161,15 @@ research/trm/h2/
     index.html          — React visualization UI
   tests/
     test_model.py       — 13 unit tests (all passing)
+  mw_extract.py       — Qdrant data extraction for MW domain
+  train_mw.py         — MW training (100% val acc)
+  mw_groups.json      — 72 extracted query groups from mcp_gchat_cards_v8
   checkpoints/
-    best_model.pt       — V1 checkpoint (4,865 params)
-    best_model_v2.pt    — V2 checkpoint (11,713 params)
+    best_model.pt       — V1 Mancala checkpoint (4,865 params)
+    best_model_v2.pt    — V2 Mancala checkpoint (11,713 params)
+    best_model_mw.pt    — MW production checkpoint (1,409 params) ← LIVE
+
+Production integration (outside h2/):
+  adapters/module_wrapper/search_mixin.py  — search_hybrid_learned(), _load_learned_model()
+  config/settings.py                       — search_mode field (SEARCH_MODE env var)
 ```

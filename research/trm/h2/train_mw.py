@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, Dataset
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "poc"))
 
 from .mw_extract import (  # noqa: E402
+    MWPoint,
     MWQueryGroup,
     build_query_groups,
     compute_similarity_features,
@@ -44,16 +45,96 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class MWListwiseDataset(Dataset):
-    """Listwise dataset for MW query groups with precomputed features."""
+def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGroup]:
+    """Load synthetic groups from JSON and convert to MWQueryGroup format.
 
-    def __init__(self, groups: list[MWQueryGroup], max_k: int = 0):
+    Args:
+        path: Path to synthetic groups JSON
+        feature_version: 1 = legacy 9 features, 2 = structural 8 features, 3 = decomposed 14 features
+    """
+    import json
+    from research.trm.h2.generate_training_data import FEATURE_NAMES_V2, FEATURE_NAMES_V3
+
+    data = json.loads(Path(path).read_text())
+    logger.info(f"Loading {len(data)} synthetic groups from {path} (feature_version={feature_version})")
+
+    groups = []
+    for g in data:
+        query = MWPoint(
+            point_id=g["query_id"],
+            point_type="synthetic",
+            name=g.get("query_description", ""),
+            full_path="",
+            symbol="",
+            comp_vectors=None, inp_vectors=None, rel_vector=None,
+            content_feedback="positive",
+            form_feedback="positive",
+            docstring=g.get("query_dsl", ""),
+            parent_paths=g.get("query_components", []),
+        )
+
+        candidates = []
+        labels = []
+        for c in g["candidates"]:
+            cand = MWPoint(
+                point_id="", point_type="class",
+                name=c["name"], full_path=c.get("full_path", ""),
+                symbol="",
+                comp_vectors=None, inp_vectors=None, rel_vector=None,
+                content_feedback=None, form_feedback=None,
+                docstring="",
+            )
+
+            if feature_version == 3:
+                # V3: 14 decomposed MaxSim + structural features
+                cand._precomputed_features = np.array([
+                    c.get(f, 0.0) for f in FEATURE_NAMES_V3
+                ], dtype=np.float32)
+            elif feature_version == 2:
+                # V2: 8 structural features (no norms)
+                cand._precomputed_features = np.array([
+                    c.get(f, 0.0) for f in FEATURE_NAMES_V2
+                ], dtype=np.float32)
+            else:
+                # V1: 9 features (with norms)
+                cand._precomputed_features = np.array([
+                    c["sim_components"], c["sim_inputs"], c["sim_relationships"],
+                    c.get("q_comp_norm", 0), c.get("q_inp_norm", 0), c.get("q_rel_norm", 0),
+                    c.get("c_comp_norm", 0), c.get("c_inp_norm", 0), c.get("c_rel_norm", 0),
+                ], dtype=np.float32)
+            candidates.append(cand)
+            labels.append(c["label"])
+
+        if any(l == 1.0 for l in labels) and len(candidates) >= 2:
+            groups.append(MWQueryGroup(query=query, candidates=candidates, labels=labels))
+
+    logger.info(f"Loaded {len(groups)} valid synthetic groups")
+    return groups
+
+
+class MWListwiseDataset(Dataset):
+    """Listwise dataset for MW query groups with precomputed features.
+
+    Supports Gaussian noise augmentation and feature dropout during training.
+    """
+
+    def __init__(
+        self,
+        groups: list[MWQueryGroup],
+        max_k: int = 0,
+        noise_std: float = 0.0,
+        feature_dropout: float = 0.0,
+        training: bool = False,
+    ):
         self.max_k = max_k or max(len(g.labels) for g in groups)
+        self.noise_std = noise_std
+        self.feature_dropout = feature_dropout
+        self.training = training
 
         # Precompute all features
-        self.features = []  # list of [K, 9] feature tensors
-        self.labels = []  # list of [K] label tensors
-        self.masks = []  # list of [K] mask tensors
+        self.features = []
+        self.labels = []
+        self.masks = []
 
         for g in groups:
             K = len(g.labels)
@@ -61,12 +142,17 @@ class MWListwiseDataset(Dataset):
 
             feats = []
             for cand in g.candidates:
-                f = compute_similarity_features(g.query, cand)
-                feats.append(f)
+                # Use precomputed features if available (synthetic data)
+                if hasattr(cand, '_precomputed_features'):
+                    feats.append(cand._precomputed_features)
+                else:
+                    f = compute_similarity_features(g.query, cand)
+                    feats.append(f)
 
             feat_tensor = torch.from_numpy(np.stack(feats))
+            feat_dim = feat_tensor.shape[1]
             if pad > 0:
-                feat_tensor = torch.cat([feat_tensor, torch.zeros(pad, 9)])
+                feat_tensor = torch.cat([feat_tensor, torch.zeros(pad, feat_dim)])
 
             label_tensor = torch.tensor(g.labels + [0.0] * pad, dtype=torch.float32)
             mask_tensor = torch.cat([torch.ones(K), torch.zeros(pad)])
@@ -79,11 +165,31 @@ class MWListwiseDataset(Dataset):
         return len(self.features)
 
     def __getitem__(self, idx):
-        return {
-            "features": self.features[idx],  # [max_k, 9]
-            "labels": self.labels[idx],  # [max_k]
-            "mask": self.masks[idx],  # [max_k]
-        }
+        feats = self.features[idx].clone()
+        labels = self.labels[idx]
+        mask = self.masks[idx]
+
+        if self.training:
+            # Gaussian noise augmentation
+            if self.noise_std > 0:
+                noise = torch.randn_like(feats) * self.noise_std
+                feats = feats + noise * mask.unsqueeze(-1)
+
+            # Feature dropout: randomly zero 1 feature
+            if self.feature_dropout > 0 and torch.rand(1).item() < self.feature_dropout:
+                feat_dim = feats.shape[1]
+                drop_idx = torch.randint(0, feat_dim, (1,)).item()
+                feats[:, drop_idx] = 0.0
+
+            # Random candidate shuffle (preserves label alignment)
+            valid_k = int(mask.sum().item())
+            if valid_k > 1:
+                perm = torch.randperm(valid_k)
+                feats[:valid_k] = feats[perm]
+                labels = labels.clone()
+                labels[:valid_k] = labels[perm]
+
+        return {"features": feats, "labels": labels, "mask": mask}
 
 
 # ---------------------------------------------------------------------------
@@ -92,19 +198,18 @@ class MWListwiseDataset(Dataset):
 
 
 class SimilarityScorerMW(nn.Module):
-    """Learned scoring on MW RIC similarity features.
+    """Learned scoring on MW similarity + structural features.
 
-    Input: 9 features per (query, candidate):
-      - MaxSim(components): ColBERT 128D late interaction
-      - MaxSim(inputs): ColBERT 128D late interaction
-      - cosine(relationships): MiniLM 384D dense
-      - 3 query norms + 3 candidate norms
+    V1 (9 features): 3 similarities + 6 norms
+    V2 (8 features): 3 similarities + 5 structural (parent/child/sibling/depth/ancestors)
+    V3 (14 features): 8 decomposed ColBERT MaxSim + 1 dense cosine + 5 structural
     """
 
-    def __init__(self, hidden_dim: int = 32, num_layers: int = 2, dropout: float = 0.1):
+    def __init__(self, input_dim: int = 9, hidden_dim: int = 32, num_layers: int = 2, dropout: float = 0.1):
         super().__init__()
+        self.input_dim = input_dim
         layers: list[nn.Module] = []
-        prev = 9
+        prev = input_dim
         for _ in range(num_layers):
             layers.extend([nn.Linear(prev, hidden_dim), nn.SiLU(), nn.Dropout(dropout)])
             prev = hidden_dim
@@ -112,7 +217,7 @@ class SimilarityScorerMW(nn.Module):
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        """features: [B, 9] → scores: [B, 1]"""
+        """features: [B, input_dim] → scores: [B, 1]"""
         return self.mlp(features)
 
     def count_parameters(self):
@@ -142,11 +247,29 @@ def compute_loss(model, batch, device):
     loss = -(target_dist * log_probs).sum(dim=-1).mean()
 
     with torch.no_grad():
+        # Top-1 accuracy
         top1 = scores.argmax(dim=-1)
-        correct = labels[torch.arange(B, device=device), top1]
-        acc = correct.mean().item()
+        correct1 = labels[torch.arange(B, device=device), top1]
+        acc1 = correct1.mean().item()
 
-    return loss, {"loss": loss.item(), "accuracy": acc}
+        # Top-3 accuracy
+        top3 = scores.topk(min(3, K), dim=-1).indices
+        correct3 = torch.zeros(B, device=device)
+        for i in range(top3.shape[1]):
+            correct3 += labels[torch.arange(B, device=device), top3[:, i]]
+        acc3 = (correct3 > 0).float().mean().item()
+
+        # MRR (Mean Reciprocal Rank)
+        sorted_indices = scores.argsort(dim=-1, descending=True)
+        mrr = torch.zeros(B, device=device)
+        for i in range(B):
+            for rank, idx in enumerate(sorted_indices[i]):
+                if labels[i, idx] > 0:
+                    mrr[i] = 1.0 / (rank + 1)
+                    break
+        mrr_val = mrr.mean().item()
+
+    return loss, {"loss": loss.item(), "accuracy": acc1, "top3": acc3, "mrr": mrr_val}
 
 
 def get_device():
@@ -172,20 +295,55 @@ def main():
     parser.add_argument("--val-split", type=float, default=0.2)
     parser.add_argument("--checkpoint-dir", type=str,
                         default=str(Path(__file__).parent / "checkpoints"))
+    parser.add_argument("--synthetic-data", type=str, default=None,
+                        help="Path to synthetic groups JSON from generate_training_data.py")
+    parser.add_argument("--noise-std", type=float, default=0.01,
+                        help="Gaussian noise std for feature augmentation")
+    parser.add_argument("--feature-dropout", type=float, default=0.1,
+                        help="Probability of zeroing a feature during training")
+    parser.add_argument("--feature-version", type=int, default=1, choices=[1, 2, 3],
+                        help="Feature version: 1=9D norms, 2=8D structural, 3=14D decomposed")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # --- Extract data from Qdrant ---
-    client = connect_qdrant()
-    points = extract_all_points(client, args.collection, args.limit)
+    # --- Load data: Qdrant + optional synthetic ---
+    groups = []
 
-    if not points:
-        logger.error("No points found")
-        return
+    # Qdrant groups (original pipeline) — skip for V2/V3 since they lack structural features
+    if args.feature_version == 1:
+        try:
+            client = connect_qdrant()
+            points = extract_all_points(client, args.collection, args.limit)
+            if points:
+                qdrant_groups = build_query_groups(points, args.top_k)
+                logger.info(f"Qdrant groups: {len(qdrant_groups)}")
+                groups.extend(qdrant_groups)
+        except Exception as e:
+            logger.warning(f"Qdrant groups unavailable: {e}")
+    else:
+        logger.info(f"Skipping Qdrant groups for V{args.feature_version} (no structural features)")
 
-    groups = build_query_groups(points, args.top_k)
+    # Synthetic groups (from generate_training_data.py)
+    if args.synthetic_data:
+        synthetic_groups = load_synthetic_groups(args.synthetic_data, feature_version=args.feature_version)
+        logger.info(f"Synthetic groups: {len(synthetic_groups)}")
+        groups.extend(synthetic_groups)
+
+    # Determine input dimension from data
+    input_dim = 9  # default V1
+    if args.feature_version == 3:
+        input_dim = 14
+    elif args.feature_version == 2:
+        input_dim = 8
+    elif groups:
+        # Detect from data
+        sample_cand = groups[0].candidates[0]
+        if hasattr(sample_cand, '_precomputed_features'):
+            input_dim = len(sample_cand._precomputed_features)
+    logger.info(f"Feature version: V{args.feature_version}, input_dim: {input_dim}")
+
     if len(groups) < 5:
         logger.error(f"Only {len(groups)} groups — need more data")
         return
@@ -199,7 +357,12 @@ def main():
 
     # --- Datasets ---
     max_k = max(max(len(g.labels) for g in train_groups), max(len(g.labels) for g in val_groups))
-    train_ds = MWListwiseDataset(train_groups, max_k)
+    train_ds = MWListwiseDataset(
+        train_groups, max_k,
+        noise_std=args.noise_std,
+        feature_dropout=args.feature_dropout,
+        training=True,
+    )
     val_ds = MWListwiseDataset(val_groups, max_k)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
@@ -207,7 +370,7 @@ def main():
     # --- Model ---
     device = get_device()
     model = SimilarityScorerMW(
-        hidden_dim=args.hidden_dim, num_layers=2, dropout=args.dropout,
+        input_dim=input_dim, hidden_dim=args.hidden_dim, num_layers=2, dropout=args.dropout,
     ).to(device)
     logger.info(f"Device: {device}, Model params: {model.count_parameters():,}")
 
@@ -223,7 +386,7 @@ def main():
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
         model.train()
-        t_loss, t_acc, n = 0.0, 0.0, 0
+        t_loss, t_acc, t_top3, t_mrr, n = 0.0, 0.0, 0.0, 0.0, 0
         for batch in train_loader:
             optimizer.zero_grad()
             loss, metrics = compute_loss(model, batch, device)
@@ -233,25 +396,33 @@ def main():
             scheduler.step()
             t_loss += metrics["loss"]
             t_acc += metrics["accuracy"]
+            t_top3 += metrics["top3"]
+            t_mrr += metrics["mrr"]
             n += 1
         t_loss /= max(n, 1)
         t_acc /= max(n, 1)
+        t_top3 /= max(n, 1)
+        t_mrr /= max(n, 1)
 
         model.eval()
-        v_loss, v_acc, nv = 0.0, 0.0, 0
+        v_loss, v_acc, v_top3, v_mrr, nv = 0.0, 0.0, 0.0, 0.0, 0
         with torch.no_grad():
             for batch in val_loader:
                 loss, metrics = compute_loss(model, batch, device)
                 v_loss += metrics["loss"]
                 v_acc += metrics["accuracy"]
+                v_top3 += metrics["top3"]
+                v_mrr += metrics["mrr"]
                 nv += 1
         v_loss /= max(nv, 1)
         v_acc /= max(nv, 1)
+        v_top3 /= max(nv, 1)
+        v_mrr /= max(nv, 1)
 
         logger.info(
             f"Epoch {epoch:3d}/{args.epochs} "
-            f"| train_loss={t_loss:.4f} train_acc={t_acc:.3f} "
-            f"| val_loss={v_loss:.4f} val_acc={v_acc:.3f}"
+            f"| train: loss={t_loss:.4f} top1={t_acc:.3f} top3={t_top3:.3f} mrr={t_mrr:.3f} "
+            f"| val: loss={v_loss:.4f} top1={v_acc:.3f} top3={v_top3:.3f} mrr={v_mrr:.3f}"
         )
 
         if v_acc > best_val_acc:
@@ -261,6 +432,8 @@ def main():
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "model_type": "similarity_mw",
+                "input_dim": input_dim,
+                "feature_version": args.feature_version,
                 "hidden_dim": args.hidden_dim,
                 "dropout": args.dropout,
                 "epoch": epoch,
