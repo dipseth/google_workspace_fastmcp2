@@ -1590,6 +1590,80 @@ class SearchMixin:
 
         return prefetch_list
 
+    def _query_grouped_candidates(
+        self,
+        query_colbert,
+        query_minilm,
+        candidate_pool_size: int = 20,
+        content_feedback: Optional[str] = None,
+        form_feedback: Optional[str] = None,
+        group_size: int = 10,
+    ) -> list:
+        """Query Qdrant with grouped results, ensuring diversity across point types.
+
+        Uses query_points_groups(group_by="type") to guarantee balanced
+        representation of classes, instance_patterns, etc. Combined with
+        prefetch + RRF fusion for multi-vector search.
+
+        Returns a flat list of points (with .vector and .payload) from all groups.
+        """
+        from qdrant_client.models import (
+            FieldCondition, Filter, Fusion, FusionQuery, MatchValue, Prefetch,
+        )
+
+        prefetch_list = self._build_prefetch_list(
+            query_colbert, query_minilm, candidate_pool_size,
+            include_classes=True,
+            content_feedback=content_feedback,
+            form_feedback=form_feedback,
+        )
+
+        try:
+            grouped = self.client.query_points_groups(
+                collection_name=self.collection_name,
+                group_by="type",
+                prefetch=prefetch_list,
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=5,               # up to 5 type groups (class, instance_pattern, function, etc.)
+                group_size=group_size,  # points per group
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            # Flatten groups into a single point list
+            points = []
+            group_counts = {}
+            for group in grouped.groups:
+                group_type = str(group.id)
+                group_counts[group_type] = len(group.hits)
+                for hit in group.hits:
+                    points.append(hit)
+
+            logger.info(
+                "Grouped query: %d points across %d groups: %s",
+                len(points), len(group_counts), group_counts,
+            )
+            return points
+
+        except Exception as e:
+            # Fallback: query_points_groups may not be available on older Qdrant
+            logger.warning("query_points_groups failed (%s), falling back to query_points", e)
+            prefetch_list = self._build_prefetch_list(
+                query_colbert, query_minilm, candidate_pool_size,
+                include_classes=True,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+            )
+            results = self.client.query_points(
+                collection_name=self.collection_name,
+                prefetch=prefetch_list,
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=candidate_pool_size * 3,
+                with_payload=True,
+                with_vectors=True,
+            )
+            return results.points
+
     def _infer_component_paths(self, points) -> Optional[List[str]]:
         """Infer component_paths from instance_pattern payloads in Qdrant results.
 
@@ -2745,33 +2819,27 @@ class SearchMixin:
                 logger.warning("Could not embed query for learned search")
                 return [], [], []
 
-            # --- Step 2: Prefetch + query Qdrant ---
-            from qdrant_client.models import Fusion, FusionQuery
-
-            prefetch_list = self._build_prefetch_list(
+            # --- Step 2: Grouped prefetch + query Qdrant ---
+            # Uses query_points_groups(group_by="type") to guarantee balanced
+            # representation of classes and instance_patterns in the candidate pool.
+            points = self._query_grouped_candidates(
                 query_colbert, query_minilm, candidate_pool_size,
-                include_classes, content_feedback, form_feedback,
-            )
-            results = self.client.query_points(
-                collection_name=self.collection_name,
-                prefetch=prefetch_list,
-                query=FusionQuery(fusion=Fusion.RRF),
-                limit=candidate_pool_size * 3,
-                with_payload=True,
-                with_vectors=True,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+                group_size=candidate_pool_size,
             )
 
-            if not results.points:
+            if not points:
                 logger.info("Learned search: no candidates found")
                 return [], [], []
 
             # --- Step 2.5: Infer component_paths for NL queries ---
             if not component_paths and self._learned_feature_version in (2, 3):
-                component_paths = self._infer_component_paths(results.points)
+                component_paths = self._infer_component_paths(points)
 
             # --- Step 3: Compute features + MLP scoring ---
             features_list, points_list = self._compute_learned_features(
-                results.points, query_colbert, query_minilm, component_paths,
+                points, query_colbert, query_minilm, component_paths,
             )
 
             features_tensor = torch.tensor(features_list, dtype=torch.float32)
@@ -2820,7 +2888,7 @@ class SearchMixin:
             logger.info(
                 "Learned search: %d classes, %d patterns, %d relationships (from %d candidates)",
                 len(class_results), len(pattern_results),
-                len(relationship_results), len(results.points),
+                len(relationship_results), len(points),
             )
 
             return class_results, pattern_results, relationship_results
@@ -2898,7 +2966,7 @@ class SearchMixin:
 
         try:
             import numpy as np
-            from qdrant_client.models import Fusion, FusionQuery
+            from qdrant_client.models import Fusion, FusionQuery, Prefetch as QdrantPrefetch
 
             # --- Embed original query ---
             query_colbert_orig = self._embed_with_colbert(description, token_ratio)
@@ -2915,34 +2983,41 @@ class SearchMixin:
             cycle_log = []
             best_scored = None
             prev_top1_name = None
+            _next_cycle_points = None  # Set by recommend prefetch for next cycle
 
             for cycle in range(max_cycles):
                 t0 = time.monotonic()
 
-                # --- Prefetch + query Qdrant ---
-                prefetch_list = self._build_prefetch_list(
-                    query_colbert, query_minilm, candidate_pool_size,
-                    include_classes, content_feedback, form_feedback,
-                )
-                results = self.client.query_points(
-                    collection_name=self.collection_name,
-                    prefetch=prefetch_list,
-                    query=FusionQuery(fusion=Fusion.RRF),
-                    limit=candidate_pool_size * 3,
-                    with_payload=True,
-                    with_vectors=True,
-                )
+                if _next_cycle_points is not None:
+                    # Use recommend-augmented results from previous cycle
+                    cycle_points = _next_cycle_points
+                    _next_cycle_points = None
+                else:
+                    # Standard prefetch + RRF query
+                    prefetch_list = self._build_prefetch_list(
+                        query_colbert, query_minilm, candidate_pool_size,
+                        include_classes, content_feedback, form_feedback,
+                    )
+                    results = self.client.query_points(
+                        collection_name=self.collection_name,
+                        prefetch=prefetch_list,
+                        query=FusionQuery(fusion=Fusion.RRF),
+                        limit=candidate_pool_size * 3,
+                        with_payload=True,
+                        with_vectors=True,
+                    )
+                    cycle_points = results.points
 
-                if not results.points:
+                if not cycle_points:
                     break
 
                 # --- Infer component_paths (first cycle only) ---
                 if cycle == 0 and not component_paths and self._learned_feature_version in (2, 3):
-                    component_paths = self._infer_component_paths(results.points)
+                    component_paths = self._infer_component_paths(cycle_points)
 
                 # --- Compute features + MLP scoring ---
                 features_list, points_data = self._compute_learned_features(
-                    results.points, query_colbert, query_minilm, component_paths,
+                    cycle_points, query_colbert, query_minilm, component_paths,
                 )
 
                 if not features_list:
@@ -2990,22 +3065,69 @@ class SearchMixin:
                     break
                 prev_top1_name = top1_name
 
-                # --- Refine query vectors for next cycle ---
+                # --- Refine for next cycle using Qdrant RecommendQuery ---
+                # Instead of manual numpy vector blending, use Qdrant's native
+                # recommend engine which properly handles multi-vector MaxSim.
                 if cycle < max_cycles - 1:
-                    alpha = alpha_init * (0.9 ** cycle)
                     top_k = min(5, len(scored))
+                    top_ids = [pt.id for _, (_, _, _, pt) in scored[:top_k]]
+                    # Bottom candidates as negative examples (optional)
+                    bottom_ids = [pt.id for _, (_, _, _, pt) in scored[-3:]] if len(scored) > 5 else []
 
-                    top_comp_vecs = []
-                    for _, (_, _, _, pt) in scored[:top_k]:
-                        vecs = pt.vector or {}
-                        cv = vecs.get("components") if isinstance(vecs, dict) else None
-                        if cv and isinstance(cv[0], list):
-                            top_comp_vecs.append(np.mean(cv, axis=0).tolist())
+                    try:
+                        from qdrant_client.models import (
+                            RecommendQuery, RecommendInput, RecommendStrategy,
+                        )
+                        # Use RecommendQuery as a prefetch source for next cycle.
+                        # Qdrant natively computes average vector from top-K point IDs
+                        # and finds similar points — properly handles multi-vector MaxSim.
+                        rec_prefetch = QdrantPrefetch(
+                            query=RecommendQuery(
+                                recommend=RecommendInput(
+                                    positive=top_ids,
+                                    negative=bottom_ids if bottom_ids else None,
+                                    strategy=RecommendStrategy.AVERAGE_VECTOR,
+                                )
+                            ),
+                            using="components",
+                            limit=candidate_pool_size,
+                        )
+                        # Also keep the original query prefetches for stability
+                        base_prefetch = self._build_prefetch_list(
+                            query_colbert_orig, query_minilm_orig, candidate_pool_size,
+                            include_classes, content_feedback, form_feedback,
+                        )
+                        # Merge: recommend-based + original query-based via RRF
+                        combined_prefetch = [rec_prefetch] + base_prefetch
 
-                    if top_comp_vecs:
-                        top_mean = np.mean(top_comp_vecs, axis=0)
-                        refined = (alpha * np.array(query_colbert_orig[0]) + (1 - alpha) * top_mean).tolist()
-                        query_colbert = [refined] + query_colbert_orig[1:]
+                        rec_results = self.client.query_points(
+                            collection_name=self.collection_name,
+                            prefetch=combined_prefetch,
+                            query=FusionQuery(fusion=Fusion.RRF),
+                            limit=candidate_pool_size * 3,
+                            with_payload=True,
+                            with_vectors=True,
+                        )
+                        logger.info(
+                            "Recursive cycle %d: recommend prefetch with %d positive, %d negative → %d candidates",
+                            cycle + 1, len(top_ids), len(bottom_ids), len(rec_results.points),
+                        )
+                        _next_cycle_points = rec_results.points
+                    except Exception as e:
+                        logger.debug("RecommendQuery prefetch failed (%s), falling back to vector blending", e)
+
+                        # Fallback: manual vector blending (original approach)
+                        alpha = alpha_init * (0.9 ** cycle)
+                        top_comp_vecs = []
+                        for _, (_, _, _, pt) in scored[:top_k]:
+                            vecs = pt.vector or {}
+                            cv = vecs.get("components") if isinstance(vecs, dict) else None
+                            if cv and isinstance(cv[0], list):
+                                top_comp_vecs.append(np.mean(cv, axis=0).tolist())
+                        if top_comp_vecs:
+                            top_mean = np.mean(top_comp_vecs, axis=0)
+                            refined = (alpha * np.array(query_colbert_orig[0]) + (1 - alpha) * top_mean).tolist()
+                            query_colbert = [refined] + query_colbert_orig[1:]
 
             # Log cycle summary
             logger.info("Recursive search completed: %d cycles | %s", len(cycle_log), cycle_log)

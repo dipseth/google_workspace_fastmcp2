@@ -79,6 +79,31 @@ def consume_from_context(
     resources = context.get(context_key, [])
     current_index = context.get(index_key, 0)
 
+    # Cross-pool fallback: when primary pool is empty, try compatible pools.
+    # This handles the case where the learned scorer picks a different structure
+    # than what the user's card_params provided (e.g., scorer chose GridItem
+    # but user passed carousel_cards or content_texts).
+    if current_index >= len(resources):
+        _FALLBACK_POOLS = {
+            "grid_items": ["content_texts", "carousel_cards"],
+            "carousel_cards": ["content_texts", "grid_items"],
+            "content_texts": ["grid_items", "carousel_cards"],
+        }
+        for alt_key in _FALLBACK_POOLS.get(context_key, []):
+            alt_index_key = f"_{alt_key.rstrip('s')}_index"
+            # Handle plurals that don't simply drop 's': content_texts → _text_index
+            if alt_key == "content_texts":
+                alt_index_key = "_text_index"
+            alt_resources = context.get(alt_key, [])
+            alt_index = context.get(alt_index_key, 0)
+            if alt_index < len(alt_resources):
+                # Found a compatible pool with unconsumed data — use it
+                resources = alt_resources
+                current_index = alt_index
+                context_key = alt_key
+                index_key = alt_index_key
+                break
+
     params: JsonDict = {}
     mapping_report = context.get("_mapping_report")
 
@@ -188,6 +213,14 @@ def consume_from_context(
                         field_name="grid_item",
                     )
         context[index_key] = current_index + 1
+
+        # Cross-pool field adaptation: remap fields when the source pool
+        # differs from what the target component expects.
+        # e.g., content_texts provides "text" but GridItem needs "title"
+        if component_name in ("GridItem", "CarouselCard") and "title" not in params and "text" in params:
+            params["title"] = params.pop("text")
+        elif component_name in ("DecoratedText", "TextParagraph") and "text" not in params and "title" in params:
+            params["text"] = params.pop("title")
     else:
         # No more resources — mark as placeholder so builder can skip non-functional widgets
         params["_placeholder"] = True

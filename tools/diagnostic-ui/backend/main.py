@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.symbols import router as symbols_router
 from routes.dsl import router as dsl_router
 from routes.ml_eval import router as ml_eval_router
+from routes.collection_stats import router as stats_router
 
 app = FastAPI(title="Card DSL Diagnostic UI", version="0.1.0")
 
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(symbols_router, prefix="/api")
 app.include_router(dsl_router, prefix="/api")
 app.include_router(ml_eval_router, prefix="/api")
+app.include_router(stats_router, prefix="/api")
 
 
 @app.get("/health")

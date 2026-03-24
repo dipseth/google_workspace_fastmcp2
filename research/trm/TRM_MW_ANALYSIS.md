@@ -1325,88 +1325,77 @@ features contain genuine discriminative signal, not noise.
 
 ### 17.4 Results
 
-| Metric | Value |
-|--------|-------|
-| **Validation accuracy** | **100%** (15/15 groups correct) |
-| Training accuracy | 100% (57/57 groups) |
-| Random baseline | 5% (1/20 candidates) |
-| Parameters | 1,409 |
-| Epochs to 100% val | 18 |
-| Architecture | MLP(9 → 32 → 32 → 1) with SiLU + dropout |
+> **Updated 2026-03-24.** V1 results below are historical. See Section 18 for
+> V2→V3 evolution and current production model.
 
-**Training curve:**
-```
-Epoch  1: val_acc=33%  (learning)
-Epoch  5: val_acc=66%  (rapid improvement)
-Epoch  9: val_acc=80%  (approaching convergence)
-Epoch 13: val_acc=94%  (near perfect)
-Epoch 18: val_acc=100% (perfect — held for 20 epochs)
-```
+| Metric | V1 (2026-03-22) | V3 (2026-03-24) |
+|--------|-----------------|-----------------|
+| **Validation accuracy** | 100% (15/15) | **100% (100/100)** |
+| Training groups | 72 (Qdrant + synthetic) | 499 (428 synthetic + 71 real user) |
+| Parameters | 1,409 | **1,569** |
+| Architecture | MLP(9→32→32→1) | **MLP(14→32→32→1)** |
+| Features | 3 sims + 6 norms | **4×2 decomposed MaxSim + sim_r + 5 structural** |
+| Epochs to 100% val | 18 | **5** |
+| Domains validated | gchat cards only | **gchat cards + MJML email** |
 
 ### 17.5 Feature Space
 
-The MW scorer uses the same 9 features as the Mancala scorer, but adapted
-for MW's mixed-dimension RIC schema:
+> **Updated 2026-03-24.** Current production model uses V3 features (14D).
+> V1 (9 features with norms) had shortcut learning — see Section 18.1.
 
-| Feature | Computation | Dimension |
-|---------|-------------|-----------|
-| sim_components | ColBERT MaxSim (late interaction) | 128D multi-vector |
-| sim_inputs | ColBERT MaxSim (late interaction) | 128D multi-vector |
-| sim_relationships | Dense cosine similarity | 384D MiniLM |
-| query norms (×3) | L2 norm of each query vector | scalar |
-| candidate norms (×3) | L2 norm of each candidate vector | scalar |
+**V3 features (14D):**
 
-**MaxSim** (vs plain cosine in Mancala): for each query token embedding, find
-the max similarity to any candidate token embedding, then average across query
-tokens. This preserves ColBERT's late-interaction design — the same scoring
-used by `search_hybrid_multidim()` in production.
+| Feature | Computation | Signal |
+|---------|-------------|--------|
+| sim_c_mean | ColBERT MaxSim mean (= original sim_c) | Average token alignment |
+| sim_c_max | Max of per-token max similarities | Peak single-token match |
+| sim_c_std | Std of per-token max similarities | Low=semantic, high=structural |
+| sim_c_coverage | Fraction of tokens with max_sim > 0.4 | Query coverage breadth |
+| sim_i_mean/max/std/coverage | Same decomposition for inputs vector | Input/parameter alignment |
+| sim_relationships | Dense MiniLM cosine | Relationship/hierarchy alignment |
+| is_parent | DAG: candidate contains query components | Structural containment |
+| is_child | DAG: candidate contained by query components | Structural membership |
+| is_sibling | DAG: shares parent with query components | Structural proximity |
+| depth_ratio | BFS depth normalized to [0,1] | Hierarchy position |
+| n_shared_ancestors | Jaccard of ancestor sets | Ancestry overlap |
 
 ### 17.6 What This Proves
 
-1. **The SimilarityScorer architecture works on production MW data.** 100% val
-   accuracy with only 1,409 parameters, trained in seconds.
+1. **Domain-agnostic architecture.** Same MLP(14→32→32→1) achieves 100% val
+   accuracy on both gchat cards (499 groups) and MJML email (300 groups)
+   without architecture changes.
 
-2. **RIC embeddings ARE discriminative** when the domain has genuine semantic
-   variety. The problem was never the embedding approach — it was testing on a
-   domain (Mancala) where all states look identical in text space.
+2. **Real user data improves coverage.** 71 real groups extracted from 294
+   `send_dynamic_card` responses in `mcp_tool_responses` collection.
 
-3. **The path to production is clear.** The scorer takes the same inputs as
-   `search_hybrid_multidim()` (3 similarity scores + norms) and produces a
-   single relevance score. Integration requires:
-   - Loading the 1,409-param model at wrapper init (~6KB file)
-   - Adding a `search_hybrid_learned()` method to `search_mixin.py`
-   - Extending `search_hybrid_dispatch()` with `SEARCH_MODE=learned`
+3. **Feature engineering > model scaling.** V1→V2→V3 progression (norms→structural→decomposed)
+   each improved robustness without adding parameters.
 
-### 17.7 Production Integration (Complete 2026-03-22)
+### 17.7 Production Integration (Updated 2026-03-24)
 
-Integration into the MCP server is done. Three files changed:
+**Search modes** (via `SEARCH_MODE` env var):
+- `rrf` — Qdrant native RRF fusion (baseline)
+- `multidim` — Multiplicative cross-dimensional scoring (H1)
+- `learned` — V3 trained MLP reranking (H2)
+- `recursive` — Iterative refinement via vector blending (H2.5)
 
-- **`search_mixin.py`** — Added `search_hybrid_learned()` (same prefetch pipeline as
-  multidim, MLP replaces multiplicative scoring) and `_load_learned_model()` (lazy
-  class-level cache). Updated `search_hybrid_dispatch()` to read `SEARCH_MODE` env var.
-- **`config/settings.py`** — Added `search_mode` field (default: `"rrf"`, env: `SEARCH_MODE`).
-  Backwards-compatible with `ENABLE_MULTIDIM_SEARCH`.
-- **`pyproject.toml`** — Added `torch>=2.0` dependency.
-
-**Activation:** `SEARCH_MODE=learned` in `.env`. Graceful fallback to multidim if torch
-missing or checkpoint not found.
-
-**Production test:** Sent 15+ cards via `send_dynamic_card` with `SEARCH_MODE=learned`.
-All DSL validations passed, correct components found every time. Cards with structured
-`card_params` rendered correctly. Cards relying on NL param extraction had rendering
-issues — this is a pre-existing card builder limitation, not a scorer regression.
+**New capabilities (2026-03-24):**
+- **Shadow A/B scoring** (`SEARCH_SHADOW_SCORING=true`): runs all modes on every query, logs comparison
+- **Per-candidate logging**: top-20 scores/features logged with query hash for correlation
+- **Card render feedback**: success/failure logged in `card_tools.py` for end-to-end tracking
+- **Grouped feature ablation**: `/ml/group-ablation` endpoint in diagnostic UI
+- **Domain-specific checkpoints**: `best_model_mw.pt` (card), `best_model_email.pt` (email)
 
 ### 17.8 Caveats
 
-- **Small validation set** (15 groups). Need more instance patterns with feedback
-  to validate at scale. The 100% may partially reflect the small sample.
-- **Training labels from path matching** (is class X in pattern's parent_paths?),
-  not from end-to-end card generation success. Production integration should
-  use actual card generation feedback as the training signal.
-- **Card builder param injection** is a separate concern — the scorer finds the
-  right components but the builder sometimes fails to map `card_params` to
-  widget properties (generic "Item 1", "Button 1" instead of provided values).
-  This needs investigation in `builder_v2.py`, not the scorer.
+- **100% val accuracy on 100 groups** — larger and harder test sets needed.
+  Grouped ablation shows the model has significant redundancy (single-feature
+  ablation shows near-zero impact due to correlated features).
+- **Recursive refinement is early.** Vector blending helped carousel queries (+2.6%)
+  but convergence is fast (1-2 cycles). Learned vector composition (H3) may be
+  needed for deeper refinement.
+- **Card builder param injection** remains a separate concern — scorer finds
+  correct components but builder sometimes fails to map params to widgets.
 
 ---
 
@@ -1516,22 +1505,22 @@ Tested `send_dynamic_card` via MCP execute sandbox:
 
 ### 19.2 Open Items Before H3
 
-| Item | Priority | Status | Why It Matters for H3 |
-|------|----------|--------|-----------------------|
-| **Grouped ablation** | Medium | Not started | Single-feature ablation shows redundancy masking. Need to ablate feature groups (all 4 sim_c_*, all 5 structural) to understand real contribution. |
-| **Production A/B: learned vs multidim vs RRF** | High | Not started | H2 validated on synthetic data. Need production accuracy comparison on real `send_dynamic_card` calls to confirm the learned scorer outperforms H1. |
-| **Text index fusion** | Medium | Implemented but not wired | `search_by_text()` and `search_by_relationship_text()` exist but aren't prefetch sources. Could improve recall for exact-match queries. |
-| **More training data diversity** | Medium | Partially done | 698 groups from synthetic structures. Could add: real user card sends, cross-domain patterns (email), adversarial hard negatives. |
-| **Multi-domain validation** | High | Not started | H2 only tested on gchat cards. H3 needs domain-agnostic scoring. Test on Gmail MJML email components to validate the architecture generalizes. |
-| **Recursive refinement prototype** | High | Not started | H3's core: can the scorer improve its own output through iteration? Prototype: score → re-embed top candidates → re-score. Does accuracy improve with cycles? |
-| **Halting mechanism** | Low | Not started | When to stop recursion. Could use score margin or confidence delta between cycles. |
+| Item | Priority | Status | Result |
+|------|----------|--------|--------|
+| **Grouped ablation** | Medium | **Done 2026-03-24** | `/ml/group-ablation` endpoint. Structural=3.6% drop, both ColBERT=22.3%, either ColBERT alone=82% |
+| **Production A/B** | High | **Infrastructure done 2026-03-24** | Shadow scoring runs all 3 modes, logs comparison. Needs traffic to accumulate data. |
+| **Text index fusion** | Medium | Not wired | `search_by_text()` exists but not a prefetch source. Deferred to H3. |
+| **Training data diversity** | Medium | **Done 2026-03-24** | 499 groups (428 synthetic + 71 real user from 294 `send_dynamic_card` responses) |
+| **Multi-domain validation** | High | **Done 2026-03-24** | Email scorer: 300 groups, 100% val acc, same architecture. Domain-agnostic confirmed. |
+| **Recursive refinement** | High | **Done 2026-03-24** | `search_hybrid_recursive()` with vector blending. Carousel +2.6%. Convergence in 1-2 cycles. |
+| **Halting mechanism** | Low | **Done 2026-03-24** | Score margin proxy + convergence detection. `RECURSIVE_HALT_MARGIN=0.5`. |
 
-### 19.3 Recommended Path to H3
+### 19.3 Remaining Path to H3
 
-1. **Production A/B** — Run learned scorer alongside RRF/multidim on real traffic. Measure
-   Top-1 accuracy on card generation success (did the card render correctly?).
-2. **Grouped ablation** — Understand which feature *categories* drive decisions. If structural
-   features alone get 95%+, the recursive network can focus on refining similarity features.
+1. **Accumulate shadow A/B data** — Run with `SEARCH_SHADOW_SCORING=true` in production.
+   Measure which mode ranks the correct component highest across real traffic.
+2. **Tune recursive refinement** — Sweep alpha (0.5–0.95) and max_cycles (1–5) on
+   a larger query set. Current default alpha=0.7 may be too aggressive.
 3. **Multi-domain test** — Wrap a second module (e.g., Gmail MJML templates), generate training
    data, train V3 scorer. If it works without architecture changes → domain-agnostic confirmed.
 4. **Recursive refinement POC** — Using the V3 scorer, iterate: score → take top-5 → use their
