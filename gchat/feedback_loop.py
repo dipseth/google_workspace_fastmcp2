@@ -994,10 +994,20 @@ class FeedbackLoop:
             if isinstance(vectors_config, dict):
                 has_inputs = "inputs" in vectors_config
                 has_relationships = "relationships" in vectors_config
+                has_content = "content" in vectors_config
 
-                if has_inputs and has_relationships:
+                if has_inputs and has_relationships and has_content:
                     logger.debug(
-                        "✅ inputs and relationships vectors exist in collection"
+                        "✅ inputs, relationships, and content vectors exist"
+                    )
+                    self._ensure_payload_indexes(client)
+                    self._description_vector_ready = True
+                    return True
+                elif has_inputs and has_relationships:
+                    # 3-vector schema (pre-content migration) — still usable
+                    logger.warning(
+                        "⚠️ content vector not found, "
+                        "content-driven retrieval disabled until re-index"
                     )
                     self._ensure_payload_indexes(client)
                     self._description_vector_ready = True
@@ -1041,6 +1051,7 @@ class FeedbackLoop:
         generate_variations: bool = False,  # Generate and cache variations
         num_structure_variations: int = 3,  # Number of structural variations
         num_param_variations: int = 2,  # Parameter variations per structure
+        content_text: Optional[str] = None,  # Actual user content for content vector
     ) -> Optional[str]:
         """
         Store a card usage pattern as an instance_pattern point.
@@ -1095,6 +1106,23 @@ class FeedbackLoop:
             component_paths, structure_description or ""
         )
 
+        # CONTENT VECTOR: Actual user content (MiniLM 384D)
+        from adapters.module_wrapper.types import CONTENT_DIM
+
+        if content_text:
+            content_embedder = self._get_relationship_embedder()
+            if content_embedder:
+                content_emb = list(content_embedder.embed([content_text]))[0]
+                content_vector = (
+                    content_emb.tolist()
+                    if hasattr(content_emb, "tolist")
+                    else list(content_emb)
+                )
+            else:
+                content_vector = [0.0] * CONTENT_DIM
+        else:
+            content_vector = [0.0] * CONTENT_DIM
+
         # Generate point ID
         point_id = str(uuid.uuid4())
 
@@ -1106,13 +1134,14 @@ class FeedbackLoop:
         try:
             from qdrant_client.models import PointStruct
 
-            # Create the point with all three named vectors
+            # Create the point with all four named vectors
             point = PointStruct(
                 id=point_id,
                 vector={
                     "components": component_vectors,
                     "inputs": inputs_vectors,
                     "relationships": relationship_vector,
+                    "content": content_vector,
                 },
                 payload={
                     "name": f"instance_pattern_{point_id[:8]}",
@@ -1130,6 +1159,12 @@ class FeedbackLoop:
                     "form_feedback": form_feedback,  # Affects relationships searches
                     # Legacy field for backwards compatibility
                     "feedback": feedback or content_feedback,
+                    # Content vector metadata
+                    "has_content_vector": bool(content_text),
+                    "content_embedding_meta": {
+                        "model": "minilm_384",
+                        "encrypted": False,
+                    },
                     "user_email": user_email,
                     "card_id": card_id,
                     "structure_description": structure_description,

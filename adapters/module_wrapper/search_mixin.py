@@ -1544,6 +1544,7 @@ class SearchMixin:
         include_classes: bool = True,
         content_feedback: Optional[str] = None,
         form_feedback: Optional[str] = None,
+        query_content_minilm=None,
     ) -> list:
         """Build the Qdrant prefetch pipeline (shared by multidim/learned/recursive)."""
         from qdrant_client.models import (
@@ -1588,6 +1589,25 @@ class SearchMixin:
                      limit=candidate_pool_size, filter=Filter(must=rel_conditions))
         )
 
+        # Prefetch 4: Content (instance patterns with actual content vectors)
+        if query_content_minilm:
+            content_conditions = [
+                FieldCondition(
+                    key="type", match=MatchValue(value="instance_pattern")
+                ),
+                FieldCondition(
+                    key="has_content_vector", match=MatchValue(value=True)
+                ),
+            ]
+            prefetch_list.append(
+                Prefetch(
+                    query=query_content_minilm,
+                    using="content",
+                    limit=candidate_pool_size,
+                    filter=Filter(must=content_conditions),
+                )
+            )
+
         return prefetch_list
 
     def _query_grouped_candidates(
@@ -1598,6 +1618,7 @@ class SearchMixin:
         content_feedback: Optional[str] = None,
         form_feedback: Optional[str] = None,
         group_size: int = 10,
+        query_content_minilm=None,
     ) -> list:
         """Query Qdrant with grouped results, ensuring diversity across point types.
 
@@ -1616,6 +1637,7 @@ class SearchMixin:
             include_classes=True,
             content_feedback=content_feedback,
             form_feedback=form_feedback,
+            query_content_minilm=query_content_minilm,
         )
 
         try:
@@ -1734,19 +1756,47 @@ class SearchMixin:
 
         return (is_parent, is_child, is_sibling, depth_ratio, n_shared)
 
+    @staticmethod
+    def _compute_content_density(point) -> float:
+        """Ratio of non-empty content fields in candidate payload.
+
+        Returns 0.0 for class points (no content), 0.0-1.0 for
+        instance patterns based on how many content fields are populated.
+        """
+        payload = point.payload or {}
+        params = payload.get("instance_params", {})
+        if not params or not isinstance(params, dict):
+            return 0.0
+
+        content_keys = [
+            "title", "subtitle", "buttons", "items",
+            "content_texts", "chips", "text",
+        ]
+        populated = 0
+        for key in content_keys:
+            val = params.get(key)
+            if val:
+                if isinstance(val, list) and len(val) > 0:
+                    populated += 1
+                elif isinstance(val, str) and val.strip():
+                    populated += 1
+        return populated / len(content_keys)
+
     def _compute_learned_features(
         self,
         points,
         query_colbert,
         query_minilm,
         component_paths: Optional[List[str]] = None,
+        query_content_minilm=None,
     ) -> tuple:
         """Compute features for all candidate points and return (features_list, points_data).
 
-        Handles V1 (norms), V2 (structural), and V3 (decomposed MaxSim) features.
+        Handles V1 (norms), V2 (structural), V3 (decomposed MaxSim),
+        and V4 (V3 + content similarity) features.
         Returns:
             features_list: List of feature vectors (one per candidate)
-            points_data: List of (sim_c, sim_r, sim_i, point) tuples
+            points_data: List of (sim_c, sim_r, sim_i, sim_content, point) tuples
         """
         import math
 
@@ -1759,11 +1809,13 @@ class SearchMixin:
             comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
             inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
             rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
+            content_vec = vectors.get("content") if isinstance(vectors, dict) else None
 
             # Compute similarities
             sim_c = 0.0
             sim_i = 0.0
             sim_r = 0.0
+            sim_content = 0.0
 
             if comp_vec and query_colbert:
                 sim_c = self._maxsim(query_colbert, comp_vec) if isinstance(comp_vec[0], list) else self._cosine_similarity(query_colbert[0], comp_vec)
@@ -1772,9 +1824,85 @@ class SearchMixin:
             if rel_vec and query_minilm:
                 if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
                     sim_r = self._cosine_similarity(query_minilm, rel_vec)
+            if content_vec and query_content_minilm:
+                is_dense = (
+                    isinstance(content_vec, list)
+                    and content_vec
+                    and not isinstance(content_vec[0], list)
+                )
+                if is_dense:
+                    sim_content = self._cosine_similarity(
+                        query_content_minilm, content_vec
+                    )
 
-            if self._learned_feature_version == 3:
-                # V3: decomposed MaxSim + structural
+            if self._learned_feature_version >= 5:
+                # V5: dual-head (17D) = V4 + content_density + content_form_alignment
+                cand_name = (point.payload or {}).get("name", "")
+                is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+                    self._compute_structural_features(cand_name, query_components)
+
+                if comp_vec and query_colbert and isinstance(comp_vec[0], list):
+                    sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                else:
+                    sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+
+                if inp_vec and query_colbert and isinstance(inp_vec[0], list):
+                    si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                else:
+                    si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+
+                # Content density: ratio of non-empty content fields
+                content_density = self._compute_content_density(point)
+
+                # Content-form alignment: query content vs candidate relationship
+                content_form_alignment = 0.0
+                if query_content_minilm and rel_vec:
+                    is_rel_dense = (
+                        isinstance(rel_vec, list)
+                        and rel_vec
+                        and not isinstance(rel_vec[0], list)
+                    )
+                    if is_rel_dense:
+                        content_form_alignment = self._cosine_similarity(
+                            query_content_minilm, rel_vec
+                        )
+
+                features_list.append([
+                    sc_m, sc_x, sc_s, sc_cv,
+                    si_m, si_x, si_s, si_cv,
+                    sim_r,
+                    is_parent, is_child, is_sibling, depth_ratio, n_shared,
+                    sim_content,
+                    content_density,
+                    content_form_alignment,
+                ])
+
+            elif self._learned_feature_version == 4:
+                # V4: V3 + content similarity (15D)
+                cand_name = (point.payload or {}).get("name", "")
+                is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+                    self._compute_structural_features(cand_name, query_components)
+
+                if comp_vec and query_colbert and isinstance(comp_vec[0], list):
+                    sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                else:
+                    sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+
+                if inp_vec and query_colbert and isinstance(inp_vec[0], list):
+                    si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                else:
+                    si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+
+                features_list.append([
+                    sc_m, sc_x, sc_s, sc_cv,
+                    si_m, si_x, si_s, si_cv,
+                    sim_r,
+                    is_parent, is_child, is_sibling, depth_ratio, n_shared,
+                    sim_content,
+                ])
+
+            elif self._learned_feature_version == 3:
+                # V3: decomposed MaxSim + structural (14D)
                 cand_name = (point.payload or {}).get("name", "")
                 is_parent, is_child, is_sibling, depth_ratio, n_shared = \
                     self._compute_structural_features(cand_name, query_components)
@@ -1823,7 +1951,7 @@ class SearchMixin:
                     _vec_norm(comp_vec), _vec_norm(inp_vec), _vec_norm(rel_vec),
                 ])
 
-            points_data.append((sim_c, sim_r, sim_i, point))
+            points_data.append((sim_c, sim_r, sim_i, sim_content, point))
 
         return features_list, points_data
 
@@ -1836,7 +1964,8 @@ class SearchMixin:
         """Categorize scored candidates into class, pattern, and relationship buckets.
 
         Args:
-            scored: List of (score, sim_c, sim_r, sim_i, point) tuples, sorted by score desc.
+            scored: List of (score, sim_c, sim_r, sim_i, sim_content, point) tuples,
+                    sorted by score desc.
             limit: Max results per bucket.
             extra_fields: Additional fields to add to each result dict.
 
@@ -1847,7 +1976,13 @@ class SearchMixin:
         pattern_results = []
         relationship_results = []
 
-        for score, sim_c, sim_r, sim_i, point in scored:
+        for entry in scored:
+            # Support both 5-tuple (legacy) and 6-tuple (with sim_content)
+            if len(entry) == 6:
+                score, sim_c, sim_r, sim_i, sim_ct, point = entry
+            else:
+                score, sim_c, sim_r, sim_i, point = entry
+                sim_ct = 0.0
             payload = point.payload or {}
             result = {
                 "id": point.id,
@@ -1855,6 +1990,7 @@ class SearchMixin:
                 "sim_components": sim_c,
                 "sim_relationships": sim_r,
                 "sim_inputs": sim_i,
+                "sim_content": sim_ct,
                 "name": payload.get("name"),
                 "type": payload.get("type"),
                 "full_path": payload.get("full_path"),
@@ -2364,9 +2500,10 @@ class SearchMixin:
         form_feedback: Optional[str] = None,
         include_classes: bool = True,
         candidate_pool_size: int = 20,
+        content_text: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Multi-dimensional scoring search using all three named vectors.
+        Multi-dimensional scoring search using all four named vectors.
 
         Unlike search_hybrid (which uses Qdrant's native RRF rank fusion), this
         method uses Qdrant's prefetch pipeline to expand the candidate pool, then
@@ -2378,10 +2515,10 @@ class SearchMixin:
         POC validated: +9.5% Top-1 accuracy over RRF fusion.
 
         Architecture (1 Qdrant round-trip for candidate collection):
-            1. Embed query into 3 vectors (ColBERT for components/inputs, MiniLM for relationships)
+            1. Embed query into 4 vectors (ColBERT for components/inputs, MiniLM for relationships/content)
             2. Single query_points call with prefetch pipeline + RRF fusion + with_vectors=True
-               (Qdrant handles the 3 independent searches server-side and returns vectors)
-            3. Client-side rerank: sim_c x sim_r x sim_i (multiplicative cross-dim scoring)
+               (Qdrant handles the 4 independent searches server-side and returns vectors)
+            3. Client-side rerank: sim_c x sim_r x sim_i with content boost
             4. Apply feedback boost (positive -> x1.1, negative -> x0.8)
             5. Categorize into (class_results, content_patterns, form_patterns)
 
@@ -2394,6 +2531,7 @@ class SearchMixin:
             form_feedback: Filter for form_feedback field ("positive", "negative", None)
             include_classes: Whether to include class results (default True)
             candidate_pool_size: How many candidates to retrieve per vector (default 20)
+            content_text: Actual user content for content vector search (button texts, labels, etc.)
 
         Returns:
             Tuple of (class_results, content_patterns, form_patterns)
@@ -2420,6 +2558,11 @@ class SearchMixin:
             query_minilm = self._embed_with_minilm(relationship_text)
             if not query_minilm:
                 query_minilm = [0.0] * RELATIONSHIPS_DIM
+
+            # Embed content text if provided (same MiniLM model, 384D)
+            query_content_minilm = None
+            if content_text:
+                query_content_minilm = self._embed_with_minilm(content_text)
 
             # --- Step 2: Build prefetch pipeline (same pattern as search_hybrid) ---
             # Qdrant executes these searches server-side in a single round-trip.
@@ -2491,6 +2634,30 @@ class SearchMixin:
                     )
                 )
 
+            # Prefetch 4: Content (instance patterns with actual content vectors)
+            if query_content_minilm:
+                prefetch_list.append(
+                    models.Prefetch(
+                        query=query_content_minilm,
+                        using="content",
+                        filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="type",
+                                    match=models.MatchValue(
+                                        value="instance_pattern"
+                                    ),
+                                ),
+                                models.FieldCondition(
+                                    key="has_content_vector",
+                                    match=models.MatchValue(value=True),
+                                ),
+                            ]
+                        ),
+                        limit=pool,
+                    )
+                )
+
             # Single Qdrant call: prefetch expands pool, RRF deduplicates,
             # with_vectors=True returns stored vectors for client-side reranking.
             results = self.client.query_points(
@@ -2518,11 +2685,13 @@ class SearchMixin:
                 comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
                 inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
                 rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
+                content_vec = vectors.get("content") if isinstance(vectors, dict) else None
 
                 # Compute cross-dimensional similarities
                 sim_c = 0.0
                 sim_i = 0.0
                 sim_r = 0.0
+                sim_content = 0.0
 
                 if comp_vec and query_colbert:
                     if isinstance(comp_vec[0], list):
@@ -2544,10 +2713,25 @@ class SearchMixin:
                     elif isinstance(rel_vec, list) and rel_vec and isinstance(rel_vec[0], list):
                         sim_r = self._maxsim([query_minilm], rel_vec)
 
+                if content_vec and query_content_minilm:
+                    is_dense = (
+                        isinstance(content_vec, list)
+                        and content_vec
+                        and not isinstance(content_vec[0], list)
+                    )
+                    if is_dense:
+                        sim_content = self._cosine_similarity(
+                            query_content_minilm, content_vec
+                        )
+
                 # Multiplicative fusion — rewards cross-dimensional consistency
                 # Add small epsilon to avoid zero-products from missing vectors
                 eps = 0.01
                 score = (sim_c + eps) * (sim_r + eps) * (sim_i + eps)
+
+                # Content boost (additive, not multiplicative — zero content = no change)
+                if sim_content > 0.0:
+                    score *= (1.0 + sim_content)
 
                 # --- Step 4: Feedback boost ---
                 cf = payload.get("content_feedback")
@@ -2561,7 +2745,7 @@ class SearchMixin:
                 elif ff == "negative":
                     score *= 0.8
 
-                scored.append((score, sim_c, sim_r, sim_i, point))
+                scored.append((score, sim_c, sim_r, sim_i, sim_content, point))
 
             # Sort by cross-dimensional score descending
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -2571,7 +2755,7 @@ class SearchMixin:
             pattern_results = []
             relationship_results = []
 
-            for score, sim_c, sim_r, sim_i, point in scored:
+            for score, sim_c, sim_r, sim_i, sim_ct, point in scored:
                 payload = point.payload or {}
                 result = {
                     "id": point.id,
@@ -2579,6 +2763,7 @@ class SearchMixin:
                     "sim_components": sim_c,
                     "sim_relationships": sim_r,
                     "sim_inputs": sim_i,
+                    "sim_content": sim_ct,
                     "name": payload.get("name"),
                     "type": payload.get("type"),
                     "full_path": payload.get("full_path"),
@@ -2639,7 +2824,8 @@ class SearchMixin:
     # =========================================================================
 
     _learned_model = None  # class-level cache for the trained model
-    _learned_feature_version = 1  # 1=9D norms, 2=8D structural
+    _learned_feature_version = 1  # 1=9D, 2=8D, 3=14D, 4=15D, 5=17D
+    _learned_model_type = "single"  # "single" or "dual_head"
     _learned_dag_children: dict = {}
     _learned_dag_parents: dict = {}
     _learned_dag_depth: dict = {}
@@ -2647,7 +2833,11 @@ class SearchMixin:
 
     @classmethod
     def _load_learned_model(cls):
-        """Load the trained SimilarityScorerMW model (cached at class level)."""
+        """Load the trained scorer model (cached at class level).
+
+        Supports both SimilarityScorerMW (single output) and
+        DualHeadScorerMW (form_score + content_score).
+        """
         if cls._learned_model is not None:
             return cls._learned_model
 
@@ -2655,29 +2845,64 @@ class SearchMixin:
             import torch
             import torch.nn as nn
         except ImportError:
-            logger.warning("torch not installed — learned scorer unavailable. Install with: pip install torch")
+            logger.warning(
+                "torch not installed — learned scorer unavailable"
+            )
             return None
 
         class _ScorerMLP(nn.Module):
-            """Minimal MLP matching SimilarityScorerMW architecture."""
+            """Single-head MLP (SimilarityScorerMW)."""
             def __init__(self, input_dim=9, hidden_dim=32, dropout=0.15):
                 super().__init__()
                 self.mlp = nn.Sequential(
-                    nn.Linear(input_dim, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, hidden_dim), nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.SiLU(), nn.Dropout(dropout),
                     nn.Linear(hidden_dim, 1),
                 )
             def forward(self, x):
                 return self.mlp(x)
 
-        # Look for checkpoint in research/trm/h2/checkpoints/ or configured path
+        class _DualHeadMLP(nn.Module):
+            """Dual-head MLP (DualHeadScorerMW)."""
+            def __init__(
+                self, input_dim=17, hidden_dim=48,
+                head_dim=24, dropout=0.15,
+            ):
+                super().__init__()
+                self.backbone = nn.Sequential(
+                    nn.Linear(input_dim, hidden_dim),
+                    nn.SiLU(), nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.SiLU(), nn.Dropout(dropout),
+                )
+                self.form_head = nn.Sequential(
+                    nn.Linear(hidden_dim, head_dim),
+                    nn.SiLU(),
+                    nn.Linear(head_dim, 1),
+                )
+                self.content_head = nn.Sequential(
+                    nn.Linear(hidden_dim, head_dim),
+                    nn.SiLU(),
+                    nn.Linear(head_dim, 1),
+                )
+            def forward(self, x):
+                shared = self.backbone(x)
+                return self.form_head(shared), self.content_head(shared)
+
+        # Look for checkpoint
         import os
         checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
         if not checkpoint_path:
             from pathlib import Path
             candidates = [
-                Path(__file__).parent.parent.parent / "research" / "trm" / "h2" / "checkpoints" / "best_model_mw.pt",
-                Path.cwd() / "research" / "trm" / "h2" / "checkpoints" / "best_model_mw.pt",
+                Path(__file__).parent.parent.parent
+                / "research" / "trm" / "h2"
+                / "checkpoints" / "best_model_mw.pt",
+                Path.cwd()
+                / "research" / "trm" / "h2"
+                / "checkpoints" / "best_model_mw.pt",
             ]
             for p in candidates:
                 if p.exists():
@@ -2685,24 +2910,52 @@ class SearchMixin:
                     break
 
         if not checkpoint_path or not os.path.exists(checkpoint_path):
-            logger.warning(f"Learned scorer checkpoint not found. Tried: {candidates if not checkpoint_path else checkpoint_path}")
+            logger.warning(
+                "Learned scorer checkpoint not found. "
+                f"Tried: {candidates if not checkpoint_path else checkpoint_path}"
+            )
             return None
 
         try:
-            ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+            ckpt = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=False
+            )
             hidden_dim = ckpt.get("hidden_dim", 32)
             dropout = ckpt.get("dropout", 0.15)
             input_dim = ckpt.get("input_dim", 9)
-            cls._learned_feature_version = ckpt.get("feature_version", 1)
+            model_type = ckpt.get("model_type", "similarity_mw")
+            cls._learned_feature_version = ckpt.get(
+                "feature_version", 1
+            )
+            cls._learned_model_type = (
+                "dual_head" if model_type == "dual_head" else "single"
+            )
 
-            model = _ScorerMLP(input_dim=input_dim, hidden_dim=hidden_dim, dropout=dropout)
+            if model_type == "dual_head":
+                head_dim = ckpt.get("head_dim", 24)
+                model = _DualHeadMLP(
+                    input_dim=input_dim,
+                    hidden_dim=hidden_dim,
+                    head_dim=head_dim,
+                    dropout=dropout,
+                )
+            else:
+                model = _ScorerMLP(
+                    input_dim=input_dim,
+                    hidden_dim=hidden_dim,
+                    dropout=dropout,
+                )
+
             model.load_state_dict(ckpt["model_state_dict"])
             model.eval()
             cls._learned_model = model
+            n_params = sum(p.numel() for p in model.parameters())
             logger.info(
-                f"Loaded learned scorer from {checkpoint_path} "
-                f"(params={sum(p.numel() for p in model.parameters())}, "
-                f"feature_version={cls._learned_feature_version}, input_dim={input_dim})"
+                f"Loaded {cls._learned_model_type} scorer "
+                f"from {checkpoint_path} "
+                f"(params={n_params}, "
+                f"V{cls._learned_feature_version}, "
+                f"input_dim={input_dim})"
             )
             return model
         except Exception as e:
@@ -2767,6 +3020,7 @@ class SearchMixin:
         form_feedback: Optional[str] = None,
         include_classes: bool = True,
         candidate_pool_size: int = 20,
+        content_text: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Search using the trained SimilarityScorerMW for reranking.
@@ -2775,7 +3029,8 @@ class SearchMixin:
         multiplicative scoring with a trained MLP reranker.
 
         Architecture: MLP(input_dim → 32 → 32 → 1), ~1,569 params (V3).
-        Feature versions: V1=9D (norms), V2=8D (structural), V3=14D (decomposed MaxSim).
+        Feature versions: V1=9D (norms), V2=8D (structural), V3=14D (decomposed MaxSim),
+                          V4=15D (V3 + content similarity).
         Trained with listwise contrastive loss on gchat card + real user data.
         """
         try:
@@ -2787,6 +3042,7 @@ class SearchMixin:
                 limit=limit, token_ratio=token_ratio,
                 content_feedback=content_feedback, form_feedback=form_feedback,
                 include_classes=include_classes, candidate_pool_size=candidate_pool_size,
+                content_text=content_text,
             )
 
         model = self._load_learned_model()
@@ -2801,6 +3057,7 @@ class SearchMixin:
                 form_feedback=form_feedback,
                 include_classes=include_classes,
                 candidate_pool_size=candidate_pool_size,
+                content_text=content_text,
             )
 
         # Reuse multidim's prefetch pipeline for candidate expansion
@@ -2819,6 +3076,11 @@ class SearchMixin:
                 logger.warning("Could not embed query for learned search")
                 return [], [], []
 
+            # Embed content text if provided (same MiniLM model, 384D)
+            query_content_minilm = None
+            if content_text:
+                query_content_minilm = self._embed_with_minilm(content_text)
+
             # --- Step 2: Grouped prefetch + query Qdrant ---
             # Uses query_points_groups(group_by="type") to guarantee balanced
             # representation of classes and instance_patterns in the candidate pool.
@@ -2827,6 +3089,7 @@ class SearchMixin:
                 content_feedback=content_feedback,
                 form_feedback=form_feedback,
                 group_size=candidate_pool_size,
+                query_content_minilm=query_content_minilm,
             )
 
             if not points:
@@ -2834,22 +3097,44 @@ class SearchMixin:
                 return [], [], []
 
             # --- Step 2.5: Infer component_paths for NL queries ---
-            if not component_paths and self._learned_feature_version in (2, 3):
+            if not component_paths and self._learned_feature_version in (2, 3, 4, 5):
                 component_paths = self._infer_component_paths(points)
 
             # --- Step 3: Compute features + MLP scoring ---
             features_list, points_list = self._compute_learned_features(
                 points, query_colbert, query_minilm, component_paths,
+                query_content_minilm=query_content_minilm,
             )
 
             features_tensor = torch.tensor(features_list, dtype=torch.float32)
+
+            # Dual-head vs single-head scoring
+            is_dual = self._learned_model_type == "dual_head"
             with torch.no_grad():
-                scores_tensor = model(features_tensor).squeeze(-1)
-            learned_scores = scores_tensor.tolist()
+                if is_dual:
+                    form_t, content_t = model(features_tensor)
+                    form_scores = form_t.squeeze(-1).tolist()
+                    content_scores = content_t.squeeze(-1).tolist()
+                    # Alpha blend: form-weighted when content available
+                    alpha = 1.0 if not content_text else 0.6
+                    try:
+                        from config.settings import Settings as _S
+                        alpha = _S().dual_head_form_weight
+                    except Exception:
+                        pass
+                    learned_scores = [
+                        alpha * f + (1 - alpha) * c
+                        for f, c in zip(form_scores, content_scores)
+                    ]
+                else:
+                    scores_tensor = model(features_tensor).squeeze(-1)
+                    learned_scores = scores_tensor.tolist()
+                    form_scores = learned_scores
+                    content_scores = [0.0] * len(learned_scores)
 
             # Apply feedback boost
             scored = []
-            for idx, (sim_c, sim_r, sim_i, point) in enumerate(points_list):
+            for idx, (sim_c, sim_r, sim_i, sim_ct, point) in enumerate(points_list):
                 score = learned_scores[idx]
                 payload = point.payload or {}
                 cf = payload.get("content_feedback")
@@ -2862,7 +3147,7 @@ class SearchMixin:
                     score *= 1.1
                 elif ff == "negative":
                     score *= 0.8
-                scored.append((score, sim_c, sim_r, sim_i, point))
+                scored.append((score, sim_c, sim_r, sim_i, sim_ct, point))
 
             scored.sort(key=lambda x: x[0], reverse=True)
 
@@ -2875,7 +3160,7 @@ class SearchMixin:
                     _top20 = [
                         {"rank": i + 1, "name": (p.payload or {}).get("name", "?"),
                          "score": round(sc, 4), "sim_c": round(s_c, 4)}
-                        for i, (sc, s_c, _sr, _si, p) in enumerate(scored[:20])
+                        for i, (sc, s_c, _sr, _si, _sct, p) in enumerate(scored[:20])
                     ]
                     logger.info("Learned scorer candidates | query=%s | top20=%s", _qh, _top20)
             except Exception:
@@ -2917,6 +3202,7 @@ class SearchMixin:
         form_feedback: Optional[str] = None,
         include_classes: bool = True,
         candidate_pool_size: int = 20,
+        content_text: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Recursive refinement search — iteratively refines query vectors using
@@ -2953,6 +3239,7 @@ class SearchMixin:
                 limit=limit, token_ratio=token_ratio,
                 content_feedback=content_feedback, form_feedback=form_feedback,
                 include_classes=include_classes, candidate_pool_size=candidate_pool_size,
+                content_text=content_text,
             )
 
         model = self._load_learned_model()
@@ -2962,6 +3249,7 @@ class SearchMixin:
                 limit=limit, token_ratio=token_ratio,
                 content_feedback=content_feedback, form_feedback=form_feedback,
                 include_classes=include_classes, candidate_pool_size=candidate_pool_size,
+                content_text=content_text,
             )
 
         try:
@@ -2977,6 +3265,11 @@ class SearchMixin:
 
             if not query_colbert_orig or not query_minilm_orig:
                 return [], [], []
+
+            # Embed content text if provided
+            query_content_minilm = None
+            if content_text:
+                query_content_minilm = self._embed_with_minilm(content_text)
 
             query_colbert = query_colbert_orig
             query_minilm = query_minilm_orig
@@ -2997,6 +3290,7 @@ class SearchMixin:
                     prefetch_list = self._build_prefetch_list(
                         query_colbert, query_minilm, candidate_pool_size,
                         include_classes, content_feedback, form_feedback,
+                        query_content_minilm=query_content_minilm,
                     )
                     results = self.client.query_points(
                         collection_name=self.collection_name,
@@ -3012,12 +3306,13 @@ class SearchMixin:
                     break
 
                 # --- Infer component_paths (first cycle only) ---
-                if cycle == 0 and not component_paths and self._learned_feature_version in (2, 3):
+                if cycle == 0 and not component_paths and self._learned_feature_version in (2, 3, 4):
                     component_paths = self._infer_component_paths(cycle_points)
 
                 # --- Compute features + MLP scoring ---
                 features_list, points_data = self._compute_learned_features(
                     cycle_points, query_colbert, query_minilm, component_paths,
+                    query_content_minilm=query_content_minilm,
                 )
 
                 if not features_list:
@@ -3034,7 +3329,7 @@ class SearchMixin:
                 )
 
                 # Track cycle metrics
-                top1_name = (scored[0][1][3].payload or {}).get("name", "?") if scored else "?"
+                top1_name = (scored[0][1][4].payload or {}).get("name", "?") if scored else "?"
                 top1_score = scored[0][0] if scored else 0.0
                 top2_score = scored[1][0] if len(scored) > 1 else 0.0
                 margin = top1_score - top2_score
@@ -3048,10 +3343,10 @@ class SearchMixin:
                 })
 
                 # Reformat scored to match _categorize_scored_results format:
-                # (score, sim_c, sim_r, sim_i, point)
+                # (score, sim_c, sim_r, sim_i, sim_content, point)
                 best_scored = [
-                    (sc, s_c, s_r, s_i, pt)
-                    for sc, (s_c, s_r, s_i, pt) in scored
+                    (sc, s_c, s_r, s_i, s_ct, pt)
+                    for sc, (s_c, s_r, s_i, s_ct, pt) in scored
                 ]
 
                 # --- Halting checks ---
@@ -3070,9 +3365,9 @@ class SearchMixin:
                 # recommend engine which properly handles multi-vector MaxSim.
                 if cycle < max_cycles - 1:
                     top_k = min(5, len(scored))
-                    top_ids = [pt.id for _, (_, _, _, pt) in scored[:top_k]]
+                    top_ids = [pt.id for _, (_, _, _, _, pt) in scored[:top_k]]
                     # Bottom candidates as negative examples (optional)
-                    bottom_ids = [pt.id for _, (_, _, _, pt) in scored[-3:]] if len(scored) > 5 else []
+                    bottom_ids = [pt.id for _, (_, _, _, _, pt) in scored[-3:]] if len(scored) > 5 else []
 
                     try:
                         from qdrant_client.models import (

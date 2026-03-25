@@ -54,6 +54,10 @@ class SyntheticPattern:
     inp_vectors: Optional[np.ndarray] = None  # ColBERT [N, 128]
     rel_vector: Optional[np.ndarray] = None  # MiniLM [384]
 
+    # Content (V5+)
+    content_text: str = ""  # generated content text for this pattern
+    content_vector: Optional[np.ndarray] = None  # MiniLM [384] embedding of content_text
+
 
 @dataclass
 class SyntheticGroup:
@@ -245,8 +249,14 @@ def generate_variations(
 
 def embed_patterns(
     structures: List[dict],
+    generate_content: bool = False,
 ) -> List[SyntheticPattern]:
-    """Embed all structures using ColBERT + MiniLM via EmbeddingService."""
+    """Embed all structures using ColBERT + MiniLM via EmbeddingService.
+
+    Args:
+        structures: List of generated structures with components, dsl, description.
+        generate_content: If True, generate synthetic content text and embed it (V5+).
+    """
     from config.embedding_service import EmbeddingService
 
     service = EmbeddingService()
@@ -274,6 +284,21 @@ def embed_patterns(
             if inp_np is not None and inp_np.ndim == 1:
                 inp_np = inp_np.reshape(1, -1)
 
+            # Content text + embedding (V5+)
+            content_text = ""
+            content_np = None
+            if generate_content:
+                content_text = _generate_content_text_for_components(
+                    struct["components"]
+                )
+                if content_text:
+                    content_vec = service.embed_dense_sync([content_text])
+                    content_np = (
+                        np.array(content_vec, dtype=np.float32).flatten()
+                        if content_vec
+                        else None
+                    )
+
             patterns.append(SyntheticPattern(
                 pattern_id=f"synthetic_{i:04d}",
                 component_paths=struct["components"],
@@ -282,6 +307,8 @@ def embed_patterns(
                 comp_vectors=comp_np,
                 inp_vectors=inp_np,
                 rel_vector=rel_np,
+                content_text=content_text,
+                content_vector=content_np,
             ))
         except Exception as e:
             logger.warning(f"Embedding failed for pattern {i}: {e}")
@@ -290,6 +317,9 @@ def embed_patterns(
             logger.info(f"Embedded {i + 1}/{len(structures)} patterns")
 
     logger.info(f"Embedded {len(patterns)} patterns")
+    if generate_content:
+        n_with_content = sum(1 for p in patterns if p.content_text)
+        logger.info(f"  {n_with_content}/{len(patterns)} patterns have content text")
     return patterns
 
 
@@ -575,6 +605,289 @@ def compute_features_v3(
     ], dtype=np.float32)
 
 
+# ---------------------------------------------------------------------------
+# V5 features: V3 + content features (17D) for dual-head model
+# ---------------------------------------------------------------------------
+
+FEATURE_NAMES_V5 = FEATURE_NAMES_V3 + [
+    "sim_content",
+    "content_density",
+    "content_form_alignment",
+]
+
+# Content affinity profiles: what kind of content each component naturally carries
+CONTENT_AFFINITY: Dict[str, Dict[str, Any]] = {
+    "ButtonList": {
+        "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
+                      "send", "save", "delete", "confirm", "run", "stop", "retry",
+                      "update", "refresh", "download", "upload", "connect"],
+        "type": "action",
+    },
+    "Button": {
+        "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
+                      "send", "save", "delete", "ok", "go", "start"],
+        "type": "action",
+    },
+    "DecoratedText": {
+        "patterns": ["status", "info", "details", "label", "name", "email",
+                      "description", "version", "type", "state", "count",
+                      "total", "last updated", "created", "owner"],
+        "type": "display",
+    },
+    "TextParagraph": {
+        "patterns": ["message", "description", "note", "warning", "error",
+                      "summary", "explanation", "instructions", "help"],
+        "type": "narrative",
+    },
+    "Grid": {
+        "patterns": ["list", "items", "products", "results", "files", "users",
+                      "servers", "services", "resources", "entries"],
+        "type": "tabular",
+    },
+    "GridItem": {
+        "patterns": ["item", "product", "file", "user", "server", "result"],
+        "type": "tabular",
+    },
+    "Image": {
+        "patterns": ["photo", "screenshot", "banner", "logo", "avatar",
+                      "chart", "graph", "diagram", "icon"],
+        "type": "media",
+    },
+    "ChipList": {
+        "patterns": ["tag", "label", "category", "filter", "option",
+                      "skill", "topic", "status"],
+        "type": "categorical",
+    },
+    "Chip": {
+        "patterns": ["tag", "label", "category", "filter", "option"],
+        "type": "categorical",
+    },
+    "SelectionInput": {
+        "patterns": ["choose", "select", "pick", "option", "preference",
+                      "setting", "mode", "type"],
+        "type": "input",
+    },
+    "TextInput": {
+        "patterns": ["enter", "type", "search", "name", "email", "url",
+                      "comment", "note", "message"],
+        "type": "input",
+    },
+    "DateTimePicker": {
+        "patterns": ["date", "time", "schedule", "deadline", "start",
+                      "end", "due", "appointment"],
+        "type": "temporal",
+    },
+    "SwitchControl": {
+        "patterns": ["enable", "disable", "toggle", "on", "off",
+                      "active", "notifications", "auto"],
+        "type": "toggle",
+    },
+    "Columns": {
+        "patterns": ["compare", "side by side", "left", "right",
+                      "details", "summary"],
+        "type": "layout",
+    },
+    "Carousel": {
+        "patterns": ["slides", "gallery", "pages", "steps", "cards"],
+        "type": "sequential",
+    },
+    "CarouselCard": {
+        "patterns": ["slide", "page", "step", "card", "panel"],
+        "type": "sequential",
+    },
+    "Divider": {
+        "patterns": [],
+        "type": "structural",
+    },
+    "Section": {
+        "patterns": [],
+        "type": "structural",
+    },
+}
+
+# Content text templates per component type — realistic user content
+CONTENT_TEXT_TEMPLATES: Dict[str, List[str]] = {
+    "ButtonList": [
+        "Deploy Service, Rollback, View Logs",
+        "Approve Request, Deny Request",
+        "Start Pipeline, Stop Pipeline, View Status",
+        "Submit Form, Cancel",
+        "Restart Server, Check Health, View Metrics",
+        "Save Changes, Discard",
+        "Connect, Disconnect, Refresh",
+        "Download Report, Export CSV",
+        "Run Tests, Deploy to Staging, Deploy to Production",
+        "Enable Feature, Disable Feature",
+    ],
+    "Button": [
+        "Submit", "Deploy", "Approve", "Cancel", "Restart",
+        "Send", "Save", "Delete", "Confirm", "Retry",
+    ],
+    "DecoratedText": [
+        "Status: Online, Version: 2.4.1, Last Updated: 2 hours ago",
+        "Name: API Gateway, Type: Service, Region: us-west-2",
+        "Owner: platform-team, Priority: High, State: Active",
+        "CPU: 45%, Memory: 2.1GB, Uptime: 14 days",
+        "Email: admin@company.com, Role: Administrator",
+        "Total Requests: 1.2M, Error Rate: 0.03%",
+        "Created: March 15, Modified: March 20",
+        "Build: #1847, Branch: main, Commit: a3f2b1c",
+        "Latency P99: 120ms, Throughput: 5K rps",
+        "License: Enterprise, Seats: 50/100, Expires: 2027-01-01",
+    ],
+    "TextParagraph": [
+        "The deployment completed successfully. All health checks passed.",
+        "Warning: This action cannot be undone. Please confirm.",
+        "Pipeline failed at stage 3: unit tests. See logs for details.",
+        "Welcome to the dashboard. Select a service to view metrics.",
+        "Note: Maintenance window scheduled for Saturday 2am-4am UTC.",
+    ],
+    "Grid": [
+        "web-server-01, web-server-02, web-server-03, db-primary, db-replica",
+        "index.html, styles.css, app.js, config.json, README.md",
+        "Alice Johnson, Bob Smith, Carol Williams, David Brown",
+        "US West, US East, EU Central, AP Southeast",
+        "v1.0.0, v1.1.0, v1.2.0, v2.0.0-beta",
+    ],
+    "GridItem": [
+        "web-server-01", "database-primary", "cache-node-1",
+        "api-gateway", "load-balancer", "worker-queue",
+    ],
+    "Image": [
+        "Architecture Diagram", "Performance Chart", "Team Photo",
+        "System Dashboard Screenshot", "Logo", "Error Screenshot",
+    ],
+    "ChipList": [
+        "Python, JavaScript, Go, Rust, TypeScript",
+        "Bug, Feature, Enhancement, Documentation, Security",
+        "High Priority, Medium Priority, Low Priority",
+        "Active, Inactive, Pending, Archived",
+        "Frontend, Backend, DevOps, QA, Design",
+    ],
+    "Chip": [
+        "Python", "Bug", "High Priority", "Active", "Frontend",
+    ],
+    "SelectionInput": [
+        "Select region: US West, US East, EU, APAC",
+        "Choose environment: Development, Staging, Production",
+        "Select priority: Critical, High, Medium, Low",
+    ],
+    "TextInput": [
+        "Enter service name", "Search users", "Add comment",
+        "Enter email address", "Type your message",
+    ],
+    "DateTimePicker": [
+        "Schedule deployment", "Set deadline", "Pick start date",
+        "Choose maintenance window", "Select meeting time",
+    ],
+    "SwitchControl": [
+        "Enable notifications", "Auto-scaling", "Debug mode",
+        "Maintenance mode", "Feature flag: dark-theme",
+    ],
+    "Columns": [
+        "Current vs Previous, Before and After, Plan vs Actual",
+    ],
+    "Carousel": [
+        "Step 1: Configure, Step 2: Deploy, Step 3: Verify",
+        "Overview, Details, Metrics, Logs",
+    ],
+    "CarouselCard": [
+        "Configuration Panel", "Deployment Status", "Metric Dashboard",
+    ],
+}
+
+
+def _generate_content_text_for_components(component_paths: List[str]) -> str:
+    """Generate realistic content text for a set of components.
+
+    Picks content templates matching the component types present
+    in the pattern and concatenates them.
+    """
+    texts = []
+    seen_types = set()
+
+    for comp in component_paths:
+        if comp in seen_types:
+            continue
+        seen_types.add(comp)
+
+        templates = CONTENT_TEXT_TEMPLATES.get(comp, [])
+        if templates:
+            texts.append(random.choice(templates))
+
+    return ", ".join(texts) if texts else ""
+
+
+def compute_content_label(
+    content_text: str,
+    candidate_name: str,
+    min_matches: int = 1,
+) -> float:
+    """Compute content affinity label for a candidate component.
+
+    Returns 1.0 if the query's content text contains patterns that match
+    the candidate component's content affinity profile (at least min_matches).
+
+    Args:
+        content_text: The query's content text (generated or real).
+        candidate_name: Component name (e.g., "ButtonList").
+        min_matches: Minimum number of affinity patterns that must match.
+    """
+    if not content_text:
+        return 0.0
+
+    affinity = CONTENT_AFFINITY.get(candidate_name)
+    if not affinity or not affinity["patterns"]:
+        return 0.0
+
+    content_lower = content_text.lower()
+    patterns = affinity["patterns"]
+    matches = sum(1 for p in patterns if p in content_lower)
+
+    return 1.0 if matches >= min_matches else 0.0
+
+
+def compute_features_v5(
+    query: "SyntheticPattern",
+    cand_comp,
+    cand_inp,
+    cand_rel,
+    cand_name: str,
+    query_content_vector: Optional[np.ndarray] = None,
+    cand_content_vector: Optional[np.ndarray] = None,
+    cand_has_content: bool = False,
+    cand_n_content_fields: int = 0,
+    cand_total_content_fields: int = 5,
+) -> np.ndarray:
+    """Compute V5 features: V3 (14D) + 3 content features = 17D.
+
+    New features:
+      - sim_content: cosine(query_content, candidate_content) — 0.0 if candidate has no content
+      - content_density: ratio of non-empty content fields in candidate
+      - content_form_alignment: cosine(query_content, candidate_relationship_vector)
+    """
+    # V3 base features (14D)
+    v3_feats = compute_features_v3(query, cand_comp, cand_inp, cand_rel, cand_name)
+
+    # sim_content: query content vs candidate content
+    sim_content = cosine_sim(query_content_vector, cand_content_vector) if cand_has_content else 0.0
+
+    # content_density: fraction of content fields populated
+    content_density = (
+        cand_n_content_fields / cand_total_content_fields
+        if cand_total_content_fields > 0
+        else 0.0
+    )
+
+    # content_form_alignment: query content vs candidate relationship vector
+    content_form_alignment = cosine_sim(query_content_vector, cand_rel) if query_content_vector is not None else 0.0
+
+    return np.concatenate([
+        v3_feats,
+        np.array([sim_content, content_density, content_form_alignment], dtype=np.float32),
+    ])
+
+
 def extract_class_points(client, collection: str, limit: int = 500):
     """Extract class points from Qdrant for use as candidates."""
     points = []
@@ -599,15 +912,22 @@ def extract_class_points(client, collection: str, limit: int = 500):
             comp_raw = vectors.get("components")
             inp_raw = vectors.get("inputs")
             rel_raw = vectors.get("relationships")
+            content_raw = vectors.get("content")
 
             comp_vec = np.array(comp_raw, dtype=np.float32) if comp_raw else None
             inp_vec = np.array(inp_raw, dtype=np.float32) if inp_raw else None
             rel_vec = np.array(rel_raw, dtype=np.float32) if rel_raw else None
+            content_vec = np.array(content_raw, dtype=np.float32) if content_raw else None
 
             if comp_vec is not None and comp_vec.ndim == 1:
                 comp_vec = comp_vec.reshape(1, -1)
             if inp_vec is not None and inp_vec.ndim == 1:
                 inp_vec = inp_vec.reshape(1, -1)
+
+            has_content = (
+                payload.get("has_content_vector", False)
+                or (content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6)
+            )
 
             points.append({
                 "name": payload.get("name", ""),
@@ -615,13 +935,16 @@ def extract_class_points(client, collection: str, limit: int = 500):
                 "comp_vectors": comp_vec,
                 "inp_vectors": inp_vec,
                 "rel_vector": rel_vec,
+                "content_vector": content_vec,
+                "has_content_vector": has_content,
             })
 
         if next_offset is None or len(points) >= limit:
             break
         offset = next_offset
 
-    logger.info(f"Extracted {len(points)} class points from Qdrant")
+    n_with_content = sum(1 for p in points if p["has_content_vector"])
+    logger.info(f"Extracted {len(points)} class points from Qdrant ({n_with_content} with content)")
     return points
 
 
@@ -683,37 +1006,76 @@ def build_synthetic_groups(
 
         if has_positive and len(top_candidates) >= 2:
             # Compute features for JSON export
-            if feature_version == 3:
-                feat_fn = compute_features_v3
+            if feature_version == 5:
+                feat_names = FEATURE_NAMES_V5
+            elif feature_version == 3 or feature_version == 4:
                 feat_names = FEATURE_NAMES_V3
             else:
-                feat_fn = compute_features_v2
                 feat_names = FEATURE_NAMES_V2
 
             candidates_data = []
             for cand, label in zip(top_candidates, labels):
-                feats = feat_fn(
-                    query, cand["comp_vectors"], cand["inp_vectors"],
-                    cand["rel_vector"], cand["name"],
-                )
+                if feature_version == 5:
+                    # V5: compute content-aware features
+                    cand_content_vec = cand.get("content_vector")
+                    cand_has_content = cand.get("has_content_vector", False)
+                    feats = compute_features_v5(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                        query_content_vector=query.content_vector,
+                        cand_content_vector=cand_content_vec,
+                        cand_has_content=cand_has_content,
+                        # Class points have no content fields
+                        cand_n_content_fields=0,
+                        cand_total_content_fields=5,
+                    )
+                elif feature_version == 3 or feature_version == 4:
+                    feats = compute_features_v3(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                    )
+                else:
+                    feats = compute_features_v2(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                    )
+
                 cand_data = {
                     "name": cand["name"],
                     "full_path": cand["full_path"],
-                    "label": label,
                 }
+
+                if feature_version == 5:
+                    # Dual labels: form_label + content_label
+                    cand_data["form_label"] = label
+                    cand_data["content_label"] = compute_content_label(
+                        query.content_text, cand["name"]
+                    )
+                else:
+                    cand_data["label"] = label
+
                 for fname, fval in zip(feat_names, feats):
                     cand_data[fname] = round(float(fval), 4)
                 candidates_data.append(cand_data)
 
-            groups.append({
+            group_data = {
                 "query_id": query.pattern_id,
                 "query_description": query.description,
                 "query_dsl": query.dsl,
                 "query_components": query.component_paths,
                 "n_candidates": len(candidates_data),
-                "n_positive": sum(1 for c in candidates_data if c["label"] == 1.0),
+                "n_positive": sum(
+                    1 for c in candidates_data
+                    if c.get("form_label", c.get("label", 0.0)) == 1.0
+                ),
                 "candidates": candidates_data,
-            })
+            }
+            if feature_version == 5:
+                group_data["content_text"] = query.content_text
+                group_data["n_content_positive"] = sum(
+                    1 for c in candidates_data if c.get("content_label", 0.0) == 1.0
+                )
+            groups.append(group_data)
 
         if (i + 1) % 100 == 0:
             logger.info(f"Built groups for {i + 1}/{len(patterns)} patterns ({len(groups)} groups)")
@@ -1099,6 +1461,289 @@ def extract_real_user_groups(
     return groups
 
 
+def extract_instance_pattern_groups(
+    client,
+    collection: str = "mcp_gchat_cards_v7",
+    class_points: List[dict] = None,
+    feature_version: int = 5,
+    top_k: int = 20,
+    n_random: int = 5,
+) -> List[dict]:
+    """Extract training groups from real instance_pattern points in Qdrant.
+
+    Pulls content-type instance patterns (real user card builds), extracts
+    their component_paths as ground-truth form labels, builds content text
+    from instance_params, and creates V5-compatible query groups.
+
+    This provides higher-quality training signal than pure synthetic data
+    because it uses actual user description→component choices.
+
+    Args:
+        client: Qdrant client (already connected).
+        collection: Collection to pull instance patterns from.
+        class_points: Pre-extracted class points (candidates).
+        feature_version: Feature version (5 for dual-head).
+        top_k: Top-K candidates per query.
+        n_random: Random negatives per query.
+    """
+    from qdrant_client import models as qmodels
+
+    # Paginate through all instance patterns
+    all_points = []
+    offset = None
+    while True:
+        batch, next_offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key="type", match=qmodels.MatchValue(value="instance_pattern"),
+                    ),
+                ]
+            ),
+            limit=100,
+            offset=offset,
+            with_payload=True,
+            with_vectors=True,
+        )
+        all_points.extend(batch)
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    # Filter to content patterns (not feedback_ui) client-side
+    content_points = [
+        p for p in all_points
+        if p.payload.get("pattern_type") == "content"
+    ]
+    logger.info(
+        f"Found {len(all_points)} instance_patterns in {collection}, "
+        f"{len(content_points)} are content patterns"
+    )
+
+    if not content_points or not class_points:
+        return []
+
+    # Import embedding service for patterns without vectors
+    from config.embedding_service import EmbeddingService
+    service = EmbeddingService()
+
+    # Import content text extractor
+    from adapters.module_wrapper.pipeline_mixin import extract_content_text_from_params
+
+    groups = []
+    skipped = 0
+
+    for pt in content_points:
+        payload = pt.payload or {}
+        vectors = pt.vector or {}
+
+        # Extract component paths (ground truth)
+        parent_paths = payload.get("parent_paths", [])
+        if not parent_paths:
+            skipped += 1
+            continue
+
+        # Normalize to short names (strip module prefix)
+        component_names = list(set(
+            p.split(".")[-1] for p in parent_paths
+        ))
+
+        desc = payload.get("card_description", "")
+        if not desc or len(desc) < 3:
+            skipped += 1
+            continue
+
+        instance_params = payload.get("instance_params", {})
+
+        # Build content text from instance params
+        content_text = extract_content_text_from_params(
+            instance_params, desc
+        )
+        # Fallback: use title + description if no structured content
+        if not content_text:
+            parts = []
+            title = instance_params.get("title")
+            if title and isinstance(title, str):
+                parts.append(title)
+            ip_desc = instance_params.get("description", "")
+            if ip_desc and isinstance(ip_desc, str) and ip_desc != desc:
+                parts.append(ip_desc[:100])
+            content_text = " ".join(parts)
+
+        try:
+            # Use existing vectors from Qdrant if available
+            comp_raw = vectors.get("components") if isinstance(vectors, dict) else None
+            inp_raw = vectors.get("inputs") if isinstance(vectors, dict) else None
+            rel_raw = vectors.get("relationships") if isinstance(vectors, dict) else None
+
+            if comp_raw:
+                comp_np = np.array(comp_raw, dtype=np.float32)
+                if comp_np.ndim == 1:
+                    comp_np = comp_np.reshape(1, -1)
+            else:
+                # Embed description with ColBERT
+                vecs = service.embed_multivector_sync([desc])
+                comp_np = np.array(vecs, dtype=np.float32) if vecs else None
+                if comp_np is not None and comp_np.ndim == 1:
+                    comp_np = comp_np.reshape(1, -1)
+
+            if inp_raw:
+                inp_np = np.array(inp_raw, dtype=np.float32)
+                if inp_np.ndim == 1:
+                    inp_np = inp_np.reshape(1, -1)
+            else:
+                vecs = service.embed_multivector_sync([desc])
+                inp_np = np.array(vecs, dtype=np.float32) if vecs else None
+                if inp_np is not None and inp_np.ndim == 1:
+                    inp_np = inp_np.reshape(1, -1)
+
+            if rel_raw:
+                rel_np = np.array(rel_raw, dtype=np.float32).flatten()
+            else:
+                vecs = service.embed_dense_sync([desc])
+                rel_np = np.array(vecs, dtype=np.float32).flatten() if vecs else None
+
+            # Content vector: embed content_text if available
+            content_np = None
+            if content_text:
+                vecs = service.embed_dense_sync([content_text])
+                content_np = np.array(vecs, dtype=np.float32).flatten() if vecs else None
+
+            if comp_np is None:
+                skipped += 1
+                continue
+
+            query = SyntheticPattern(
+                pattern_id=f"real_ip_{len(groups):04d}",
+                component_paths=component_names,
+                dsl=instance_params.get("dsl", ""),
+                description=desc,
+                comp_vectors=comp_np,
+                inp_vectors=inp_np,
+                rel_vector=rel_np,
+                content_text=content_text,
+                content_vector=content_np,
+            )
+
+            # Score against all class points
+            scored = []
+            for cp in class_points:
+                if cp["comp_vectors"] is None:
+                    continue
+                sim = maxsim_score(query.comp_vectors, cp["comp_vectors"])
+                scored.append((cp, sim))
+
+            scored.sort(key=lambda x: x[1], reverse=True)
+            top_candidates = [c for c, _ in scored[:top_k]]
+            remaining = [c for c, _ in scored[top_k:]]
+            if remaining:
+                top_candidates.extend(
+                    random.sample(remaining, min(n_random, len(remaining)))
+                )
+
+            # Build candidate data with labels
+            if feature_version == 5:
+                feat_names = FEATURE_NAMES_V5
+            elif feature_version in (3, 4):
+                feat_names = FEATURE_NAMES_V3
+            else:
+                feat_names = FEATURE_NAMES_V2
+
+            candidates_data = []
+            has_positive = False
+            for cand in top_candidates:
+                form_label = 1.0 if cand["name"] in component_names else 0.0
+                if form_label > 0.5:
+                    has_positive = True
+
+                if feature_version == 5:
+                    feats = compute_features_v5(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                        query_content_vector=query.content_vector,
+                        cand_content_vector=cand.get("content_vector"),
+                        cand_has_content=cand.get("has_content_vector", False),
+                        cand_n_content_fields=0,
+                        cand_total_content_fields=5,
+                    )
+                    content_label = compute_content_label(
+                        content_text, cand["name"]
+                    )
+                    cand_data = {
+                        "name": cand["name"],
+                        "full_path": cand["full_path"],
+                        "form_label": form_label,
+                        "content_label": content_label,
+                    }
+                elif feature_version in (3, 4):
+                    feats = compute_features_v3(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                    )
+                    cand_data = {
+                        "name": cand["name"],
+                        "full_path": cand["full_path"],
+                        "label": form_label,
+                    }
+                else:
+                    feats = compute_features_v2(
+                        query, cand["comp_vectors"], cand["inp_vectors"],
+                        cand["rel_vector"], cand["name"],
+                    )
+                    cand_data = {
+                        "name": cand["name"],
+                        "full_path": cand["full_path"],
+                        "label": form_label,
+                    }
+
+                for fname, fval in zip(feat_names, feats):
+                    cand_data[fname] = round(float(fval), 4)
+                candidates_data.append(cand_data)
+
+            if has_positive and len(candidates_data) >= 2:
+                group_data = {
+                    "query_id": query.pattern_id,
+                    "query_description": desc[:200],
+                    "query_dsl": query.dsl,
+                    "query_components": component_names,
+                    "n_candidates": len(candidates_data),
+                    "n_positive": sum(
+                        1 for c in candidates_data
+                        if c.get("form_label", c.get("label", 0.0)) == 1.0
+                    ),
+                    "candidates": candidates_data,
+                    "source": "instance_pattern",
+                    "source_collection": collection,
+                }
+                if feature_version == 5:
+                    group_data["content_text"] = content_text
+                    group_data["n_content_positive"] = sum(
+                        1 for c in candidates_data
+                        if c.get("content_label", 0.0) == 1.0
+                    )
+                groups.append(group_data)
+
+        except Exception as e:
+            logger.debug(f"Failed to build group for instance pattern: {e}")
+            skipped += 1
+            continue
+
+    logger.info(
+        f"Built {len(groups)} instance pattern training groups "
+        f"from {collection} (skipped {skipped})"
+    )
+    if groups and feature_version == 5:
+        n_with_content = sum(1 for g in groups if g.get("content_text"))
+        total_content_pos = sum(g.get("n_content_positive", 0) for g in groups)
+        logger.info(
+            f"  With content text: {n_with_content}/{len(groups)}, "
+            f"content positives: {total_content_pos}"
+        )
+
+    return groups
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1115,12 +1760,16 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-variations", action="store_true", help="Skip variation generation")
     parser.add_argument("--skip-embed", action="store_true", help="Skip embedding (use pre-computed)")
-    parser.add_argument("--feature-version", type=int, default=3, choices=[2, 3],
-                        help="Feature version: 2=V2 (8 features), 3=V3 (14 decomposed)")
+    parser.add_argument("--feature-version", type=int, default=3, choices=[2, 3, 5],
+                        help="Feature version: 2=V2 (8D), 3=V3 (14D decomposed), 5=V5 (17D dual-head)")
     parser.add_argument("--domain", default="card", choices=["card", "email"],
                         help="Domain: 'card' (gchat cards) or 'email' (MJML email)")
     parser.add_argument("--include-real", action="store_true",
                         help="Also extract real user training data from mcp_tool_responses")
+    parser.add_argument("--include-instance-patterns", action="store_true",
+                        help="Extract real instance patterns from Qdrant (v7/v8)")
+    parser.add_argument("--instance-pattern-collection", default=None,
+                        help="Collection for instance patterns (default: mcp_gchat_cards_v7 for card)")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -1163,8 +1812,9 @@ def main():
             logger.warning(f"Variation generation failed (continuing with originals): {e}")
 
     # Step 3: Embed all patterns
-    logger.info(f"\n=== Step 3: Embedding {len(structures)} patterns ===")
-    patterns = embed_patterns(structures)
+    generate_content = args.feature_version >= 5
+    logger.info(f"\n=== Step 3: Embedding {len(structures)} patterns (content={generate_content}) ===")
+    patterns = embed_patterns(structures, generate_content=generate_content)
 
     if not patterns:
         logger.error("No patterns embedded successfully")
@@ -1196,6 +1846,27 @@ def main():
             logger.info(f"Adding {len(real_groups)} real user groups to {len(groups)} synthetic groups")
             groups.extend(real_groups)
 
+    # Step 5c: Extract instance pattern groups if requested
+    if args.include_instance_patterns and args.domain == "card":
+        ip_collection = args.instance_pattern_collection or "mcp_gchat_cards_v7"
+        logger.info(
+            f"\n=== Step 5c: Extracting instance pattern groups from {ip_collection} ==="
+        )
+        ip_groups = extract_instance_pattern_groups(
+            client,
+            collection=ip_collection,
+            class_points=class_points,
+            feature_version=fv,
+            top_k=args.top_k,
+            n_random=args.n_random,
+        )
+        if ip_groups:
+            logger.info(
+                f"Adding {len(ip_groups)} instance pattern groups "
+                f"to {len(groups)} existing groups"
+            )
+            groups.extend(ip_groups)
+
     if not groups:
         logger.error("No groups built")
         return
@@ -1212,13 +1883,20 @@ def main():
     logger.info(f"\n{'='*60}")
     logger.info(f"SYNTHETIC DATA SUMMARY")
     logger.info(f"{'='*60}")
+    logger.info(f"Feature version:      V{fv}")
     logger.info(f"Structures generated: {len(structures)}")
     logger.info(f"Patterns embedded:    {len(patterns)}")
     logger.info(f"Query groups:         {len(groups)}")
     logger.info(f"Unique DSL patterns:  {unique_queries}")
     logger.info(f"Total candidates:     {total_candidates}")
-    logger.info(f"Total positives:      {total_positive}")
-    logger.info(f"Positive rate:        {total_positive/total_candidates:.1%}")
+    logger.info(f"Total form positives: {total_positive}")
+    logger.info(f"Form positive rate:   {total_positive/total_candidates:.1%}")
+    if fv >= 5:
+        total_content_pos = sum(g.get("n_content_positive", 0) for g in groups)
+        n_with_content = sum(1 for g in groups if g.get("content_text"))
+        logger.info(f"Content positives:    {total_content_pos}")
+        logger.info(f"Content pos rate:     {total_content_pos/total_candidates:.1%}")
+        logger.info(f"Queries with content: {n_with_content}/{len(groups)}")
     logger.info(f"Output:               {output_path}")
 
 

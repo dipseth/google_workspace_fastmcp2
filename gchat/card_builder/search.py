@@ -504,6 +504,7 @@ def store_card_pattern(
     description_rendered: Optional[str] = None,
     jinja_applied: bool = False,
     enable_feedback: bool = True,
+    supply_map: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Store the main card content pattern in Qdrant.
@@ -520,6 +521,7 @@ def store_card_pattern(
         description_rendered: Jinja-processed description (if different from raw)
         jinja_applied: Whether Jinja template processing was applied
         enable_feedback: Whether feedback storage is enabled
+        supply_map: Post-rendering content values (buttons, items, chips, etc.)
     """
     if not enable_feedback:
         return
@@ -571,6 +573,25 @@ def store_card_pattern(
         # Store style metadata with instance params
         instance_params["style_metadata"] = style_metadata
 
+        # Build content text from supply_map (actual user content values)
+        content_text = ""
+        if supply_map:
+            from adapters.module_wrapper.pipeline_mixin import (
+                extract_content_text_from_params,
+            )
+
+            # supply_map keys align with extract_content_text_from_params fields
+            content_params = {
+                "title": title,
+                "buttons": supply_map.get("buttons", []),
+                "items": supply_map.get("grid_items", []),
+                "content_texts": supply_map.get("content_texts", []),
+                "chips": supply_map.get("chips", []),
+            }
+            content_text = extract_content_text_from_params(
+                content_params, description or ""
+            )
+
         # Store the CONTENT pattern (main card, not feedback UI)
         point_id = feedback_loop.store_instance_pattern(
             card_description=description,
@@ -579,6 +600,7 @@ def store_card_pattern(
             card_id=card_id,
             structure_description=structure_dsl or "",
             pattern_type="content",
+            content_text=content_text or None,
         )
 
         if point_id:

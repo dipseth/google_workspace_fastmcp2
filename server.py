@@ -441,21 +441,70 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             # 3. Normal OAuth token validation (FastMCP JWT)
             logger.info(f"🔍 load_access_token called, token prefix: {token[:20]}...")
             result = await _original_load_access_token(token)
-            if result is None:
-                logger.warning(
-                    f"⚠️ load_access_token returned None for token: {token[:30]}..."
-                )
-                # Record failed attempt for rate limiting
-                _failed_auth_attempts.setdefault(token_prefix, []).append(now)
-                # Evict oldest prefix if over cap (defense against unique-token flooding)
-                if len(_failed_auth_attempts) > _MAX_TRACKED_PREFIXES:
-                    oldest_key = next(iter(_failed_auth_attempts))
-                    del _failed_auth_attempts[oldest_key]
-            else:
+            if result is not None:
                 logger.info(
                     f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
                 )
-            return result
+                return result
+
+            # 4. Fallback: try validating as a raw Google access token
+            # Some MCP clients (e.g., Claude Code VS Code) may send a cached
+            # opaque Google access token instead of the FastMCP JWT wrapper.
+            # Validate it directly via Google's tokeninfo API.
+            if "." not in token[:40] or not token.startswith("eyJ"):
+                logger.info(
+                    "🔄 Token is not a FastMCP JWT — trying Google tokeninfo fallback..."
+                )
+                try:
+                    import httpx as _httpx
+
+                    async with _httpx.AsyncClient(timeout=10) as _http:
+                        _resp = await _http.get(
+                            "https://www.googleapis.com/oauth2/v1/tokeninfo",
+                            params={"access_token": token},
+                        )
+                    if _resp.status_code == 200:
+                        _info = _resp.json()
+                        _email = _info.get("email")
+                        _expires_in = int(_info.get("expires_in", 0))
+                        if _email and _expires_in > 0:
+                            logger.info(
+                                f"✅ Google tokeninfo fallback succeeded: {_email} "
+                                f"(expires_in={_expires_in}s)"
+                            )
+                            return _FastMCPAccessToken(
+                                token=token,
+                                client_id=f"google-tokeninfo-{_email}",
+                                scopes=_oauth_comprehensive_scopes,
+                                expires_at=int(_time.time()) + _expires_in,
+                                claims={
+                                    "sub": _email,
+                                    "email": _email,
+                                    "auth_method": AuthProvenance.USER_API_KEY,
+                                },
+                            )
+                        else:
+                            logger.debug(
+                                f"Google tokeninfo returned no email or token expired "
+                                f"(email={_email}, expires_in={_expires_in})"
+                            )
+                    else:
+                        logger.debug(
+                            f"Google tokeninfo fallback failed: HTTP {_resp.status_code}"
+                        )
+                except Exception as _e:
+                    logger.debug(f"Google tokeninfo fallback error: {_e}")
+
+            logger.warning(
+                f"⚠️ load_access_token returned None for token: {token[:30]}..."
+            )
+            # Record failed attempt for rate limiting
+            _failed_auth_attempts.setdefault(token_prefix, []).append(now)
+            # Evict oldest prefix if over cap (defense against unique-token flooding)
+            if len(_failed_auth_attempts) > _MAX_TRACKED_PREFIXES:
+                oldest_key = next(iter(_failed_auth_attempts))
+                del _failed_auth_attempts[oldest_key]
+            return None
 
         google_auth_provider.load_access_token = _load_access_token_with_api_key
         if _mcp_api_key:

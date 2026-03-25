@@ -1197,6 +1197,7 @@ class SmartCardBuilderV2:
         card: Dict[str, Any],
         description_rendered: Optional[str] = None,
         jinja_applied: bool = False,
+        supply_map: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Store card content pattern in Qdrant (fire-and-forget).
 
@@ -1214,6 +1215,7 @@ class SmartCardBuilderV2:
             description_rendered=description_rendered,
             jinja_applied=jinja_applied,
             enable_feedback=ENABLE_FEEDBACK_BUTTONS,
+            supply_map=supply_map,
         )
 
     @fire_and_forget
@@ -1648,6 +1650,7 @@ class SmartCardBuilderV2:
         """
         card_id = str(uuid.uuid4())[:8]
         card = None
+        supply_map = None
         # Reset Jinja tracking for this build
         self._jinja_applied = False
         # Track the Jinja-rendered description (if different from raw)
@@ -1866,6 +1869,7 @@ class SmartCardBuilderV2:
             card=dict(card) if card else {},  # Copy to avoid mutation issues
             description_rendered=self._description_rendered,
             jinja_applied=self._jinja_applied,
+            supply_map=dict(supply_map) if supply_map else None,
         )
 
         # Add feedback section AFTER storing content pattern

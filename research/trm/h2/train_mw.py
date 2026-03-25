@@ -50,13 +50,20 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
 
     Args:
         path: Path to synthetic groups JSON
-        feature_version: 1 = legacy 9 features, 2 = structural 8 features, 3 = decomposed 14 features
+        feature_version: 1-4 = single label, 5 = dual labels (form + content)
     """
     import json
-    from research.trm.h2.generate_training_data import FEATURE_NAMES_V2, FEATURE_NAMES_V3
+    from research.trm.h2.generate_training_data import (
+        FEATURE_NAMES_V2,
+        FEATURE_NAMES_V3,
+        FEATURE_NAMES_V5,
+    )
 
     data = json.loads(Path(path).read_text())
-    logger.info(f"Loading {len(data)} synthetic groups from {path} (feature_version={feature_version})")
+    logger.info(
+        f"Loading {len(data)} synthetic groups from {path} "
+        f"(feature_version={feature_version})"
+    )
 
     groups = []
     for g in data:
@@ -74,7 +81,8 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
         )
 
         candidates = []
-        labels = []
+        form_labels = []
+        content_labels = []
         for c in g["candidates"]:
             cand = MWPoint(
                 point_id="", point_type="class",
@@ -85,28 +93,45 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
                 docstring="",
             )
 
-            if feature_version == 3:
-                # V3: 14 decomposed MaxSim + structural features
+            if feature_version >= 5:
+                cand._precomputed_features = np.array([
+                    c.get(f, 0.0) for f in FEATURE_NAMES_V5
+                ], dtype=np.float32)
+            elif feature_version == 3 or feature_version == 4:
                 cand._precomputed_features = np.array([
                     c.get(f, 0.0) for f in FEATURE_NAMES_V3
                 ], dtype=np.float32)
             elif feature_version == 2:
-                # V2: 8 structural features (no norms)
                 cand._precomputed_features = np.array([
                     c.get(f, 0.0) for f in FEATURE_NAMES_V2
                 ], dtype=np.float32)
             else:
-                # V1: 9 features (with norms)
                 cand._precomputed_features = np.array([
-                    c["sim_components"], c["sim_inputs"], c["sim_relationships"],
-                    c.get("q_comp_norm", 0), c.get("q_inp_norm", 0), c.get("q_rel_norm", 0),
-                    c.get("c_comp_norm", 0), c.get("c_inp_norm", 0), c.get("c_rel_norm", 0),
+                    c["sim_components"], c["sim_inputs"],
+                    c["sim_relationships"],
+                    c.get("q_comp_norm", 0),
+                    c.get("q_inp_norm", 0),
+                    c.get("q_rel_norm", 0),
+                    c.get("c_comp_norm", 0),
+                    c.get("c_inp_norm", 0),
+                    c.get("c_rel_norm", 0),
                 ], dtype=np.float32)
             candidates.append(cand)
-            labels.append(c["label"])
 
-        if any(l == 1.0 for l in labels) and len(candidates) >= 2:
-            groups.append(MWQueryGroup(query=query, candidates=candidates, labels=labels))
+            # Form label (backward compat: "label" or "form_label")
+            form_labels.append(
+                c.get("form_label", c.get("label", 0.0))
+            )
+            # Content label (V5+, defaults to 0.0 for older data)
+            content_labels.append(c.get("content_label", 0.0))
+
+        if any(l == 1.0 for l in form_labels) and len(candidates) >= 2:
+            groups.append(MWQueryGroup(
+                query=query,
+                candidates=candidates,
+                labels=form_labels,
+                content_labels=content_labels,
+            ))
 
     logger.info(f"Loaded {len(groups)} valid synthetic groups")
     return groups
@@ -115,7 +140,8 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
 class MWListwiseDataset(Dataset):
     """Listwise dataset for MW query groups with precomputed features.
 
-    Supports Gaussian noise augmentation and feature dropout during training.
+    Supports single-label (V1-V4) and dual-label (V5+) modes.
+    Gaussian noise augmentation and feature dropout during training.
     """
 
     def __init__(
@@ -125,15 +151,18 @@ class MWListwiseDataset(Dataset):
         noise_std: float = 0.0,
         feature_dropout: float = 0.0,
         training: bool = False,
+        dual_labels: bool = False,
     ):
         self.max_k = max_k or max(len(g.labels) for g in groups)
         self.noise_std = noise_std
         self.feature_dropout = feature_dropout
         self.training = training
+        self.dual_labels = dual_labels
 
         # Precompute all features
         self.features = []
-        self.labels = []
+        self.form_labels = []
+        self.content_labels = []
         self.masks = []
 
         for g in groups:
@@ -154,11 +183,26 @@ class MWListwiseDataset(Dataset):
             if pad > 0:
                 feat_tensor = torch.cat([feat_tensor, torch.zeros(pad, feat_dim)])
 
-            label_tensor = torch.tensor(g.labels + [0.0] * pad, dtype=torch.float32)
+            # Form labels (always present — backward compat with "labels")
+            form_labels = g.labels
+            form_tensor = torch.tensor(
+                form_labels + [0.0] * pad, dtype=torch.float32
+            )
+
+            # Content labels (optional — from content_labels attr or zeros)
+            if dual_labels and hasattr(g, 'content_labels') and g.content_labels:
+                c_labels = g.content_labels
+            else:
+                c_labels = [0.0] * K
+            content_tensor = torch.tensor(
+                c_labels + [0.0] * pad, dtype=torch.float32
+            )
+
             mask_tensor = torch.cat([torch.ones(K), torch.zeros(pad)])
 
             self.features.append(feat_tensor)
-            self.labels.append(label_tensor)
+            self.form_labels.append(form_tensor)
+            self.content_labels.append(content_tensor)
             self.masks.append(mask_tensor)
 
     def __len__(self):
@@ -166,7 +210,8 @@ class MWListwiseDataset(Dataset):
 
     def __getitem__(self, idx):
         feats = self.features[idx].clone()
-        labels = self.labels[idx]
+        form_labels = self.form_labels[idx]
+        content_labels = self.content_labels[idx]
         mask = self.masks[idx]
 
         if self.training:
@@ -186,10 +231,20 @@ class MWListwiseDataset(Dataset):
             if valid_k > 1:
                 perm = torch.randperm(valid_k)
                 feats[:valid_k] = feats[perm]
-                labels = labels.clone()
-                labels[:valid_k] = labels[perm]
+                form_labels = form_labels.clone()
+                form_labels[:valid_k] = form_labels[perm]
+                content_labels = content_labels.clone()
+                content_labels[:valid_k] = content_labels[perm]
 
-        return {"features": feats, "labels": labels, "mask": mask}
+        if self.dual_labels:
+            return {
+                "features": feats,
+                "form_labels": form_labels,
+                "content_labels": content_labels,
+                "mask": mask,
+            }
+        # Backward compat: single-label mode
+        return {"features": feats, "labels": form_labels, "mask": mask}
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +277,69 @@ class SimilarityScorerMW(nn.Module):
 
     def count_parameters(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class DualHeadScorerMW(nn.Module):
+    """Dual-head scorer: form_score + content_score.
+
+    Shared backbone learns joint representations, then two heads
+    specialize: form_head predicts structural match, content_head
+    predicts content-form affinity.
+
+    V5 (17 features): V3 decomposed MaxSim (8) + relationships (1)
+        + structural (5) + sim_content (1) + content_density (1)
+        + content_form_alignment (1)
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 17,
+        hidden_dim: int = 48,
+        head_dim: int = 24,
+        dropout: float = 0.15,
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.head_dim = head_dim
+
+        # Shared backbone
+        self.backbone = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+        )
+
+        # Form head: structural match scoring
+        self.form_head = nn.Sequential(
+            nn.Linear(hidden_dim, head_dim),
+            nn.SiLU(),
+            nn.Linear(head_dim, 1),
+        )
+
+        # Content head: content-form affinity scoring
+        self.content_head = nn.Sequential(
+            nn.Linear(hidden_dim, head_dim),
+            nn.SiLU(),
+            nn.Linear(head_dim, 1),
+        )
+
+    def forward(
+        self, features: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """features: [B, input_dim] → (form_scores: [B, 1], content_scores: [B, 1])"""
+        shared = self.backbone(features)
+        form_scores = self.form_head(shared)
+        content_scores = self.content_head(shared)
+        return form_scores, content_scores
+
+    def count_parameters(self):
+        return sum(
+            p.numel() for p in self.parameters() if p.requires_grad
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +390,125 @@ def compute_loss(model, batch, device):
     return loss, {"loss": loss.item(), "accuracy": acc1, "top3": acc3, "mrr": mrr_val}
 
 
+def _listwise_ce(scores, labels, mask):
+    """Listwise cross-entropy for a single head."""
+    scores = scores.masked_fill(mask == 0, -1e9)
+    label_sums = labels.sum(dim=-1, keepdim=True).clamp(min=1.0)
+    target_dist = labels / label_sums
+    log_probs = F.log_softmax(scores, dim=-1)
+    return -(target_dist * log_probs).sum(dim=-1)
+
+
+def _head_metrics(scores, labels, device):
+    """Compute top-1, top-3, MRR for a single head."""
+    B, K = scores.shape
+    top1 = scores.argmax(dim=-1)
+    correct1 = labels[torch.arange(B, device=device), top1]
+    acc1 = correct1.mean().item()
+
+    top3 = scores.topk(min(3, K), dim=-1).indices
+    correct3 = torch.zeros(B, device=device)
+    for i in range(top3.shape[1]):
+        correct3 += labels[torch.arange(B, device=device), top3[:, i]]
+    acc3 = (correct3 > 0).float().mean().item()
+
+    sorted_idx = scores.argsort(dim=-1, descending=True)
+    mrr = torch.zeros(B, device=device)
+    for i in range(B):
+        for rank, idx in enumerate(sorted_idx[i]):
+            if labels[i, idx] > 0:
+                mrr[i] = 1.0 / (rank + 1)
+                break
+
+    return acc1, acc3, mrr.mean().item()
+
+
+def compute_dual_loss(
+    model,
+    batch,
+    device,
+    form_weight: float = 0.6,
+    content_weight: float = 0.4,
+):
+    """Dual-head loss: form + content listwise cross-entropy.
+
+    Args:
+        model: DualHeadScorerMW instance
+        batch: dict with features, form_labels, content_labels, mask
+        device: torch device
+        form_weight: weight for form loss (default 0.6)
+        content_weight: weight for content loss (default 0.4)
+
+    Returns:
+        (total_loss, metrics_dict)
+    """
+    features = batch["features"].to(device)
+    form_labels = batch["form_labels"].to(device)
+    content_labels = batch["content_labels"].to(device)
+    mask = batch["mask"].to(device)
+
+    B, K, Fd = features.shape
+
+    # Forward: dual outputs
+    form_scores, content_scores = model(
+        features.reshape(B * K, Fd)
+    )
+    form_scores = form_scores.squeeze(-1).reshape(B, K)
+    content_scores = content_scores.squeeze(-1).reshape(B, K)
+
+    # Form loss: always computed
+    form_loss = _listwise_ce(form_scores, form_labels, mask).mean()
+
+    # Content loss: masked for groups with no content labels
+    has_content = (content_labels.sum(dim=-1) > 0).float()
+    content_loss_per_group = _listwise_ce(
+        content_scores, content_labels, mask
+    )
+    if has_content.sum() > 0:
+        content_loss = (
+            (content_loss_per_group * has_content).sum()
+            / has_content.sum()
+        )
+    else:
+        content_loss = torch.tensor(0.0, device=device)
+
+    total_loss = form_weight * form_loss + content_weight * content_loss
+
+    with torch.no_grad():
+        # Mask scores for metrics
+        fm = form_scores.masked_fill(mask == 0, -1e9)
+        cm = content_scores.masked_fill(mask == 0, -1e9)
+
+        # Per-head metrics
+        f_acc1, f_acc3, f_mrr = _head_metrics(
+            fm, form_labels, device
+        )
+        c_acc1, c_acc3, c_mrr = _head_metrics(
+            cm, content_labels, device
+        )
+
+        # Combined score (alpha=form_weight)
+        combined = form_weight * fm + content_weight * cm
+        comb_acc1, comb_acc3, comb_mrr = _head_metrics(
+            combined, form_labels, device
+        )
+
+    return total_loss, {
+        "loss": total_loss.item(),
+        "form_loss": form_loss.item(),
+        "content_loss": content_loss.item(),
+        "form_top1": f_acc1,
+        "form_top3": f_acc3,
+        "form_mrr": f_mrr,
+        "content_top1": c_acc1,
+        "content_top3": c_acc3,
+        "content_mrr": c_mrr,
+        "combined_top1": comb_acc1,
+        "combined_top3": comb_acc3,
+        "combined_mrr": comb_mrr,
+    }
+
+
 def get_device():
     if torch.backends.mps.is_available():
         return torch.device("mps")
@@ -303,8 +540,16 @@ def main():
                         help="Probability of zeroing a feature during training")
     parser.add_argument("--domain", type=str, default="card", choices=["card", "email", "combined"],
                         help="Domain label saved in checkpoint and used for naming")
-    parser.add_argument("--feature-version", type=int, default=1, choices=[1, 2, 3],
-                        help="Feature version: 1=9D norms, 2=8D structural, 3=14D decomposed")
+    parser.add_argument("--feature-version", type=int, default=1, choices=[1, 2, 3, 4, 5],
+                        help="Feature version: 1=9D, 2=8D, 3=14D, 4=15D, 5=17D dual-head")
+    parser.add_argument("--model-type", type=str, default="single", choices=["single", "dual"],
+                        help="Model type: single (SimilarityScorerMW) or dual (DualHeadScorerMW)")
+    parser.add_argument("--form-weight", type=float, default=0.6,
+                        help="Weight for form loss in dual-head training")
+    parser.add_argument("--content-weight", type=float, default=0.4,
+                        help="Weight for content loss in dual-head training")
+    parser.add_argument("--head-dim", type=int, default=24,
+                        help="Hidden dim for each head in dual-head model")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -334,17 +579,17 @@ def main():
         groups.extend(synthetic_groups)
 
     # Determine input dimension from data
-    input_dim = 9  # default V1
-    if args.feature_version == 3:
-        input_dim = 14
-    elif args.feature_version == 2:
-        input_dim = 8
-    elif groups:
-        # Detect from data
+    input_dim_map = {1: 9, 2: 8, 3: 14, 4: 15, 5: 17}
+    input_dim = input_dim_map.get(args.feature_version, 9)
+    if groups:
         sample_cand = groups[0].candidates[0]
         if hasattr(sample_cand, '_precomputed_features'):
             input_dim = len(sample_cand._precomputed_features)
-    logger.info(f"Feature version: V{args.feature_version}, input_dim: {input_dim}")
+    is_dual = args.model_type == "dual"
+    logger.info(
+        f"Feature version: V{args.feature_version}, "
+        f"input_dim: {input_dim}, model: {args.model_type}"
+    )
 
     if len(groups) < 5:
         logger.error(f"Only {len(groups)} groups — need more data")
@@ -364,16 +609,28 @@ def main():
         noise_std=args.noise_std,
         feature_dropout=args.feature_dropout,
         training=True,
+        dual_labels=is_dual,
     )
-    val_ds = MWListwiseDataset(val_groups, max_k)
+    val_ds = MWListwiseDataset(val_groups, max_k, dual_labels=is_dual)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
     # --- Model ---
     device = get_device()
-    model = SimilarityScorerMW(
-        input_dim=input_dim, hidden_dim=args.hidden_dim, num_layers=2, dropout=args.dropout,
-    ).to(device)
+    if is_dual:
+        model = DualHeadScorerMW(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            head_dim=args.head_dim,
+            dropout=args.dropout,
+        ).to(device)
+    else:
+        model = SimilarityScorerMW(
+            input_dim=input_dim,
+            hidden_dim=args.hidden_dim,
+            num_layers=2,
+            dropout=args.dropout,
+        ).to(device)
     logger.info(f"Device: {device}, Model params: {model.count_parameters():,}")
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
@@ -383,70 +640,125 @@ def main():
     ckpt_dir = Path(args.checkpoint_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     best_val_acc = 0.0
+    best_content_top1 = 0.0
     patience_counter = 0
+
+    # Select loss function based on model type
+    _loss_fn = (
+        lambda m, b, d: compute_dual_loss(
+            m, b, d, args.form_weight, args.content_weight
+        )
+        if is_dual
+        else compute_loss
+    )
 
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
         model.train()
-        t_loss, t_acc, t_top3, t_mrr, n = 0.0, 0.0, 0.0, 0.0, 0
+        t_metrics: dict[str, float] = {}
+        n = 0
         for batch in train_loader:
             optimizer.zero_grad()
-            loss, metrics = compute_loss(model, batch, device)
+            loss, metrics = _loss_fn(model, batch, device)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             scheduler.step()
-            t_loss += metrics["loss"]
-            t_acc += metrics["accuracy"]
-            t_top3 += metrics["top3"]
-            t_mrr += metrics["mrr"]
+            for k, v in metrics.items():
+                t_metrics[k] = t_metrics.get(k, 0.0) + v
             n += 1
-        t_loss /= max(n, 1)
-        t_acc /= max(n, 1)
-        t_top3 /= max(n, 1)
-        t_mrr /= max(n, 1)
+        for k in t_metrics:
+            t_metrics[k] /= max(n, 1)
 
         model.eval()
-        v_loss, v_acc, v_top3, v_mrr, nv = 0.0, 0.0, 0.0, 0.0, 0
+        v_metrics: dict[str, float] = {}
+        nv = 0
         with torch.no_grad():
             for batch in val_loader:
-                loss, metrics = compute_loss(model, batch, device)
-                v_loss += metrics["loss"]
-                v_acc += metrics["accuracy"]
-                v_top3 += metrics["top3"]
-                v_mrr += metrics["mrr"]
+                _, metrics = _loss_fn(model, batch, device)
+                for k, v in metrics.items():
+                    v_metrics[k] = v_metrics.get(k, 0.0) + v
                 nv += 1
-        v_loss /= max(nv, 1)
-        v_acc /= max(nv, 1)
-        v_top3 /= max(nv, 1)
-        v_mrr /= max(nv, 1)
+        for k in v_metrics:
+            v_metrics[k] /= max(nv, 1)
 
-        logger.info(
-            f"Epoch {epoch:3d}/{args.epochs} "
-            f"| train: loss={t_loss:.4f} top1={t_acc:.3f} top3={t_top3:.3f} mrr={t_mrr:.3f} "
-            f"| val: loss={v_loss:.4f} top1={v_acc:.3f} top3={v_top3:.3f} mrr={v_mrr:.3f}"
-        )
+        # Logging
+        if is_dual:
+            logger.info(
+                f"Epoch {epoch:3d}/{args.epochs} "
+                f"| train: loss={t_metrics['loss']:.4f} "
+                f"form_top1={t_metrics['form_top1']:.3f} "
+                f"content_top1={t_metrics['content_top1']:.3f} "
+                f"combined={t_metrics['combined_top1']:.3f} "
+                f"| val: loss={v_metrics['loss']:.4f} "
+                f"form_top1={v_metrics['form_top1']:.3f} "
+                f"content_top1={v_metrics['content_top1']:.3f} "
+                f"combined={v_metrics['combined_top1']:.3f}"
+            )
+            val_acc = v_metrics["combined_top1"]
+        else:
+            logger.info(
+                f"Epoch {epoch:3d}/{args.epochs} "
+                f"| train: loss={t_metrics['loss']:.4f} "
+                f"top1={t_metrics['accuracy']:.3f} "
+                f"top3={t_metrics['top3']:.3f} "
+                f"mrr={t_metrics['mrr']:.3f} "
+                f"| val: loss={v_metrics['loss']:.4f} "
+                f"top1={v_metrics['accuracy']:.3f} "
+                f"top3={v_metrics['top3']:.3f} "
+                f"mrr={v_metrics['mrr']:.3f}"
+            )
+            val_acc = v_metrics["accuracy"]
 
-        if v_acc > best_val_acc:
-            best_val_acc = v_acc
+        # For dual-head: track content_top1 independently so that
+        # training continues while the content head is still improving,
+        # even if combined accuracy has plateaued (form saturates early).
+        improved = False
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            improved = True
+
+        if is_dual:
+            ct1 = v_metrics.get("content_top1", 0.0)
+            if ct1 > best_content_top1:
+                best_content_top1 = ct1
+                improved = True
+
+        if improved:
             patience_counter = 0
-            # Domain-specific checkpoint filename to avoid overwriting
             domain = getattr(args, "domain", "card")
-            ckpt_name = f"best_model_{domain}.pt" if domain != "card" else "best_model_mw.pt"
+            ckpt_name = (
+                f"best_model_{domain}.pt"
+                if domain != "card"
+                else "best_model_mw.pt"
+            )
             ckpt = ckpt_dir / ckpt_name
-            torch.save({
+            ckpt_data = {
                 "model_state_dict": model.state_dict(),
-                "model_type": "similarity_mw",
+                "model_type": "dual_head" if is_dual else "similarity_mw",
                 "input_dim": input_dim,
                 "feature_version": args.feature_version,
                 "hidden_dim": args.hidden_dim,
                 "dropout": args.dropout,
                 "epoch": epoch,
-                "val_accuracy": v_acc,
+                "val_accuracy": val_acc,
                 "collection": args.collection,
                 "domain": domain,
-            }, ckpt)
-            logger.info(f"  New best val_acc={v_acc:.3f} → {ckpt}")
+            }
+            if is_dual:
+                ckpt_data["head_dim"] = args.head_dim
+                ckpt_data["form_weight"] = args.form_weight
+                ckpt_data["content_weight"] = args.content_weight
+                ckpt_data["val_form_top1"] = v_metrics["form_top1"]
+                ckpt_data["val_content_top1"] = v_metrics["content_top1"]
+            torch.save(ckpt_data, ckpt)
+            if is_dual:
+                logger.info(
+                    f"  New best → combined={val_acc:.3f} "
+                    f"content_top1={best_content_top1:.3f} → {ckpt}"
+                )
+            else:
+                logger.info(f"  New best val_acc={val_acc:.3f} → {ckpt}")
         else:
             patience_counter += 1
             if patience_counter >= args.patience:

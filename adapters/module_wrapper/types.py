@@ -582,6 +582,14 @@ MINILM_DIM: int = 384
 RELATIONSHIPS_DIM: int = 384
 """Dimension for relationship embeddings."""
 
+CONTENT_DIM: int = 384
+"""Dimension for content embeddings (MiniLM, same model as relationships)."""
+
+EXPECTED_VECTOR_NAMES: frozenset = frozenset(
+    {"components", "inputs", "relationships", "content"}
+)
+"""Expected named vectors in the Qdrant collection schema (v2, 4-vector)."""
+
 # Default relationship extraction depth (used by core.py and relationships_mixin.py)
 DEFAULT_RELATIONSHIP_DEPTH: int = 5
 """Default depth for relationship extraction."""

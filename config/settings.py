@@ -347,6 +347,23 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "RECURSIVE_ALPHA_INIT"},
     )
 
+    # Dual-Head Scorer Configuration
+    dual_head_form_weight: float = Field(
+        default=0.6,
+        description="Form vs content weight for dual-head scorer (1.0 = pure form, 0.0 = pure content)",
+        json_schema_extra={"env": "DUAL_HEAD_FORM_WEIGHT"},
+    )
+    recursive_alpha_decay: float = Field(
+        default=0.1,
+        description="Per-cycle alpha decay for recursive dual-head search (shifts from form to content)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_DECAY"},
+    )
+    recursive_content_pool_size: int = Field(
+        default=10,
+        description="Candidate pool size for content RecommendQuery in recursive search",
+        json_schema_extra={"env": "RECURSIVE_CONTENT_POOL_SIZE"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,

@@ -41,17 +41,19 @@ class MWPoint:
     comp_vectors: np.ndarray | None  # ColBERT multi-vector [N, 128]
     inp_vectors: np.ndarray | None  # ColBERT multi-vector [M, 128]
     rel_vector: np.ndarray | None  # MiniLM dense [384]
+    content_vector: np.ndarray | None = None  # MiniLM dense [384] (content embedding, V5+)
 
     # Feedback (instance patterns only)
-    content_feedback: str | None  # "positive", "negative", None
-    form_feedback: str | None
+    content_feedback: str | None = None  # "positive", "negative", None
+    form_feedback: str | None = None
 
     # Metadata
-    docstring: str
+    docstring: str = ""
     parent_paths: list[str] = field(default_factory=list)
     card_description: str = ""
     dsl_notation: str = ""
     instance_params: dict = field(default_factory=dict)
+    has_content_vector: bool = False  # True if content vector is non-zero
 
 
 @dataclass
@@ -60,11 +62,14 @@ class MWQueryGroup:
 
     Label: candidates with the same component type/path as the query
     (for class points) or positive feedback (for instance patterns).
+
+    content_labels: optional dual-label for content-form affinity (V5+).
     """
 
     query: MWPoint
     candidates: list[MWPoint]
-    labels: list[float]  # 1.0 = relevant, 0.0 = not
+    labels: list[float]  # 1.0 = relevant, 0.0 = not (form labels)
+    content_labels: list[float] = field(default_factory=list)
 
 
 def connect_qdrant(url: str | None = None, key: str | None = None):
@@ -106,20 +111,28 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
             payload = p.payload or {}
             vectors = p.vector or {}
 
-            # Extract ColBERT multi-vectors and MiniLM dense vector
+            # Extract ColBERT multi-vectors and MiniLM dense vectors
             comp_raw = vectors.get("components")
             inp_raw = vectors.get("inputs")
             rel_raw = vectors.get("relationships")
+            content_raw = vectors.get("content")
 
             comp_vec = np.array(comp_raw, dtype=np.float32) if comp_raw is not None else None
             inp_vec = np.array(inp_raw, dtype=np.float32) if inp_raw is not None else None
             rel_vec = np.array(rel_raw, dtype=np.float32) if rel_raw is not None else None
+            content_vec = np.array(content_raw, dtype=np.float32) if content_raw is not None else None
 
             # Ensure comp/inp are 2D (multi-vector)
             if comp_vec is not None and comp_vec.ndim == 1:
                 comp_vec = comp_vec.reshape(1, -1)
             if inp_vec is not None and inp_vec.ndim == 1:
                 inp_vec = inp_vec.reshape(1, -1)
+
+            # Detect non-zero content vector
+            has_content = (
+                payload.get("has_content_vector", False)
+                or (content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6)
+            )
 
             points.append(MWPoint(
                 point_id=str(p.id),
@@ -130,6 +143,7 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
                 comp_vectors=comp_vec,
                 inp_vectors=inp_vec,
                 rel_vector=rel_vec,
+                content_vector=content_vec,
                 content_feedback=payload.get("content_feedback"),
                 form_feedback=payload.get("form_feedback"),
                 docstring=payload.get("docstring", "")[:200],
@@ -137,6 +151,7 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
                 card_description=payload.get("card_description", ""),
                 dsl_notation=payload.get("relationship_text", payload.get("dsl_notation", "")),
                 instance_params=payload.get("instance_params", {}),
+                has_content_vector=has_content,
             ))
 
         if next_offset is None or len(points) >= limit:
@@ -149,13 +164,16 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
     types = {}
     for p in points:
         types[p.point_type] = types.get(p.point_type, 0) + 1
+    n_with_content = sum(1 for p in points if p.has_content_vector)
     for t, n in sorted(types.items()):
         feedback_info = ""
         if t == "instance_pattern":
             pos = sum(1 for p in points if p.point_type == t and p.content_feedback == "positive")
             neg = sum(1 for p in points if p.point_type == t and p.content_feedback == "negative")
-            feedback_info = f" (content: {pos}+ / {neg}-)"
+            t_content = sum(1 for p in points if p.point_type == t and p.has_content_vector)
+            feedback_info = f" (content: {pos}+ / {neg}-, content_vec: {t_content})"
         logger.info(f"  {t}: {n}{feedback_info}")
+    logger.info(f"  Points with content vector: {n_with_content}/{len(points)}")
 
     return points
 
