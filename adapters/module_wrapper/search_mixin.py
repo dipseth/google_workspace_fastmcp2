@@ -1595,9 +1595,6 @@ class SearchMixin:
                 FieldCondition(
                     key="type", match=MatchValue(value="instance_pattern")
                 ),
-                FieldCondition(
-                    key="has_content_vector", match=MatchValue(value=True)
-                ),
             ]
             prefetch_list.append(
                 Prefetch(
@@ -2037,6 +2034,7 @@ class SearchMixin:
         form_feedback: Optional[str] = None,
         include_classes: bool = True,
         candidate_pool_size: int = 20,
+        content_text: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Dispatch to search_hybrid, search_hybrid_multidim, or search_hybrid_learned.
@@ -2088,6 +2086,10 @@ class SearchMixin:
 
         # Run active mode
         active_mode = search_mode if search_mode in _search_methods else "rrf"
+
+        # content_text only supported by learned/recursive
+        if content_text and active_mode in ("learned", "recursive"):
+            _pool_kwargs["content_text"] = content_text
         logger.info("Using search mode: %s", active_mode)
         kwargs = _pool_kwargs if active_mode != "rrf" else _common_kwargs
         result = _search_methods[active_mode](**kwargs)
@@ -2648,10 +2650,6 @@ class SearchMixin:
                                         value="instance_pattern"
                                     ),
                                 ),
-                                models.FieldCondition(
-                                    key="has_content_vector",
-                                    match=models.MatchValue(value=True),
-                                ),
                             ]
                         ),
                         limit=pool,
@@ -3192,6 +3190,27 @@ class SearchMixin:
                 candidate_pool_size=candidate_pool_size,
             )
 
+    _has_content_vector: Optional[bool] = None  # Cached result
+
+    def _collection_has_content_vector(self) -> bool:
+        """Check if collection schema has the 'content' named vector.
+
+        Cached after first check to avoid repeated collection_info calls.
+        Prevents errors when running against old 3-vector collections.
+        """
+        if self.__class__._has_content_vector is not None:
+            return self.__class__._has_content_vector
+        try:
+            info = self.client.get_collection(self.collection_name)
+            vectors_config = info.config.params.vectors
+            if isinstance(vectors_config, dict) and "content" in vectors_config:
+                self.__class__._has_content_vector = True
+            else:
+                self.__class__._has_content_vector = False
+        except Exception:
+            self.__class__._has_content_vector = False
+        return self.__class__._has_content_vector
+
     def search_hybrid_recursive(
         self,
         description: str,
@@ -3221,12 +3240,16 @@ class SearchMixin:
         max_cycles = 3
         halt_margin = 0.5
         alpha_init = 0.7
+        alpha_decay = 0.1
+        content_pool_size = 10
         try:
             from config.settings import Settings
             _s = Settings()
             max_cycles = _s.recursive_max_cycles
             halt_margin = _s.recursive_halt_margin
             alpha_init = _s.recursive_alpha_init
+            alpha_decay = _s.recursive_alpha_decay
+            content_pool_size = _s.recursive_content_pool_size
         except Exception:
             pass
 
@@ -3243,6 +3266,8 @@ class SearchMixin:
             )
 
         model = self._load_learned_model()
+        # Must check AFTER _load_learned_model() which sets _learned_model_type
+        is_dual = self._learned_model_type == "dual_head"
         if model is None:
             return self.search_hybrid_learned(
                 description=description, component_paths=component_paths,
@@ -3276,6 +3301,7 @@ class SearchMixin:
             cycle_log = []
             best_scored = None
             prev_top1_name = None
+            prev_content_top1_name = None
             _next_cycle_points = None  # Set by recommend prefetch for next cycle
 
             for cycle in range(max_cycles):
@@ -3319,8 +3345,26 @@ class SearchMixin:
                     break
 
                 features_tensor = torch.tensor(features_list, dtype=torch.float32)
+
+                # --- 9.7a: Dual-score inference ---
                 with torch.no_grad():
-                    scores_tensor = model(features_tensor).squeeze(-1)
+                    if is_dual:
+                        form_t, content_t = model(features_tensor)
+                        form_scores_t = form_t.squeeze(-1)
+                        content_scores_t = content_t.squeeze(-1)
+                        # Adaptive alpha: form-dominant early, content grows
+                        cycle_alpha = max(0.3, alpha_init - (cycle * alpha_decay))
+                        scores_tensor = (
+                            cycle_alpha * form_scores_t
+                            + (1.0 - cycle_alpha) * content_scores_t
+                        )
+                        form_scores = form_scores_t.tolist()
+                        content_scores = content_scores_t.tolist()
+                    else:
+                        scores_tensor = model(features_tensor).squeeze(-1)
+                        form_scores = None
+                        content_scores = None
+                        cycle_alpha = None
                 scores = scores_tensor.tolist()
 
                 scored = sorted(
@@ -3328,19 +3372,39 @@ class SearchMixin:
                     key=lambda x: x[0], reverse=True,
                 )
 
-                # Track cycle metrics
+                # --- 9.7b: Dual-score tracking ---
                 top1_name = (scored[0][1][4].payload or {}).get("name", "?") if scored else "?"
                 top1_score = scored[0][0] if scored else 0.0
                 top2_score = scored[1][0] if len(scored) > 1 else 0.0
                 margin = top1_score - top2_score
                 elapsed = round((time.monotonic() - t0) * 1000)
 
-                cycle_log.append({
+                # Find top1 index in original order for per-head scores
+                top_idx = scores.index(top1_score) if top1_score in scores else 0
+
+                cycle_entry = {
                     "cycle": cycle, "top1": top1_name,
                     "top1_score": round(top1_score, 4),
                     "margin": round(margin, 4),
                     "n_candidates": len(scored), "latency_ms": elapsed,
-                })
+                }
+                if is_dual:
+                    cycle_entry["form_top1_score"] = round(form_scores[top_idx], 4)
+                    cycle_entry["content_top1_score"] = round(content_scores[top_idx], 4)
+                    cycle_entry["cycle_alpha"] = round(cycle_alpha, 2)
+
+                    # Track per-head top1 names (may differ from combined top1)
+                    form_top1_idx = form_scores.index(max(form_scores))
+                    content_top1_idx = content_scores.index(max(content_scores))
+                    form_top1_name = (points_data[form_top1_idx][4].payload or {}).get("name", "?")
+                    content_top1_name = (points_data[content_top1_idx][4].payload or {}).get("name", "?")
+                    cycle_entry["form_top1"] = form_top1_name
+                    cycle_entry["content_top1"] = content_top1_name
+                else:
+                    form_top1_name = top1_name
+                    content_top1_name = None
+
+                cycle_log.append(cycle_entry)
 
                 # Reformat scored to match _categorize_scored_results format:
                 # (score, sim_c, sim_r, sim_i, sim_content, point)
@@ -3349,16 +3413,35 @@ class SearchMixin:
                     for sc, (s_c, s_r, s_i, s_ct, pt) in scored
                 ]
 
-                # --- Halting checks ---
-                if margin > halt_margin:
-                    logger.info("Recursive search halted at cycle %d: margin %.4f > %.4f",
-                                cycle, margin, halt_margin)
-                    break
-                if top1_name == prev_top1_name and cycle > 0:
-                    logger.info("Recursive search converged at cycle %d: top1=%s unchanged",
-                                cycle, top1_name)
-                    break
+                # --- 9.7d: Dual halt conditions ---
+                if is_dual:
+                    form_converged = (
+                        margin > halt_margin
+                        or form_top1_name == prev_top1_name
+                    )
+                    content_converged = (
+                        content_top1_name == prev_content_top1_name
+                        if prev_content_top1_name is not None
+                        else False
+                    )
+                    if cycle > 0 and form_converged and content_converged:
+                        logger.info(
+                            "Recursive search converged at cycle %d: "
+                            "form_top1=%s, content_top1=%s (both stable)",
+                            cycle, form_top1_name, content_top1_name,
+                        )
+                        break
+                else:
+                    if margin > halt_margin:
+                        logger.info("Recursive search halted at cycle %d: margin %.4f > %.4f",
+                                    cycle, margin, halt_margin)
+                        break
+                    if top1_name == prev_top1_name and cycle > 0:
+                        logger.info("Recursive search converged at cycle %d: top1=%s unchanged",
+                                    cycle, top1_name)
+                        break
                 prev_top1_name = top1_name
+                prev_content_top1_name = content_top1_name if is_dual else None
 
                 # --- Refine for next cycle using Qdrant RecommendQuery ---
                 # Instead of manual numpy vector blending, use Qdrant's native
@@ -3372,6 +3455,7 @@ class SearchMixin:
                     try:
                         from qdrant_client.models import (
                             RecommendQuery, RecommendInput, RecommendStrategy,
+                            Filter, FieldCondition, MatchValue,
                         )
                         # Use RecommendQuery as a prefetch source for next cycle.
                         # Qdrant natively computes average vector from top-K point IDs
@@ -3387,13 +3471,36 @@ class SearchMixin:
                             using="components",
                             limit=candidate_pool_size,
                         )
+
+                        # 9.7c: Content-aware RecommendQuery
+                        # Parallel content recommend using content vector
+                        content_rec_prefetch = None
+                        if (
+                            is_dual
+                            and query_content_minilm
+                            and self._collection_has_content_vector()
+                        ):
+                            content_rec_prefetch = QdrantPrefetch(
+                                query=query_content_minilm,
+                                using="content",
+                                limit=content_pool_size,
+                                filter=Filter(must=[
+                                    FieldCondition(
+                                        key="type",
+                                        match=MatchValue(value="instance_pattern"),
+                                    ),
+                                ]),
+                            )
+
                         # Also keep the original query prefetches for stability
                         base_prefetch = self._build_prefetch_list(
                             query_colbert_orig, query_minilm_orig, candidate_pool_size,
                             include_classes, content_feedback, form_feedback,
                         )
-                        # Merge: recommend-based + original query-based via RRF
+                        # Merge: recommend-based + content-based + original via RRF
                         combined_prefetch = [rec_prefetch] + base_prefetch
+                        if content_rec_prefetch:
+                            combined_prefetch.insert(1, content_rec_prefetch)
 
                         rec_results = self.client.query_points(
                             collection_name=self.collection_name,
@@ -3404,8 +3511,10 @@ class SearchMixin:
                             with_vectors=True,
                         )
                         logger.info(
-                            "Recursive cycle %d: recommend prefetch with %d positive, %d negative → %d candidates",
-                            cycle + 1, len(top_ids), len(bottom_ids), len(rec_results.points),
+                            "Recursive cycle %d: recommend prefetch with %d positive, %d negative, "
+                            "content_recommend=%s → %d candidates",
+                            cycle + 1, len(top_ids), len(bottom_ids),
+                            bool(content_rec_prefetch), len(rec_results.points),
                         )
                         _next_cycle_points = rec_results.points
                     except Exception as e:
@@ -3414,7 +3523,7 @@ class SearchMixin:
                         # Fallback: manual vector blending (original approach)
                         alpha = alpha_init * (0.9 ** cycle)
                         top_comp_vecs = []
-                        for _, (_, _, _, pt) in scored[:top_k]:
+                        for _, (_, _, _, _, pt) in scored[:top_k]:
                             vecs = pt.vector or {}
                             cv = vecs.get("components") if isinstance(vecs, dict) else None
                             if cv and isinstance(cv[0], list):

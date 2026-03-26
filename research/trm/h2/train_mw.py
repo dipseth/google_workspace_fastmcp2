@@ -152,12 +152,17 @@ class MWListwiseDataset(Dataset):
         feature_dropout: float = 0.0,
         training: bool = False,
         dual_labels: bool = False,
+        structural_mask_prob: float = 0.0,
     ):
         self.max_k = max_k or max(len(g.labels) for g in groups)
         self.noise_std = noise_std
         self.feature_dropout = feature_dropout
         self.training = training
         self.dual_labels = dual_labels
+        self.structural_mask_prob = structural_mask_prob
+        # V5 structural feature indices: is_parent, is_child, is_sibling,
+        # depth_ratio, n_shared_ancestors
+        self._structural_indices = [9, 10, 11, 12, 13]
 
         # Precompute all features
         self.features = []
@@ -225,6 +230,16 @@ class MWListwiseDataset(Dataset):
                 feat_dim = feats.shape[1]
                 drop_idx = torch.randint(0, feat_dim, (1,)).item()
                 feats[:, drop_idx] = 0.0
+
+            # Structural feature masking: zero all hierarchy features
+            # to force content head to rely on content features (14-16)
+            # instead of using is_child as a shortcut
+            if (
+                self.structural_mask_prob > 0
+                and self.dual_labels
+                and torch.rand(1).item() < self.structural_mask_prob
+            ):
+                feats[:, self._structural_indices] = 0.0
 
             # Random candidate shuffle (preserves label alignment)
             valid_k = int(mask.sum().item())
@@ -297,11 +312,17 @@ class DualHeadScorerMW(nn.Module):
         hidden_dim: int = 48,
         head_dim: int = 24,
         dropout: float = 0.15,
+        separate_content_encoder: bool = False,
+        content_feature_indices: list[int] | None = None,
     ):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.head_dim = head_dim
+        self.separate_content_encoder = separate_content_encoder
+        # Default: V5 content features at indices 14, 15, 16
+        self.content_feature_indices = content_feature_indices or [14, 15, 16]
+        content_input_dim = len(self.content_feature_indices)
 
         # Shared backbone
         self.backbone = nn.Sequential(
@@ -320,12 +341,27 @@ class DualHeadScorerMW(nn.Module):
             nn.Linear(head_dim, 1),
         )
 
-        # Content head: content-form affinity scoring
-        self.content_head = nn.Sequential(
-            nn.Linear(hidden_dim, head_dim),
-            nn.SiLU(),
-            nn.Linear(head_dim, 1),
-        )
+        if separate_content_encoder:
+            # Separate content encoder: ONLY sees content features (3D)
+            # Architecturally prevents is_child shortcut
+            content_hidden = max(16, content_input_dim * 4)
+            self.content_encoder = nn.Sequential(
+                nn.Linear(content_input_dim, content_hidden),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                nn.Linear(content_hidden, content_hidden),
+                nn.SiLU(),
+            )
+            self.content_head = nn.Sequential(
+                nn.Linear(content_hidden, 1),
+            )
+        else:
+            # Content head shares backbone (original architecture)
+            self.content_head = nn.Sequential(
+                nn.Linear(hidden_dim, head_dim),
+                nn.SiLU(),
+                nn.Linear(head_dim, 1),
+            )
 
     def forward(
         self, features: torch.Tensor
@@ -333,7 +369,14 @@ class DualHeadScorerMW(nn.Module):
         """features: [B, input_dim] → (form_scores: [B, 1], content_scores: [B, 1])"""
         shared = self.backbone(features)
         form_scores = self.form_head(shared)
-        content_scores = self.content_head(shared)
+
+        if self.separate_content_encoder:
+            content_feats = features[:, self.content_feature_indices]
+            content_repr = self.content_encoder(content_feats)
+            content_scores = self.content_head(content_repr)
+        else:
+            content_scores = self.content_head(shared)
+
         return form_scores, content_scores
 
     def count_parameters(self):
@@ -550,6 +593,16 @@ def main():
                         help="Weight for content loss in dual-head training")
     parser.add_argument("--head-dim", type=int, default=24,
                         help="Hidden dim for each head in dual-head model")
+    parser.add_argument("--structural-mask-prob", type=float, default=0.0,
+                        help="Probability of zeroing structural features (indices 9-13) "
+                             "during training to break is_child shortcut for content head")
+    parser.add_argument("--separate-content-encoder", action="store_true",
+                        help="Use separate content encoder instead of shared backbone for content head")
+    parser.add_argument("--content-encoder-features", type=str, default="content-only",
+                        choices=["content-only", "no-structural"],
+                        help="Which features the separate content encoder sees: "
+                             "'content-only' = [14,15,16] (3D), "
+                             "'no-structural' = [0-8,14-16] (12D, excludes hierarchy)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -610,6 +663,7 @@ def main():
         feature_dropout=args.feature_dropout,
         training=True,
         dual_labels=is_dual,
+        structural_mask_prob=args.structural_mask_prob if is_dual else 0.0,
     )
     val_ds = MWListwiseDataset(val_groups, max_k, dual_labels=is_dual)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
@@ -618,11 +672,23 @@ def main():
     # --- Model ---
     device = get_device()
     if is_dual:
+        # Determine content encoder feature indices
+        content_indices = None
+        if args.separate_content_encoder:
+            if args.content_encoder_features == "no-structural":
+                # Similarity (0-8) + content (14-16), exclude structural (9-13)
+                content_indices = list(range(9)) + [14, 15, 16]
+            else:
+                # Content-only (14-16)
+                content_indices = [14, 15, 16]
+
         model = DualHeadScorerMW(
             input_dim=input_dim,
             hidden_dim=args.hidden_dim,
             head_dim=args.head_dim,
             dropout=args.dropout,
+            separate_content_encoder=args.separate_content_encoder,
+            content_feature_indices=content_indices,
         ).to(device)
     else:
         model = SimilarityScorerMW(
@@ -632,6 +698,16 @@ def main():
             dropout=args.dropout,
         ).to(device)
     logger.info(f"Device: {device}, Model params: {model.count_parameters():,}")
+    if is_dual and args.structural_mask_prob > 0:
+        logger.info(
+            f"Structural masking: p={args.structural_mask_prob} "
+            f"(zeroing features {train_ds._structural_indices} to break is_child shortcut)"
+        )
+    if is_dual and args.separate_content_encoder:
+        logger.info(
+            "Separate content encoder: content head only sees features "
+            f"{model.content_feature_indices} (no structural shortcut possible)"
+        )
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=1e-6)
@@ -751,6 +827,8 @@ def main():
                 ckpt_data["content_weight"] = args.content_weight
                 ckpt_data["val_form_top1"] = v_metrics["form_top1"]
                 ckpt_data["val_content_top1"] = v_metrics["content_top1"]
+                ckpt_data["structural_mask_prob"] = args.structural_mask_prob
+                ckpt_data["separate_content_encoder"] = args.separate_content_encoder
             torch.save(ckpt_data, ckpt)
             if is_dual:
                 logger.info(

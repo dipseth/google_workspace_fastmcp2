@@ -786,7 +786,7 @@ class SmartCardBuilderV2:
                     content_texts.append(content_entry)
                 logger.info(f"📝 Added {len(items)} items to content_texts")
 
-            # Build supply map for mismatch detection
+            # Build supply map for mismatch detection + content vector embedding
             supply_map = {
                 "buttons": buttons or [],
                 "content_texts": content_texts,
@@ -794,6 +794,8 @@ class SmartCardBuilderV2:
                 "carousel_cards": cards or [],
                 "grid_items": grid_items or items or [],
             }
+            # Expose to build() for content vector storage
+            self._supply_map = dict(supply_map)
 
             # Detect DSL-to-param mismatches (corrections applied via placeholder skip logic)
             demands = {}
@@ -1650,7 +1652,7 @@ class SmartCardBuilderV2:
         """
         card_id = str(uuid.uuid4())[:8]
         card = None
-        supply_map = None
+        self._supply_map = None
         # Reset Jinja tracking for this build
         self._jinja_applied = False
         # Track the Jinja-rendered description (if different from raw)
@@ -1869,7 +1871,7 @@ class SmartCardBuilderV2:
             card=dict(card) if card else {},  # Copy to avoid mutation issues
             description_rendered=self._description_rendered,
             jinja_applied=self._jinja_applied,
-            supply_map=dict(supply_map) if supply_map else None,
+            supply_map=dict(self._supply_map) if self._supply_map else None,
         )
 
         # Add feedback section AFTER storing content pattern

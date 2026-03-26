@@ -948,6 +948,91 @@ def extract_class_points(client, collection: str, limit: int = 500):
     return points
 
 
+def enrich_class_points_with_content(
+    class_points: List[dict],
+    seed: int = 42,
+) -> int:
+    """Add synthetic content vectors to class points that lack them.
+
+    Without this, sim_content = cosine(query_content, [0,...,0]) = 0.0
+    for ALL class candidates, making content features useless for ranking.
+
+    For each class point, we generate a representative content embedding
+    by averaging embeddings of its CONTENT_TEXT_TEMPLATES. This gives
+    ButtonList a content vector near "Deploy, Restart, Submit" and
+    DecoratedText a vector near "Status, Version, Last Updated".
+
+    Args:
+        class_points: List of class point dicts (modified in-place)
+        seed: Random seed for template selection
+
+    Returns:
+        Number of class points enriched
+    """
+    rng = random.Random(seed)
+
+    # Find class points that need content vectors
+    needs_content = [
+        p for p in class_points
+        if not p.get("has_content_vector")
+    ]
+
+    if not needs_content:
+        logger.info("All class points already have content vectors")
+        return 0
+
+    # Build content text for each class by sampling templates
+    texts_to_embed = []
+    point_indices = []
+
+    for i, p in enumerate(needs_content):
+        name = p["name"]
+        templates = CONTENT_TEXT_TEMPLATES.get(name, [])
+        if not templates:
+            # Try affinity patterns as fallback
+            affinity = CONTENT_AFFINITY.get(name, {})
+            patterns = affinity.get("patterns", [])
+            if patterns:
+                # Use patterns directly as pseudo-content
+                templates = [", ".join(rng.sample(patterns, min(5, len(patterns))))]
+
+        if templates:
+            # Average multiple templates for a robust representative vector
+            n_samples = min(3, len(templates))
+            sampled = rng.sample(templates, n_samples)
+            content_text = " | ".join(sampled)
+            texts_to_embed.append(content_text)
+            point_indices.append(i)
+
+    if not texts_to_embed:
+        logger.info("No templates available for class point enrichment")
+        return 0
+
+    # Embed all at once
+    try:
+        from config.embedding_service import EmbeddingService
+        service = EmbeddingService()
+        embeddings = service.embed_dense_sync(texts_to_embed)
+    except Exception as e:
+        logger.warning(f"Failed to embed class content: {e}")
+        return 0
+
+    # Assign to class points
+    enriched = 0
+    for idx, emb in zip(point_indices, embeddings):
+        if emb is not None:
+            content_vec = np.array(emb, dtype=np.float32).flatten()
+            needs_content[idx]["content_vector"] = content_vec
+            needs_content[idx]["has_content_vector"] = True
+            enriched += 1
+
+    logger.info(
+        f"Enriched {enriched}/{len(needs_content)} class points "
+        f"with synthetic content vectors"
+    )
+    return enriched
+
+
 def build_synthetic_groups(
     patterns: List[SyntheticPattern],
     class_points: List[dict],
@@ -1086,6 +1171,221 @@ def build_synthetic_groups(
         logger.info(f"  Positive rate: mean={np.mean(pos_rates):.3f}, median={np.median(pos_rates):.3f}")
 
     return groups
+
+
+def generate_hard_negatives(
+    groups: List[dict],
+    class_points: List[dict],
+    patterns: List[SyntheticPattern],
+    fraction: float = 0.5,
+    seed: int = 42,
+) -> List[dict]:
+    """Generate content-swapped hard negatives to break structural shortcuts.
+
+    Problem: the content head learns is_child/depth_ratio as shortcuts because
+    in normal training data, structural position correlates perfectly with
+    content type (ButtonList is always at child depth with action content).
+
+    Fix: For a fraction of groups, swap the query's content_text to a
+    MISMATCHED content type while keeping the same structure. This holds
+    structural features constant while varying content features, forcing
+    the content head to actually use sim_content/content_align.
+
+    Example:
+      Original: ButtonList query + "Deploy, Restart, View Logs" (action content)
+      Swapped:  ButtonList query + "Status: Online, CPU: 45%" (display content)
+      → Same is_child, depth_ratio. Different sim_content, content_label.
+
+    Args:
+        groups: Existing V5 training groups
+        class_points: Class point dicts (for feature recomputation)
+        patterns: Original SyntheticPattern objects (for embedding lookup)
+        fraction: Fraction of groups to generate swapped versions for
+        seed: Random seed
+
+    Returns:
+        List of new hard-negative groups (to be appended to existing groups)
+    """
+    rng = random.Random(seed)
+
+    # Build content type pools from CONTENT_TEXT_TEMPLATES
+    type_to_templates: Dict[str, List[str]] = {}
+    for comp_name, affinity in CONTENT_AFFINITY.items():
+        ctype = affinity.get("type", "")
+        if ctype and ctype not in ("structural",):
+            templates = CONTENT_TEXT_TEMPLATES.get(comp_name, [])
+            if templates:
+                if ctype not in type_to_templates:
+                    type_to_templates[ctype] = []
+                type_to_templates[ctype].extend(templates)
+
+    # Deduplicate
+    for k in type_to_templates:
+        type_to_templates[k] = list(set(type_to_templates[k]))
+
+    all_types = list(type_to_templates.keys())
+    if len(all_types) < 2:
+        logger.warning("Not enough content types for hard negatives")
+        return []
+
+    # Map component names to their affinity type
+    comp_to_type = {
+        name: info["type"]
+        for name, info in CONTENT_AFFINITY.items()
+        if info.get("type") and info["type"] not in ("structural",)
+    }
+
+    # Need embedder for swapped content
+    try:
+        from config.embedding_service import EmbeddingService
+        service = EmbeddingService()
+    except Exception as e:
+        logger.warning(f"Cannot create EmbeddingService for hard negatives: {e}")
+        return []
+
+    # Build pattern lookup by ID
+    pattern_by_id = {p.pattern_id: p for p in patterns}
+
+    # Select groups to create swapped versions
+    v5_groups = [g for g in groups if "content_text" in g and g.get("content_text")]
+    n_swap = int(len(v5_groups) * fraction)
+    swap_groups = rng.sample(v5_groups, min(n_swap, len(v5_groups)))
+
+    logger.info(
+        f"Generating {len(swap_groups)} content-swapped hard negative groups "
+        f"from {len(v5_groups)} V5 groups ({len(all_types)} content types)"
+    )
+
+    hard_neg_groups = []
+    for group in swap_groups:
+        query_id = group["query_id"]
+        query_components = group.get("query_components", [])
+        original_content = group.get("content_text", "")
+
+        # Determine original content type from primary component
+        original_type = None
+        for comp in query_components:
+            if comp in comp_to_type:
+                original_type = comp_to_type[comp]
+                break
+
+        if not original_type:
+            continue
+
+        # Pick a DIFFERENT content type
+        other_types = [t for t in all_types if t != original_type]
+        if not other_types:
+            continue
+        swap_type = rng.choice(other_types)
+        swap_templates = type_to_templates[swap_type]
+        swap_content = rng.choice(swap_templates)
+
+        # Embed the swapped content
+        try:
+            swap_vecs = service.embed_dense_sync([swap_content])
+            swap_content_vec = (
+                np.array(swap_vecs, dtype=np.float32).flatten()
+                if swap_vecs else None
+            )
+        except Exception:
+            continue
+
+        if swap_content_vec is None:
+            continue
+
+        # Get original query pattern for structural features
+        orig_pattern = pattern_by_id.get(query_id)
+        if not orig_pattern:
+            continue
+
+        # Create swapped query pattern (same structure, different content)
+        swapped = SyntheticPattern(
+            pattern_id=f"{query_id}_swap_{swap_type}",
+            component_paths=orig_pattern.component_paths,
+            description=orig_pattern.description,
+            dsl=orig_pattern.dsl,
+            comp_vectors=orig_pattern.comp_vectors,
+            inp_vectors=orig_pattern.inp_vectors,
+            rel_vector=orig_pattern.rel_vector,
+            content_text=swap_content,
+            content_vector=swap_content_vec,
+        )
+
+        # Rebuild candidates with recomputed content features
+        candidates_data = []
+        for cand_data in group["candidates"]:
+            cand_name = cand_data["name"]
+
+            # Find matching class point
+            cp = None
+            for c in class_points:
+                if c["name"] == cand_name:
+                    cp = c
+                    break
+            if not cp:
+                continue
+
+            # Recompute V5 features with swapped content
+            feats = compute_features_v5(
+                swapped,
+                cp["comp_vectors"], cp["inp_vectors"],
+                cp["rel_vector"], cand_name,
+                query_content_vector=swap_content_vec,
+                cand_content_vector=cp.get("content_vector"),
+                cand_has_content=cp.get("has_content_vector", False),
+                cand_n_content_fields=0,
+                cand_total_content_fields=5,
+            )
+
+            new_cand = {
+                "name": cand_name,
+                "full_path": cand_data.get("full_path", ""),
+                "form_label": cand_data.get("form_label", 0.0),  # Same form label
+                "content_label": compute_content_label(
+                    swap_content, cand_name
+                ),  # DIFFERENT content label
+            }
+            for fname, fval in zip(FEATURE_NAMES_V5, feats):
+                new_cand[fname] = round(float(fval), 4)
+
+            candidates_data.append(new_cand)
+
+        if len(candidates_data) >= 2:
+            n_content_pos = sum(
+                1 for c in candidates_data if c.get("content_label", 0.0) == 1.0
+            )
+            hard_neg_groups.append({
+                "query_id": swapped.pattern_id,
+                "query_description": swapped.description,
+                "query_dsl": swapped.dsl,
+                "query_components": swapped.component_paths,
+                "content_text": swap_content,
+                "n_candidates": len(candidates_data),
+                "n_positive": sum(
+                    1 for c in candidates_data
+                    if c.get("form_label", 0.0) == 1.0
+                ),
+                "n_content_positive": n_content_pos,
+                "candidates": candidates_data,
+                "hard_negative": True,
+                "original_content_type": original_type,
+                "swapped_content_type": swap_type,
+            })
+
+    logger.info(
+        f"Generated {len(hard_neg_groups)} hard negative groups"
+    )
+    if hard_neg_groups:
+        # Log swap statistics
+        from collections import Counter
+        swaps = Counter(
+            f"{g['original_content_type']}->{g['swapped_content_type']}"
+            for g in hard_neg_groups
+        )
+        for swap_pair, count in swaps.most_common(10):
+            logger.info(f"  {swap_pair}: {count}")
+
+    return hard_neg_groups
 
 
 # ---------------------------------------------------------------------------
@@ -1770,6 +2070,10 @@ def main():
                         help="Extract real instance patterns from Qdrant (v7/v8)")
     parser.add_argument("--instance-pattern-collection", default=None,
                         help="Collection for instance patterns (default: mcp_gchat_cards_v7 for card)")
+    parser.add_argument("--skip-hard-negatives", action="store_true",
+                        help="Skip content-swapped hard negative generation")
+    parser.add_argument("--hard-negative-fraction", type=float, default=0.5,
+                        help="Fraction of groups to generate hard negatives for (default: 0.5)")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -1830,8 +2134,15 @@ def main():
         logger.error("No class points found in Qdrant")
         return
 
-    # Step 5: Build query groups with ground-truth labels
+    # Step 4b: Enrich class points with synthetic content vectors
     fv = args.feature_version
+    if fv >= 5:
+        logger.info(
+            "\n=== Step 4b: Enriching class points with synthetic content vectors ==="
+        )
+        enrich_class_points_with_content(class_points, seed=args.seed)
+
+    # Step 5: Build query groups with ground-truth labels
     logger.info(f"\n=== Step 5: Building query groups (domain={args.domain}, feature_version={fv}) ===")
     groups = build_synthetic_groups(patterns, class_points, args.top_k, args.n_random, feature_version=fv)
 
@@ -1867,6 +2178,25 @@ def main():
             )
             groups.extend(ip_groups)
 
+    # Step 5d: Generate content-swapped hard negatives (V5 only)
+    if fv >= 5 and not args.skip_hard_negatives:
+        logger.info(
+            f"\n=== Step 5d: Generating content-swapped hard negatives ==="
+        )
+        hard_neg_groups = generate_hard_negatives(
+            groups=groups,
+            class_points=class_points,
+            patterns=patterns,
+            fraction=args.hard_negative_fraction,
+            seed=args.seed,
+        )
+        if hard_neg_groups:
+            logger.info(
+                f"Adding {len(hard_neg_groups)} hard negative groups "
+                f"to {len(groups)} existing groups"
+            )
+            groups.extend(hard_neg_groups)
+
     if not groups:
         logger.error("No groups built")
         return
@@ -1897,6 +2227,9 @@ def main():
         logger.info(f"Content positives:    {total_content_pos}")
         logger.info(f"Content pos rate:     {total_content_pos/total_candidates:.1%}")
         logger.info(f"Queries with content: {n_with_content}/{len(groups)}")
+        n_hard = sum(1 for g in groups if g.get("hard_negative"))
+        if n_hard:
+            logger.info(f"Hard negatives:       {n_hard} ({n_hard/len(groups):.0%})")
     logger.info(f"Output:               {output_path}")
 
 
