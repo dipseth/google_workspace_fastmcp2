@@ -825,26 +825,80 @@ def compute_content_label(
 ) -> float:
     """Compute content affinity label for a candidate component.
 
-    Returns 1.0 if the query's content text contains patterns that match
-    the candidate component's content affinity profile (at least min_matches).
+    Uses pool-aware matching: traces each content item back to its source
+    component template, maps to a pool, and labels the candidate positive
+    only if the candidate's pool matches a content pool.
+
+    Falls back to keyword matching (CONTENT_AFFINITY) for content items
+    that don't match any template.
 
     Args:
-        content_text: The query's content text (generated or real).
+        content_text: The query's content text (comma-separated items).
         candidate_name: Component name (e.g., "ButtonList").
-        min_matches: Minimum number of affinity patterns that must match.
+        min_matches: Minimum number of pool matches required.
     """
+    from .slot_assigner import COMPONENT_TO_POOL
+
     if not content_text:
         return 0.0
 
-    affinity = CONTENT_AFFINITY.get(candidate_name)
-    if not affinity or not affinity["patterns"]:
+    # Determine the candidate's pool
+    cand_pool = COMPONENT_TO_POOL.get(candidate_name)
+    if not cand_pool:
         return 0.0
 
-    content_lower = content_text.lower()
-    patterns = affinity["patterns"]
-    matches = sum(1 for p in patterns if p in content_lower)
+    # Split content text into individual items
+    items = [item.strip() for item in content_text.split(",") if item.strip()]
+    if not items:
+        return 0.0
 
-    return 1.0 if matches >= min_matches else 0.0
+    # For each content item, determine which pool it belongs to
+    # by checking which CONTENT_TEXT_TEMPLATES component it came from
+    pool_matches = 0
+    for item in items:
+        item_pool = _content_item_to_pool(item)
+        if item_pool and item_pool == cand_pool:
+            pool_matches += 1
+
+    if pool_matches >= min_matches:
+        return 1.0
+
+    # Fallback: keyword matching for items that didn't match templates
+    # (but with stricter threshold — need 2+ keyword matches)
+    affinity = CONTENT_AFFINITY.get(candidate_name)
+    if affinity and affinity["patterns"] and affinity.get("type") != "structural":
+        content_lower = content_text.lower()
+        patterns = affinity["patterns"]
+        keyword_matches = sum(1 for p in patterns if p in content_lower)
+        if keyword_matches >= max(min_matches, 2):
+            return 1.0
+
+    return 0.0
+
+
+# Build reverse lookup: content item → pool (cached at module level)
+_ITEM_TO_POOL_CACHE: Optional[Dict[str, str]] = None
+
+
+def _content_item_to_pool(item: str) -> Optional[str]:
+    """Map a content item back to its pool by checking CONTENT_TEXT_TEMPLATES."""
+    from .slot_assigner import COMPONENT_TO_POOL
+
+    global _ITEM_TO_POOL_CACHE
+    if _ITEM_TO_POOL_CACHE is None:
+        _ITEM_TO_POOL_CACHE = {}
+        for comp_name, templates in CONTENT_TEXT_TEMPLATES.items():
+            pool = COMPONENT_TO_POOL.get(comp_name)
+            if not pool:
+                continue
+            for template in templates:
+                # Index both full templates and individual items
+                _ITEM_TO_POOL_CACHE[template.strip().lower()] = pool
+                for sub_item in template.split(","):
+                    sub_item = sub_item.strip().lower()
+                    if sub_item:
+                        _ITEM_TO_POOL_CACHE[sub_item] = pool
+    return _ITEM_TO_POOL_CACHE.get(item.strip().lower())
 
 
 def compute_features_v5(

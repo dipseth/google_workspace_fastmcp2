@@ -809,6 +809,20 @@ class SmartCardBuilderV2:
                 for warning in mismatch_result.get("warnings", []):
                     logger.info(f"🔧 {warning}")
 
+            # Phase 8: Neural content-to-slot reassignment
+            try:
+                from gchat.card_builder.slot_assignment import reassign_supply_map
+                reassigned = reassign_supply_map(supply_map, demands, wrapper)
+                if reassigned is not supply_map:
+                    supply_map = reassigned
+                    buttons = supply_map.get("buttons", [])
+                    chips = supply_map.get("chips", [])
+                    cards = supply_map.get("carousel_cards", [])
+                    grid_items = supply_map.get("grid_items", [])
+                    content_texts = supply_map.get("content_texts", [])
+            except Exception as e:
+                logger.debug(f"Slot reassignment skipped: {e}")
+
             # Create shared context for unified resource consumption
             context = {
                 "buttons": buttons or [],
@@ -1537,8 +1551,13 @@ class SmartCardBuilderV2:
         cards = card_params.get("cards") or card_params.get("carousel_cards")
         sections = card_params.get("sections")
 
-        # Map decorated_texts → items for DecoratedText widget consumption
-        # decorated_texts is a common param shape: [{top_label, text, bottom_label}, ...]
+        # Map content_texts / decorated_texts → items for DecoratedText widget consumption
+        # These are common param shapes: [{top_label, text, bottom_label}, ...]
+        content_texts_param = card_params.get("content_texts")
+        if content_texts_param and not items:
+            items = content_texts_param
+            logger.info(f"📝 Mapped {len(content_texts_param)} content_texts → items")
+
         decorated_texts = card_params.get("decorated_texts")
         if decorated_texts and not items:
             items = decorated_texts

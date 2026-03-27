@@ -1354,3 +1354,532 @@ async def content_accuracy_detail():
         "n_groups": len(groups_out),
         "n_groups_with_content": len(content_ranks),
     }
+
+
+# ---------------------------------------------------------------------------
+# Slot Assigner Diagnostics
+# ---------------------------------------------------------------------------
+
+_slot_model = None
+_slot_training_data = None
+
+_SLOT_CHECKPOINT_PATH = _H2_DIR / "checkpoints" / "best_model_slot.pt"
+_SLOT_TRAINING_DATA_PATH = _H2_DIR / "slot_training_data.json"
+
+
+def _load_slot_model():
+    """Load the SlotAffinityNet checkpoint."""
+    global _slot_model
+    if _slot_model is not None:
+        return _slot_model
+
+    torch = _load_torch()
+    import torch.nn as nn
+
+    if not _SLOT_CHECKPOINT_PATH.exists():
+        return None
+
+    ckpt = torch.load(str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True)
+    content_dim = ckpt.get("content_dim", 384)
+    hidden_dim = ckpt.get("hidden_dim", 64)
+    n_slot_types = ckpt.get("n_slot_types", 5)
+
+    # Direct classifier architecture
+    model = nn.Sequential(
+        nn.Linear(content_dim, hidden_dim),
+        nn.SiLU(),
+        nn.Dropout(0.2),
+        nn.Linear(hidden_dim, n_slot_types),
+    )
+
+    # Remap state dict keys from "classifier.N.weight" → "N.weight"
+    raw_sd = ckpt["model_state_dict"]
+    sd = {}
+    for k, v in raw_sd.items():
+        sd[k.removeprefix("classifier.")] = v
+    model.load_state_dict(sd)
+    model.eval()
+    _slot_model = model
+    return model
+
+
+def _load_slot_training_data():
+    """Load slot training data pairs."""
+    global _slot_training_data
+    if _slot_training_data is not None:
+        return _slot_training_data
+
+    if not _SLOT_TRAINING_DATA_PATH.exists():
+        return None
+
+    with open(_SLOT_TRAINING_DATA_PATH) as f:
+        _slot_training_data = json.load(f)
+    return _slot_training_data
+
+
+@router.get("/ml/slot-assigner-info")
+async def slot_assigner_info():
+    """Slot assigner model metadata + per-pool accuracy on training data."""
+    torch = _load_torch()
+
+    if not _SLOT_CHECKPOINT_PATH.exists():
+        return {"error": "No slot assigner checkpoint found"}
+
+    ckpt = torch.load(str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True)
+
+    # Load training data for evaluation
+    pairs = _load_slot_training_data()
+    pool_names = ckpt.get("slot_type_vocab", {})
+    pool_names_inv = {v: k for k, v in pool_names.items()}
+
+    result = {
+        "model_type": ckpt.get("model_type", "slot_assigner"),
+        "content_dim": ckpt.get("content_dim", 384),
+        "hidden_dim": ckpt.get("hidden_dim", 64),
+        "n_pools": ckpt.get("n_slot_types", 5),
+        "pool_vocab": pool_names,
+        "epoch": ckpt.get("epoch", 0),
+        "val_accuracy": ckpt.get("val_accuracy", 0.0),
+        "val_per_pool": ckpt.get("val_per_type", {}),
+        "train_loss": ckpt.get("train_loss", 0.0),
+        "train_acc": ckpt.get("train_acc", 0.0),
+        "n_params": sum(p.numel() for p in torch.load(
+            str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True
+        )["model_state_dict"].values()),
+    }
+
+    # Data stats
+    if pairs:
+        pos_count = sum(1 for p in pairs if p.get("label", 0) > 0.5)
+        neg_count = len(pairs) - pos_count
+        by_pool = {}
+        for p in pairs:
+            t = p.get("slot_type", "unknown")
+            by_pool[t] = by_pool.get(t, 0) + 1
+        result["data_stats"] = {
+            "total_pairs": len(pairs),
+            "positive": pos_count,
+            "negative": neg_count,
+            "by_pool": by_pool,
+        }
+
+    return result
+
+
+@router.get("/ml/slot-assigner-confusion")
+async def slot_assigner_confusion():
+    """Confusion matrix for the slot assigner on training data (positive pairs only)."""
+    torch = _load_torch()
+
+    model = _load_slot_model()
+    if model is None:
+        return {"error": "No slot assigner model loaded"}
+
+    pairs = _load_slot_training_data()
+    if not pairs:
+        return {"error": "No slot training data found"}
+
+    ckpt = torch.load(str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True)
+    pool_vocab = ckpt.get("slot_type_vocab", {})
+    pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
+    n_pools = len(pool_names)
+
+    # Filter to positive pairs and deduplicate by content_text
+    seen = set()
+    unique_positive = []
+    for p in pairs:
+        if p.get("label", 0) > 0.5 and p["content_text"] not in seen:
+            seen.add(p["content_text"])
+            unique_positive.append(p)
+
+    if not unique_positive:
+        return {"error": "No positive pairs in training data"}
+
+    # Build tensors
+    embeddings = torch.tensor(
+        [p["content_embedding"] for p in unique_positive], dtype=torch.float32
+    )
+    targets = torch.tensor(
+        [p["slot_type_id"] for p in unique_positive], dtype=torch.long
+    )
+
+    # Predict
+    with torch.no_grad():
+        logits = model(embeddings)
+        preds = logits.argmax(dim=-1)
+
+    # Build confusion matrix
+    matrix = [[0] * n_pools for _ in range(n_pools)]
+    for pred, target in zip(preds.numpy(), targets.numpy()):
+        matrix[int(pred)][int(target)] += 1
+
+    # Per-pool accuracy
+    per_pool = {}
+    for i, name in enumerate(pool_names):
+        col_total = sum(matrix[j][i] for j in range(n_pools))
+        correct = matrix[i][i]
+        per_pool[name] = round(correct / max(col_total, 1), 4)
+
+    accuracy = sum(matrix[i][i] for i in range(n_pools)) / max(len(unique_positive), 1)
+
+    # Misclassified examples
+    misclassified = []
+    for p, pred_id in zip(unique_positive, preds.numpy()):
+        target_id = p["slot_type_id"]
+        if int(pred_id) != target_id:
+            misclassified.append({
+                "content_text": p["content_text"],
+                "expected": pool_names[target_id] if target_id < n_pools else f"id_{target_id}",
+                "predicted": pool_names[int(pred_id)] if int(pred_id) < n_pools else f"id_{pred_id}",
+                "source": p.get("source", "unknown"),
+            })
+
+    return {
+        "labels": pool_names,
+        "matrix": matrix,
+        "accuracy": round(accuracy, 4),
+        "per_pool": per_pool,
+        "n_items": len(unique_positive),
+        "misclassified": misclassified[:30],  # Cap for UI
+    }
+
+
+class SlotRoutingRequest(BaseModel):
+    content_items: list[str]
+    demands: dict[str, int] = {}
+
+
+@router.post("/ml/slot-routing-test")
+async def slot_routing_test(req: SlotRoutingRequest):
+    """Test slot routing on arbitrary content items. Shows predicted pool + scores."""
+    torch = _load_torch()
+
+    model = _load_slot_model()
+    if model is None:
+        return {"error": "No slot assigner model loaded"}
+
+    ckpt = torch.load(str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True)
+    pool_vocab = ckpt.get("slot_type_vocab", {})
+    pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
+
+    # Embed content items
+    try:
+        from fastembed import TextEmbedding
+        embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+        embeddings = list(embedder.embed(req.content_items))
+        emb_tensor = torch.tensor(np.array(embeddings), dtype=torch.float32)
+    except Exception as e:
+        return {"error": f"Embedding failed: {e}"}
+
+    # Score all pools
+    with torch.no_grad():
+        logits = model(emb_tensor)  # [N, n_pools]
+        probs = torch.softmax(logits, dim=-1)
+
+    items_out = []
+    for i, text in enumerate(req.content_items):
+        scores = {}
+        for j, name in enumerate(pool_names):
+            scores[name] = round(probs[i, j].item(), 4)
+        pred_id = logits[i].argmax().item()
+        items_out.append({
+            "content_text": text,
+            "predicted_pool": pool_names[pred_id] if pred_id < len(pool_names) else f"id_{pred_id}",
+            "confidence": round(probs[i, pred_id].item(), 4),
+            "pool_scores": scores,
+        })
+
+    return {
+        "items": items_out,
+        "pool_names": pool_names,
+    }
+
+
+# ---------------------------------------------------------------------------
+# UnifiedTRN Diagnostics
+# ---------------------------------------------------------------------------
+
+_unified_model = None
+_UNIFIED_CHECKPOINT_PATH = _H2_DIR / "checkpoints" / "best_model_unified.pt"
+_UNIFIED_DATA_PATH = _H2_DIR / "unified_training_data.json"
+
+
+def _load_unified_model():
+    """Load the UnifiedTRN checkpoint."""
+    global _unified_model
+    if _unified_model is not None:
+        return _unified_model
+
+    torch = _load_torch()
+    import torch.nn as nn
+
+    if not _UNIFIED_CHECKPOINT_PATH.exists():
+        return None
+
+    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+    structural_dim = ckpt.get("structural_dim", 17)
+    content_dim = ckpt.get("content_dim", 384)
+    hidden = ckpt.get("hidden", 64)
+    n_pools = ckpt.get("n_pools", 5)
+    dropout = ckpt.get("dropout", 0.15)
+    enc_dim = 32
+    head_dim = hidden // 2
+
+    class _UnifiedTRN(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.structural_enc = nn.Sequential(nn.Linear(structural_dim, enc_dim), nn.SiLU())
+            self.content_enc = nn.Sequential(nn.Linear(content_dim, enc_dim), nn.SiLU())
+            self.backbone = nn.Sequential(
+                nn.Linear(enc_dim * 2, hidden), nn.SiLU(), nn.Dropout(dropout),
+                nn.Linear(hidden, hidden), nn.SiLU(), nn.Dropout(dropout))
+            self.form_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1))
+            self.content_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1))
+            self.pool_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, n_pools))
+            self.halt_head = nn.Sequential(nn.Linear(hidden, 16), nn.SiLU(), nn.Linear(16, 1), nn.LayerNorm(1), nn.Sigmoid())
+
+        def forward(self, structural, content_emb, mode="search"):
+            s = self.structural_enc(structural)
+            c = self.content_enc(content_emb)
+            shared = self.backbone(torch.cat([s, c], dim=-1))
+            if mode == "build":
+                return {"pool_logits": self.pool_head(shared)}
+            result = {
+                "form_score": self.form_head(shared),
+                "content_score": self.content_head(shared),
+                "halt_prob": self.halt_head(shared),
+            }
+            if mode == "all":
+                result["pool_logits"] = self.pool_head(shared)
+            return result
+
+    model = _UnifiedTRN()
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+    _unified_model = model
+    return model
+
+
+@router.get("/ml/unified-model-info")
+async def unified_model_info():
+    """UnifiedTRN model metadata, per-component param counts, per-task metrics."""
+    torch = _load_torch()
+
+    if not _UNIFIED_CHECKPOINT_PATH.exists():
+        return {"error": "No unified checkpoint found"}
+
+    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+
+    # Count params per component
+    sd = ckpt["model_state_dict"]
+    component_params = {}
+    for key, tensor in sd.items():
+        component = key.split(".")[0]  # e.g., "structural_enc", "backbone", "form_head"
+        component_params[component] = component_params.get(component, 0) + tensor.numel()
+
+    total_params = sum(component_params.values())
+
+    return {
+        "model_type": ckpt.get("model_type", "unified_trn"),
+        "structural_dim": ckpt.get("structural_dim", 17),
+        "content_dim": ckpt.get("content_dim", 384),
+        "hidden": ckpt.get("hidden", 64),
+        "n_pools": ckpt.get("n_pools", 5),
+        "dropout": ckpt.get("dropout", 0.15),
+        "feature_version": ckpt.get("feature_version", 5),
+        "epoch": ckpt.get("epoch", 0),
+        "total_params": total_params,
+        "component_params": component_params,
+        "val_form_top1": ckpt.get("val_form_top1", 0),
+        "val_content_top1": ckpt.get("val_content_top1", 0),
+        "val_combined_top1": ckpt.get("val_combined_top1", 0),
+        "val_pool_acc": ckpt.get("val_pool_acc", 0),
+        "val_halt_acc": ckpt.get("val_halt_acc", 0),
+        "loss_weights": ckpt.get("loss_weights", {}),
+        "pool_vocab": ckpt.get("pool_vocab", {}),
+        # Comparison with standalone models
+        "comparison": {
+            "dual_head": {
+                "form_top1": 0.986,
+                "content_top1": 0.595,
+                "params": 5618,
+            },
+            "slot_affinity": {
+                "pool_acc": 0.756,
+                "params": 12485,
+            },
+            "combined_standalone_params": 18103,
+        },
+    }
+
+
+@router.get("/ml/unified-halt-analysis")
+async def unified_halt_analysis():
+    """Halt head analysis on validation search groups."""
+    torch = _load_torch()
+
+    model = _load_unified_model()
+    if model is None:
+        return {"error": "No unified model loaded"}
+
+    # Load unified training data for search groups
+    if not _UNIFIED_DATA_PATH.exists():
+        return {"error": "No unified training data found"}
+
+    with open(_UNIFIED_DATA_PATH) as f:
+        data = json.load(f)
+
+    search_groups = data.get("search_groups", [])
+    if not search_groups:
+        return {"error": "No search groups in training data"}
+
+    # Use the same val split as training (seed=42, 20%)
+    import random as rng
+    groups_copy = list(search_groups)
+    rng.seed(42)
+    rng.shuffle(groups_copy)
+    n_val = max(5, int(len(groups_copy) * 0.2))
+    val_groups = groups_copy[:n_val]
+
+    feature_names = FEATURE_NAMES_V5
+
+    halt_probs_correct = []
+    halt_probs_wrong = []
+    all_halt_probs = []
+    all_correct = []
+
+    for g in val_groups:
+        cands = g["candidates"]
+        if not cands:
+            continue
+
+        # Build tensors
+        feats = []
+        for c in cands:
+            feats.append([c.get(f, 0.0) for f in feature_names])
+        structural = torch.tensor(feats, dtype=torch.float32)
+
+        content_emb_raw = g.get("content_embedding")
+        if content_emb_raw:
+            ce = torch.tensor(content_emb_raw, dtype=torch.float32)
+        else:
+            ce = torch.zeros(384)
+        content_emb = ce.unsqueeze(0).expand(len(cands), -1)
+
+        form_labels = [c.get("form_label", 0.0) for c in cands]
+        gt_top1 = max(range(len(form_labels)), key=lambda i: form_labels[i])
+
+        with torch.no_grad():
+            out = model(structural, content_emb, mode="search")
+            form_scores = out["form_score"].squeeze(-1)
+            halt_probs = out["halt_prob"].squeeze(-1)
+            pred_top1 = form_scores.argmax().item()
+            halt_prob = halt_probs[pred_top1].item()
+
+        is_correct = pred_top1 == gt_top1
+        all_halt_probs.append(halt_prob)
+        all_correct.append(is_correct)
+
+        if is_correct:
+            halt_probs_correct.append(halt_prob)
+        else:
+            halt_probs_wrong.append(halt_prob)
+
+    # Histogram bins
+    bins = [i / 20.0 for i in range(21)]  # 0.0, 0.05, ..., 1.0
+    correct_hist = [0] * 20
+    wrong_hist = [0] * 20
+    for p in halt_probs_correct:
+        idx = min(int(p * 20), 19)
+        correct_hist[idx] += 1
+    for p in halt_probs_wrong:
+        idx = min(int(p * 20), 19)
+        wrong_hist[idx] += 1
+
+    # Threshold sweep
+    thresholds = [i / 20.0 for i in range(21)]
+    threshold_results = []
+    for t in thresholds:
+        # If halt_prob > t, we'd halt (accept top-1 as correct)
+        # If halt_prob <= t, we'd continue searching
+        tp = sum(1 for p, c in zip(all_halt_probs, all_correct) if p > t and c)
+        fp = sum(1 for p, c in zip(all_halt_probs, all_correct) if p > t and not c)
+        fn = sum(1 for p, c in zip(all_halt_probs, all_correct) if p <= t and c)
+        tn = sum(1 for p, c in zip(all_halt_probs, all_correct) if p <= t and not c)
+        precision = tp / max(tp + fp, 1)
+        recall = tp / max(tp + fn, 1)
+        accuracy = (tp + tn) / max(tp + fp + fn + tn, 1)
+        threshold_results.append({
+            "threshold": round(t, 2),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "accuracy": round(accuracy, 4),
+            "would_halt": tp + fp,
+            "would_continue": fn + tn,
+        })
+
+    return {
+        "n_groups": len(val_groups),
+        "n_correct": len(halt_probs_correct),
+        "n_wrong": len(halt_probs_wrong),
+        "mean_halt_correct": round(np.mean(halt_probs_correct).item(), 4) if halt_probs_correct else 0,
+        "mean_halt_wrong": round(np.mean(halt_probs_wrong).item(), 4) if halt_probs_wrong else 0,
+        "correct_histogram": correct_hist,
+        "wrong_histogram": wrong_hist,
+        "bin_edges": [round(b, 2) for b in bins],
+        "threshold_sweep": threshold_results,
+    }
+
+
+class UnifiedRoutingRequest(BaseModel):
+    content_items: list[str]
+
+
+@router.post("/ml/unified-routing-test")
+async def unified_routing_test(req: UnifiedRoutingRequest):
+    """Test UnifiedTRN pool routing on arbitrary content items (build mode)."""
+    torch = _load_torch()
+
+    model = _load_unified_model()
+    if model is None:
+        return {"error": "No unified model loaded"}
+
+    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+    pool_vocab = ckpt.get("pool_vocab", {})
+    pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
+    structural_dim = ckpt.get("structural_dim", 17)
+
+    # Embed
+    try:
+        from fastembed import TextEmbedding
+        embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+        embeddings = list(embedder.embed(req.content_items))
+        emb_tensor = torch.tensor(np.array(embeddings), dtype=torch.float32)
+    except Exception as e:
+        return {"error": f"Embedding failed: {e}"}
+
+    structural_zeros = torch.zeros(len(req.content_items), structural_dim)
+
+    with torch.no_grad():
+        out = model(structural_zeros, emb_tensor, mode="build")
+        logits = out["pool_logits"]
+        probs = torch.softmax(logits, dim=-1)
+
+    items_out = []
+    for i, text in enumerate(req.content_items):
+        scores = {}
+        for j, name in enumerate(pool_names):
+            scores[name] = round(probs[i, j].item(), 4)
+        pred_id = logits[i].argmax().item()
+        items_out.append({
+            "content_text": text,
+            "predicted_pool": pool_names[pred_id] if pred_id < len(pool_names) else f"id_{pred_id}",
+            "confidence": round(probs[i, pred_id].item(), 4),
+            "pool_scores": scores,
+        })
+
+    return {
+        "items": items_out,
+        "pool_names": pool_names,
+        "model": "unified_trn",
+    }

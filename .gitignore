@@ -58,6 +58,12 @@ credentials/
 .coverage
 htmlcov/
 
+# Research / ML artifacts
+research/trm/h2/*_training_data.json
+research/trm/h2/checkpoints/*.pt
+research/trm/official-repo/
+.claude/worktrees/
+
 # Google OAuth credential files (CRITICAL - never commit these)
 client_secret*.json
 client_secrets*.json
