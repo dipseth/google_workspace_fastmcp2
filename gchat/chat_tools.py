@@ -394,11 +394,11 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
                 )
         else:
             # Different type of RuntimeError, log and return None
-            logger.error(f"Chat service injection error for {user_google_email}: {e}")
+            logger.error(f"Chat service injection error: {e}")
 
     except Exception as e:
         logger.error(
-            f"Unexpected error getting Chat service for {user_google_email}: {e}"
+            f"Unexpected error getting Chat service: {e}"
         )
 
     return None
@@ -500,7 +500,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             if user_google_email and user_google_email.strip():
                 user_email = user_google_email.strip()
                 auth_method = "provided_parameter"
-                logger.info(f"🎯 [list_spaces] Using provided email: {user_email}")
+                logger.info("🎯 [list_spaces] Using provided email parameter")
 
             # Method 2: Try resource context (primary method)
             if not user_email:
@@ -858,7 +858,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         Returns:
             SendMessageResponse: Structured response with message details and success status.
         """
-        logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
+        logger.info(f"[send_message] Space: '{space_id}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)
@@ -959,7 +959,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         Returns:
             SearchMessagesResponse: Structured response with search results.
         """
-        logger.info(f"[search_messages] Email={user_google_email}, Query='{query}'")
+        logger.info(f"[search_messages] Query='{query}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)

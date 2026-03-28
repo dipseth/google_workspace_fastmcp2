@@ -226,6 +226,16 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                     client, authorization_code
                 )
 
+                # Cache the newly-issued JWT for stale-header fallback.
+                if result and hasattr(result, "access_token") and result.access_token:
+                    import time as _t
+
+                    _latest_issued_jwt[0] = result.access_token
+                    _latest_issued_jwt[1] = _t.time()
+                    logger.debug(
+                        "🔑 Cached latest JWT for stale-header fallback"
+                    )
+
                 # Now save the Google tokens as API credentials
                 if idp_tokens:
                     try:
@@ -235,6 +245,21 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                             f"⚠️ SSO credential save failed (auth still works): {e}"
                         )
 
+                return result
+
+            async def exchange_refresh_token(self, client, refresh_token, scopes):
+                """Intercept refresh to update stale-header fallback cache."""
+                result = await super().exchange_refresh_token(
+                    client, refresh_token, scopes
+                )
+                if result and hasattr(result, "access_token") and result.access_token:
+                    import time as _t
+
+                    _latest_issued_jwt[0] = result.access_token
+                    _latest_issued_jwt[1] = _t.time()
+                    logger.debug(
+                        "🔑 Refresh: updated latest JWT for stale-header fallback"
+                    )
                 return result
 
             async def _save_google_credentials(self, idp_tokens: dict):
@@ -305,16 +330,21 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 _save_credentials(user_email, credentials)
                 # Log the per-user API key if one was generated
                 user_api_key = getattr(credentials, "_user_api_key", None)
+                from config.enhanced_logging import redact_email
+                _redacted = redact_email(user_email)
                 if user_api_key:
                     logger.info(
-                        f"🔑 SSO: Per-user API key generated for {user_email} "
+                        f"🔑 SSO: Per-user API key generated for {_redacted} "
                         f"(key will be available via check_drive_auth)"
                     )
                 logger.info(
-                    f"✅ SSO: Google API credentials saved for {user_email} "
+                    f"✅ SSO: Google API credentials saved for {_redacted} "
                     f"(refresh_token: {'yes' if refresh_token else 'no'}, "
                     f"scopes: {len(_oauth_comprehensive_scopes)})"
                 )
+                # Clear rate limits after successful re-auth so the client's
+                # new token isn't blocked by prior stale-token failures.
+                _clear_auth_rate_limits()
 
         google_auth_provider = SSOGoogleProvider(
             client_id=_fastmcp_google_client_id,
@@ -382,8 +412,22 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
         # Simple in-memory rate limiter for failed auth attempts
         _failed_auth_attempts: dict[str, list[float]] = {}
         _RATE_LIMIT_WINDOW = 60.0  # seconds
-        _RATE_LIMIT_MAX = 10  # max failures per window
+        _RATE_LIMIT_MAX = 15  # max failures per window (generous for refresh loops)
         _MAX_TRACKED_PREFIXES = 1000  # cap to prevent memory growth from brute-force
+        # Track the last stale token prefix we warned about (avoid log spam)
+        _last_stale_warn: dict[str, float] = {}
+        # Grace period / stale-header fallback: when the server issues new JWTs
+        # (code exchange or refresh), cache the latest JWT. If a client has a
+        # hardcoded Authorization header with a stale non-JWT token, we validate
+        # the cached JWT instead and remember the stale token so it keeps working.
+        _latest_issued_jwt: list = [None, 0.0]  # [jwt_string, issued_at]
+        _GRACE_PERIOD_SECONDS = 30.0  # window for first-time stale token match
+        _stale_token_aliases: set = set()  # token prefixes that matched via grace
+
+        def _clear_auth_rate_limits():
+            """Clear all rate limit state — called after successful token issuance."""
+            _failed_auth_attempts.clear()
+            _last_stale_warn.clear()
 
         async def _load_access_token_with_api_key(token: str):
             """Check for admin key / per-user key before delegating to OAuth."""
@@ -401,7 +445,17 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             elif token_prefix in _failed_auth_attempts:
                 del _failed_auth_attempts[token_prefix]
             if len(attempts) >= _RATE_LIMIT_MAX:
-                logger.warning("🚫 Rate limit exceeded for auth attempts")
+                # Only warn once per 30s per prefix to avoid log spam
+                last_warn = _last_stale_warn.get(token_prefix, 0)
+                if now - last_warn > 30.0:
+                    logger.warning(
+                        f"🚫 Rate limit exceeded for auth attempts "
+                        f"(prefix={token_prefix}..., {len(attempts)} failures in "
+                        f"{_RATE_LIMIT_WINDOW}s window). Client may be sending a "
+                        f"stale cached token — client should clear MCP auth cache "
+                        f"and re-authenticate."
+                    )
+                    _last_stale_warn[token_prefix] = now
                 return None
 
             from auth.types import AuthProvenance
@@ -425,7 +479,8 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
 
             user_email = lookup_key(token)
             if user_email:
-                logger.debug(f"🔑 Per-user API key matched: {user_email}")
+                from config.enhanced_logging import redact_email as _redact
+                logger.debug(f"🔑 Per-user API key matched: {_redact(user_email)}")
                 return _FastMCPAccessToken(
                     token=token,
                     client_id=f"user-key-{user_email}",
@@ -439,7 +494,7 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                 )
 
             # 3. Normal OAuth token validation (FastMCP JWT)
-            logger.info(f"🔍 load_access_token called, token prefix: {token[:20]}...")
+            logger.debug(f"🔍 load_access_token called, token prefix: {token[:8]}...")
             result = await _original_load_access_token(token)
             if result is not None:
                 logger.info(
@@ -451,7 +506,12 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
             # Some MCP clients (e.g., Claude Code VS Code) may send a cached
             # opaque Google access token instead of the FastMCP JWT wrapper.
             # Validate it directly via Google's tokeninfo API.
-            if "." not in token[:40] or not token.startswith("eyJ"):
+            # Skip if this prefix is a known stale header — no point calling
+            # Google for a token we know isn't a Google token.
+            if (
+                ("." not in token[:40] or not token.startswith("eyJ"))
+                and token_prefix not in _stale_token_aliases
+            ):
                 logger.info(
                     "🔄 Token is not a FastMCP JWT — trying Google tokeninfo fallback..."
                 )
@@ -468,8 +528,9 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                         _email = _info.get("email")
                         _expires_in = int(_info.get("expires_in", 0))
                         if _email and _expires_in > 0:
+                            from config.enhanced_logging import redact_email as _re
                             logger.info(
-                                f"✅ Google tokeninfo fallback succeeded: {_email} "
+                                f"✅ Google tokeninfo fallback succeeded: {_re(_email)} "
                                 f"(expires_in={_expires_in}s)"
                             )
                             return _FastMCPAccessToken(
@@ -489,15 +550,74 @@ if _fastmcp_google_client_id and _fastmcp_google_client_secret:
                                 f"(email={_email}, expires_in={_expires_in})"
                             )
                     else:
-                        logger.debug(
-                            f"Google tokeninfo fallback failed: HTTP {_resp.status_code}"
+                        logger.info(
+                            f"🔄 Google tokeninfo fallback rejected: HTTP {_resp.status_code} "
+                            f"— token is not a valid Google access token either. "
+                            f"Client is likely sending a stale/expired cached token."
                         )
                 except Exception as _e:
                     logger.debug(f"Google tokeninfo fallback error: {_e}")
 
-            logger.warning(
-                f"⚠️ load_access_token returned None for token: {token[:30]}..."
-            )
+            # 5. Stale-header fallback: client may have a hardcoded Authorization
+            # header overriding OAuth tokens. If we recently issued a JWT (code
+            # exchange or refresh), validate that instead.
+            if not token.startswith("eyJ") and _latest_issued_jwt[0]:
+                _grace_jwt = _latest_issued_jwt[0]
+                _grace_ts = _latest_issued_jwt[1]
+                # Clear cached JWT if older than access token TTL (~1hr)
+                # so it doesn't linger in memory unnecessarily.
+                _JWT_MAX_AGE = 3700.0  # slightly over 1hr TTL
+                if now - _grace_ts > _JWT_MAX_AGE:
+                    _latest_issued_jwt[0] = None
+                    _latest_issued_jwt[1] = 0.0
+                    _stale_token_aliases.clear()
+                    logger.debug(
+                        "🧹 Cleared expired JWT from stale-header fallback cache"
+                    )
+                else:
+                    # Allow if: prefix previously matched, OR within grace window
+                    _is_known_stale = token_prefix in _stale_token_aliases
+                    _in_grace_window = now - _grace_ts <= _GRACE_PERIOD_SECONDS
+                    if _is_known_stale or _in_grace_window:
+                        _grace_result = await _original_load_access_token(
+                            _grace_jwt
+                        )
+                        if _grace_result is not None:
+                            if not _is_known_stale:
+                                logger.warning(
+                                    f"🔄 STALE HEADER FALLBACK: client sent "
+                                    f"non-JWT token (prefix={token_prefix}...) "
+                                    f"but a valid JWT was issued "
+                                    f"{now - _grace_ts:.1f}s ago. Using the "
+                                    f"fresh JWT. FIX: remove the hardcoded "
+                                    f"'Authorization' header from the client's "
+                                    f"MCP server config — OAuth handles auth "
+                                    f"automatically."
+                                )
+                                _stale_token_aliases.add(token_prefix)
+                            return _grace_result
+                        elif _is_known_stale:
+                            # JWT invalid — clear cache so it's not in memory
+                            _latest_issued_jwt[0] = None
+                            _latest_issued_jwt[1] = 0.0
+                            _stale_token_aliases.discard(token_prefix)
+
+            # Detect repeated stale token (same prefix failing multiple times)
+            prior_count = len(attempts)
+            if prior_count >= 3:
+                if prior_count == 3:
+                    logger.warning(
+                        f"⚠️ Token prefix {token_prefix}... has failed {prior_count + 1} "
+                        f"times — client appears stuck sending a stale cached token. "
+                        f"Token is not a JWT (no 'eyJ' prefix), not an API key, and "
+                        f"not a valid Google access token. Check if the client's MCP "
+                        f"config has a hardcoded 'Authorization' header that should "
+                        f"be removed (OAuth handles auth automatically)."
+                    )
+            else:
+                logger.warning(
+                    f"⚠️ load_access_token returned None for token: {token[:8]}..."
+                )
             # Record failed attempt for rate limiting
             _failed_auth_attempts.setdefault(token_prefix, []).append(now)
             # Evict oldest prefix if over cap (defense against unique-token flooding)
@@ -627,9 +747,9 @@ else:
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
 # ─── GitHub OAuth Provider Setup (Alpha Access via Repo Star Gating) ─────────
-# When GITHUB_OAUTH_CLIENT_ID and SECRET are set, we add GitHub as an
-# alternative auth provider using MultiAuth. GitHub-authed users are validated
-# via repo star check (alpha mode) and receive limited access (no Google API).
+# When GITHUB_OAUTH_CLIENT_ID and SECRET are set, GitHub OAuth is used solely
+# for star-gating (alpha access check). All bearer tokens on /mcp are still
+# FastMCP JWTs issued via Google OAuth. GitHub never issues bearer tokens.
 github_auth_provider = None
 _dual_oauth_router = None
 
@@ -642,8 +762,6 @@ _github_client_secret = settings.github_oauth_client_secret or os.getenv(
 
 if _github_client_id and _github_client_secret:
     try:
-        from fastmcp.server.auth.providers.github import GitHubTokenVerifier
-
         from auth.github_provider import SSOGitHubProvider
 
         _github_scopes = [
@@ -669,28 +787,19 @@ if _github_client_id and _github_client_secret:
                 f"  ⭐ Repo star gating: {settings.github_oauth_gating_repo}"
             )
 
-        # If both Google and GitHub are configured, wrap with MultiAuth
+        # If both Google and GitHub are configured, set up dual OAuth routing.
+        # GitHub is ONLY used for star-gating (alpha access check) — all actual
+        # bearer tokens on /mcp must be FastMCP JWTs issued via Google OAuth.
+        # We do NOT add GitHubTokenVerifier to MultiAuth because GitHub tokens
+        # should never be used as bearer tokens for API requests.
         if google_auth_provider:
-            from fastmcp.server.auth import MultiAuth
-
-            _github_token_verifier = GitHubTokenVerifier(
-                required_scopes=_github_scopes,
-            )
-
-            _multi_auth_provider = MultiAuth(
-                server=google_auth_provider,  # Google owns the OAuth routes/metadata
-                verifiers=[_github_token_verifier],  # GitHub validates opaque tokens
-            )
-
-            # Replace google_auth_provider with MultiAuth for FastMCP app creation
-            google_auth_provider = _multi_auth_provider
-            logger.info("✅ MultiAuth configured: Google (primary) + GitHub (verifier)")
+            logger.info("✅ GitHub configured for star-gating (Google handles all tokens)")
 
             # Set up dual OAuth router for provider selection
             from auth.dual_oauth_provider import DualOAuthRouter
 
             _dual_oauth_router = DualOAuthRouter(
-                google_provider=_multi_auth_provider.server,
+                google_provider=google_auth_provider,
                 github_provider=github_auth_provider,
                 settings=settings,
             )
@@ -914,7 +1023,7 @@ from auth.middleware import create_enhanced_auth_middleware
 
 auth_middleware = create_enhanced_auth_middleware(
     storage_mode=credential_storage_mode,
-    google_provider=google_auth_provider,  # GoogleProvider/MultiAuth when configured
+    google_provider=google_auth_provider,  # GoogleProvider when configured
     github_provider=github_auth_provider,  # GitHubProvider when configured (for session enrichment)
 )
 # Enable service selection for existing OAuth system
@@ -1229,7 +1338,7 @@ if settings.payment_enabled:
     )
     mcp.add_middleware(payment_middleware)
     logger.info("X402 Payment middleware enabled (x402 SDK v2)")
-    logger.info(f"  Recipient: {settings.payment_recipient_wallet or '(not set)'}")
+    logger.info(f"  Recipient: {'configured' if settings.payment_recipient_wallet else '(not set)'}")
     logger.info(f"  Amount: {settings.payment_usdc_amount} USDC")
     logger.info(f"  Network: {settings.payment_network}")
     logger.info(f"  Facilitator: {settings.payment_facilitator_url}")

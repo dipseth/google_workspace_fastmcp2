@@ -483,7 +483,7 @@ async def list_calendars(
     Returns:
         CalendarListResponse: Structured calendar list with metadata.
     """
-    logger.info(f"[list_calendars] Invoked. Email: '{user_google_email}'")
+    logger.info("[list_calendars] Invoked")
 
     # Check for None/empty email
     if not user_google_email:
