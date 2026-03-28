@@ -2703,3 +2703,153 @@ def setup_status_check_routes(mcp) -> None:
         return HTMLResponse(content=page_html)
 
     logger.info("  ✅ Status check route registered (/auth/status-check)")
+
+
+def setup_complete_oauth_endpoints(
+    mcp,
+    google_auth_provider,
+    settings,
+    use_google_oauth: bool,
+    enable_jwt_auth: bool,
+):
+    """Register all OAuth endpoints — GoogleProvider supplemental or legacy.
+
+    When GoogleProvider is active, registers only supplemental endpoints
+    (status polling, service selection, legacy callback, config API, status check).
+    When not active, registers full legacy OAuth discovery + operational endpoints
+    and configures JWT-based authentication.
+    """
+    if google_auth_provider:
+        # GoogleProvider is active — it already registered all discovery endpoints.
+        logger.info(
+            "🔍 GoogleProvider active — RFC-compliant OAuth endpoints auto-registered"
+        )
+        logger.info(
+            f"  ✅ Protected Resource:  {settings.base_url}/.well-known/oauth-protected-resource"
+        )
+        logger.info(
+            f"  ✅ Auth Server Metadata: {settings.base_url}/.well-known/oauth-authorization-server"
+        )
+        logger.info(f"  ✅ Authorization:        {settings.base_url}/authorize")
+        logger.info(f"  ✅ Token Exchange:       {settings.base_url}/token")
+        logger.info(f"  ✅ Callback:             {settings.base_url}/auth/callback")
+        logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
+
+        try:
+            @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
+            async def oauth_status_check_gp(request):
+                """OAuth authentication status polling endpoint (supplemental)."""
+                from starlette.responses import JSONResponse, Response
+
+                if request.method == "OPTIONS":
+                    return Response(
+                        status_code=200, headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                import json
+                from pathlib import Path as _Path
+
+                oauth_data_path = (
+                    _Path(settings.credentials_dir) / ".oauth_authentication.json"
+                )
+                if oauth_data_path.exists():
+                    try:
+                        with open(oauth_data_path, "r") as f:
+                            oauth_data = json.load(f)
+                    except (json.JSONDecodeError, OSError):
+                        oauth_data = {}
+                    authenticated_email = oauth_data.get("authenticated_email")
+                    if authenticated_email:
+                        return JSONResponse(
+                            content={
+                                "authenticated": True,
+                                "user_email": authenticated_email,
+                            },
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                                "Cache-Control": "no-store",
+                            },
+                        )
+                return JSONResponse(
+                    content={
+                        "authenticated": False,
+                        "message": "No authentication data found",
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-store",
+                    },
+                )
+
+            logger.info("  ✅ Supplemental /oauth/status endpoint registered")
+
+            setup_service_selection_routes(mcp)
+            logger.info("  ✅ Service selection routes registered (/auth/services/select)")
+
+            setup_legacy_callback_route(mcp)
+            logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
+
+            setup_config_api_routes(mcp)
+            logger.info("  ✅ Config API routes registered for OAuth success page")
+
+            setup_status_check_routes(mcp)
+            logger.info("  ✅ Status check route registered for credential status page")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
+
+        # Do NOT set mcp._auth — GoogleProvider already handles Bearer token validation
+        logger.info(
+            "🔐 Authentication: Handled by GoogleProvider (no manual _auth override)"
+        )
+
+    else:
+        # Legacy mode: register all custom OAuth discovery + operational endpoints
+        logger.info("🔍 Setting up legacy OAuth discovery endpoints...")
+        try:
+            setup_oauth_endpoints_fastmcp(mcp)
+            logger.info("✅ Legacy OAuth discovery endpoints configured")
+            logger.info(
+                f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
+            )
+            logger.info(
+                f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
+            )
+            logger.info(f"  Registration: {settings.base_url}/oauth/register")
+            logger.info(f"  Callback: {settings.base_url}/oauth2callback")
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to setup legacy OAuth endpoints: {e}", exc_info=True
+            )
+
+        # Legacy Authentication System Setup with Access Control
+        if use_google_oauth:
+            from auth.token_validator import create_access_controlled_auth_provider
+
+            jwt_auth_provider = create_access_controlled_auth_provider(
+                jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+                issuer="https://accounts.google.com",
+                required_scopes=["openid", "email"],
+            )
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Legacy Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+            )
+            logger.info(
+                "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+            )
+            logger.info("🎯 OAuth issuer: https://accounts.google.com")
+            logger.info(
+                "🔒 Access enforcement: Only users with stored credentials can connect"
+            )
+
+        elif enable_jwt_auth:
+            from auth.jwt_auth import setup_jwt_auth
+
+            jwt_auth_provider = setup_jwt_auth()
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Custom JWT Bearer Token authentication enabled (development mode)"
+            )
+            logger.info("⚠️  No access control on JWT tokens - for testing only")
+
+        else:
+            logger.info("⚠️ Authentication DISABLED (for testing)")
