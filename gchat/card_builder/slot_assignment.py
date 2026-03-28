@@ -4,6 +4,9 @@ Uses UnifiedTRN (pool_head) to reassign and reorder supply_map pools
 before sequential consumption, fixing misrouted content items.
 Falls back to SlotAffinityNet if UnifiedTRN checkpoint not found.
 
+Domain-aware: loads pool vocabulary from checkpoint metadata via
+DomainConfig, defaulting to gchat if not specified.
+
 Integration: Called from builder_v2.py between supply_map construction
 and context creation. Falls back to original supply_map on any error.
 """
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 _cached_model = None
 _cached_model_meta: dict = {}
 _cached_model_type: str = ""  # "unified" or "slot"
+_cached_domain_config = None  # DomainConfig resolved from checkpoint
 _model_load_attempted = False
 
 
@@ -40,32 +44,25 @@ def _extract_item_text(item: Any) -> str:
 def _rewrap_item(item: Any, source_pool: str, target_pool: str) -> dict:
     """Re-wrap a supply_map item for a different pool's expected schema.
 
-    Preserves all original fields (url, icon, image_url, etc.)
-    and remaps the primary text field to the target pool's convention.
+    Uses DomainConfig rewrap_rules when available, falls back to
+    hardcoded gchat rules for backward compatibility.
     """
-    # Start with all existing fields if dict, else create new
-    if isinstance(item, dict):
-        result = dict(item)
-    else:
-        result = {}
+    domain = _get_domain_config()
+    return domain.rewrap_item(item, source_pool, target_pool)
 
-    text = _extract_item_text(item)
 
-    if target_pool == "buttons":
-        result["text"] = text
-        result.setdefault("url", "")
-    elif target_pool == "chips":
-        result["label"] = text
-        result.setdefault("url", "")
-    elif target_pool == "content_texts":
-        result["text"] = text
-        result.setdefault("wrapText", True)
-    elif target_pool == "grid_items":
-        result["title"] = text
-    elif target_pool == "carousel_cards":
-        result["title"] = text
-
-    return result
+def _get_domain_config():
+    """Get the resolved DomainConfig (from checkpoint or default gchat)."""
+    global _cached_domain_config
+    if _cached_domain_config is not None:
+        return _cached_domain_config
+    # Ensure model is loaded (which resolves domain config)
+    _load_slot_model()
+    if _cached_domain_config is not None:
+        return _cached_domain_config
+    # Fallback: gchat default
+    from research.trm.h2.domain_config import GCHAT_DOMAIN
+    return GCHAT_DOMAIN
 
 
 def _load_slot_model():
@@ -75,9 +72,11 @@ def _load_slot_model():
     then falls back to default paths. UnifiedTRN is preferred because it
     was jointly trained on form+content+pool tasks.
 
+    Resolves DomainConfig from checkpoint metadata when available.
     Cached after first call.
     """
-    global _cached_model, _cached_model_meta, _cached_model_type, _model_load_attempted
+    global _cached_model, _cached_model_meta, _cached_model_type
+    global _cached_domain_config, _model_load_attempted
 
     if _model_load_attempted:
         return _cached_model
@@ -117,10 +116,17 @@ def _load_slot_model():
             _cached_model = model
             _cached_model_meta = checkpoint
             _cached_model_type = "unified"
+
+            # Resolve domain config from checkpoint metadata
+            from research.trm.h2.domain_config import resolve_domain
+            _cached_domain_config = resolve_domain(checkpoint=checkpoint)
+            domain_id = _cached_domain_config.domain_id
+
             pool_acc = checkpoint.get("best_pool_acc", checkpoint.get("val_pool_acc", 0))
             content_acc = checkpoint.get("best_content_top1", 0)
             logger.info(
                 f"Loaded UnifiedTRN (epoch {checkpoint.get('epoch')}, "
+                f"domain={domain_id}, pools={_cached_domain_config.n_pools}, "
                 f"pool={pool_acc:.1%}, content={content_acc:.1%})"
             )
             return model
@@ -154,8 +160,14 @@ def _load_slot_model():
         _cached_model = model
         _cached_model_meta = checkpoint
         _cached_model_type = "slot"
+
+        # Resolve domain config from checkpoint metadata
+        from research.trm.h2.domain_config import resolve_domain
+        _cached_domain_config = resolve_domain(checkpoint=checkpoint)
+
         val_acc = checkpoint.get("val_accuracy", 0)
-        logger.info(f"Loaded SlotAffinityNet (epoch {checkpoint.get('epoch')}, val_acc={val_acc:.1%})")
+        logger.info(f"Loaded SlotAffinityNet (epoch {checkpoint.get('epoch')}, "
+                     f"domain={_cached_domain_config.domain_id}, val_acc={val_acc:.1%})")
         return model
     except Exception as e:
         logger.warning(f"Failed to load slot assigner: {e}")
@@ -192,42 +204,10 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
         return None
 
 
-# Import slot assigner constants lazily
-_SLOT_TYPE_VOCAB = None
-_SLOT_TO_POOL = None
-_SPECIFICITY_ORDER = None
-
-
 def _get_constants():
-    global _SLOT_TYPE_VOCAB, _SLOT_TO_POOL, _SPECIFICITY_ORDER
-    if _SLOT_TYPE_VOCAB is None:
-        try:
-            from research.trm.h2.slot_assigner import (
-                COMPONENT_TO_POOL,
-                POOL_SPECIFICITY_ORDER,
-                POOL_VOCAB,
-            )
-            _SLOT_TYPE_VOCAB = POOL_VOCAB
-            _SLOT_TO_POOL = COMPONENT_TO_POOL
-            _SPECIFICITY_ORDER = POOL_SPECIFICITY_ORDER
-        except ImportError:
-            _SLOT_TYPE_VOCAB = {
-                "buttons": 0, "content_texts": 1, "grid_items": 2,
-                "chips": 3, "carousel_cards": 4,
-            }
-            _SLOT_TO_POOL = {
-                "Button": "buttons", "ButtonList": "buttons",
-                "DecoratedText": "content_texts", "TextParagraph": "content_texts",
-                "Image": "content_texts", "Column": "content_texts",
-                "Columns": "content_texts",
-                "Grid": "grid_items", "GridItem": "grid_items",
-                "Chip": "chips", "ChipList": "chips",
-                "Carousel": "carousel_cards", "CarouselCard": "carousel_cards",
-            }
-            _SPECIFICITY_ORDER = [
-                "chips", "grid_items", "carousel_cards", "buttons", "content_texts",
-            ]
-    return _SLOT_TYPE_VOCAB, _SLOT_TO_POOL, _SPECIFICITY_ORDER
+    """Get pool vocab, component-to-pool, and specificity order from DomainConfig."""
+    domain = _get_domain_config()
+    return domain.pool_vocab, domain.component_to_pool, domain.specificity_order
 
 
 def reassign_supply_map(
@@ -258,9 +238,9 @@ def reassign_supply_map(
     if model is None:
         return supply_map
 
-    # Flatten all items from all pools
+    # Flatten all items from all pools (domain-driven pool keys)
     all_items: List[Tuple[Any, str]] = []  # (item, source_pool)
-    for pool_key in ("buttons", "content_texts", "chips", "grid_items", "carousel_cards"):
+    for pool_key in VOCAB:
         for item in supply_map.get(pool_key, []):
             all_items.append((item, pool_key))
 
@@ -323,13 +303,7 @@ def reassign_supply_map(
     # are pinned (kept in place). Only overflow or items in non-demanded
     # pools are candidates for neural rerouting.
     assigned = [False] * len(all_items)
-    new_pools: Dict[str, List[Any]] = {
-        "buttons": [],
-        "content_texts": [],
-        "chips": [],
-        "grid_items": [],
-        "carousel_cards": [],
-    }
+    new_pools: Dict[str, List[Any]] = {k: [] for k in VOCAB}
     remaining_demand: Dict[str, int] = dict(pool_demands)
 
     for i, (item, source_pool) in enumerate(all_items):
@@ -394,7 +368,7 @@ def reassign_supply_map(
 
     # Log what changed
     changes = []
-    for pool_key in ("buttons", "content_texts", "chips", "grid_items", "carousel_cards"):
+    for pool_key in VOCAB:
         old_count = len(supply_map.get(pool_key, []))
         new_count = len(new_pools.get(pool_key, []))
         if old_count != new_count:

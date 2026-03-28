@@ -27,8 +27,11 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-# Re-export pool vocab from slot_assigner for consistency
-from .slot_assigner import COMPONENT_TO_POOL, POOL_VOCAB
+from .domain_config import GCHAT_DOMAIN, get_domain_or_default
+
+# Re-export for backward compatibility
+POOL_VOCAB = dict(GCHAT_DOMAIN.pool_vocab)
+COMPONENT_TO_POOL = dict(GCHAT_DOMAIN.component_to_pool)
 
 # V5 feature names (17D) — same as generate_training_data.py
 FEATURE_NAMES_V5 = [
@@ -41,7 +44,7 @@ FEATURE_NAMES_V5 = [
 
 STRUCTURAL_DIM = len(FEATURE_NAMES_V5)  # 17
 CONTENT_DIM = 384  # MiniLM
-N_POOLS = len(POOL_VOCAB)  # 5
+N_POOLS = GCHAT_DOMAIN.n_pools  # 5 (default; overridden by constructor arg)
 
 
 class UnifiedTRN(nn.Module):
@@ -109,13 +112,14 @@ class UnifiedTRN(nn.Module):
         )
 
         # Halt head (learned convergence)
-        # LayerNorm before Sigmoid stabilizes train/eval scale shift
-        # caused by Dropout in the backbone
+        # LayerNorm(16) before final projection stabilizes train/eval
+        # scale shift caused by Dropout in the backbone.
+        # NOTE: LayerNorm(1) would kill gradients (single-element norm → always 0).
         self.halt_head = nn.Sequential(
             nn.Linear(hidden, 16),
+            nn.LayerNorm(16),
             nn.SiLU(),
             nn.Linear(16, 1),
-            nn.LayerNorm(1),
             nn.Sigmoid(),
         )
 

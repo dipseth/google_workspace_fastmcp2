@@ -2824,17 +2824,73 @@ class SearchMixin:
     _learned_model = None  # class-level cache for the trained model
     _learned_feature_version = 1  # 1=9D, 2=8D, 3=14D, 4=15D, 5=17D
     _learned_model_type = "single"  # "single" or "dual_head"
+    _learned_model_domain = None  # domain_id from checkpoint
     _learned_dag_children: dict = {}
     _learned_dag_parents: dict = {}
     _learned_dag_depth: dict = {}
     _learned_dag_loaded = False
 
+    # Per-domain model registry: {domain_id: (model, feature_version, model_type)}
+    _learned_model_registry: dict = {}
+
     @classmethod
-    def _load_learned_model(cls):
+    def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
+        """Resolve checkpoint path from registry or env vars.
+
+        Priority:
+          1. LEARNED_SCORER_REGISTRY JSON (domain→path mapping)
+          2. LEARNED_SCORER_CHECKPOINT (single path, any domain)
+          3. Default file path
+        """
+        import json as _json
+        import os
+
+        # Try registry first
+        registry_json = os.environ.get("LEARNED_SCORER_REGISTRY")
+        if registry_json:
+            try:
+                registry = _json.loads(registry_json)
+                if domain and domain in registry:
+                    path = registry[domain]
+                    if os.path.exists(path):
+                        return path
+                # Fallback to first available in registry
+                for d, path in registry.items():
+                    if os.path.exists(path):
+                        return path
+            except _json.JSONDecodeError:
+                logger.warning("LEARNED_SCORER_REGISTRY is not valid JSON")
+
+        # Single checkpoint path
+        checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            return checkpoint_path
+
+        # Default file path
+        from pathlib import Path
+        candidates = [
+            Path(__file__).parent.parent.parent
+            / "research" / "trm" / "h2"
+            / "checkpoints" / "best_model_mw.pt",
+            Path.cwd()
+            / "research" / "trm" / "h2"
+            / "checkpoints" / "best_model_mw.pt",
+        ]
+        for p in candidates:
+            if p.exists():
+                return str(p)
+
+        return None
+
+    @classmethod
+    def _load_learned_model(cls, domain: str | None = None):
         """Load the trained scorer model (cached at class level).
 
         Supports both SimilarityScorerMW (single output) and
         DualHeadScorerMW (form_score + content_score).
+
+        Args:
+            domain: Optional domain ID for registry-based checkpoint lookup.
         """
         if cls._learned_model is not None:
             return cls._learned_model
@@ -2889,28 +2945,14 @@ class SearchMixin:
                 shared = self.backbone(x)
                 return self.form_head(shared), self.content_head(shared)
 
-        # Look for checkpoint
+        # Resolve checkpoint path (supports registry, env var, or default)
         import os
-        checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
-        if not checkpoint_path:
-            from pathlib import Path
-            candidates = [
-                Path(__file__).parent.parent.parent
-                / "research" / "trm" / "h2"
-                / "checkpoints" / "best_model_mw.pt",
-                Path.cwd()
-                / "research" / "trm" / "h2"
-                / "checkpoints" / "best_model_mw.pt",
-            ]
-            for p in candidates:
-                if p.exists():
-                    checkpoint_path = str(p)
-                    break
+        checkpoint_path = cls._resolve_checkpoint_path(domain=domain)
 
-        if not checkpoint_path or not os.path.exists(checkpoint_path):
+        if not checkpoint_path:
             logger.warning(
                 "Learned scorer checkpoint not found. "
-                f"Tried: {candidates if not checkpoint_path else checkpoint_path}"
+                "Set LEARNED_SCORER_CHECKPOINT or LEARNED_SCORER_REGISTRY."
             )
             return None
 
@@ -2928,6 +2970,7 @@ class SearchMixin:
             cls._learned_model_type = (
                 "dual_head" if model_type == "dual_head" else "single"
             )
+            cls._learned_model_domain = ckpt.get("domain_id")
 
             if model_type == "dual_head":
                 head_dim = ckpt.get("head_dim", 24)
@@ -2948,10 +2991,11 @@ class SearchMixin:
             model.eval()
             cls._learned_model = model
             n_params = sum(p.numel() for p in model.parameters())
+            domain_str = cls._learned_model_domain or "unknown"
             logger.info(
                 f"Loaded {cls._learned_model_type} scorer "
                 f"from {checkpoint_path} "
-                f"(params={n_params}, "
+                f"(domain={domain_str}, params={n_params}, "
                 f"V{cls._learned_feature_version}, "
                 f"input_dim={input_dim})"
             )

@@ -27,6 +27,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset
 
+from .domain_config import GCHAT_DOMAIN, get_domain_or_default
 from .slot_assigner import POOL_NAMES, POOL_VOCAB
 from .unified_trn import FEATURE_NAMES_V5, UnifiedTRN
 
@@ -391,6 +392,8 @@ def main():
     parser.add_argument("--w-halt", type=float, default=0.1)
     parser.add_argument("--checkpoint-dir", type=str,
                         default=str(Path(__file__).parent / "checkpoints"))
+    parser.add_argument("--domain", type=str, default="gchat",
+                        help="Domain ID for pool vocab (gchat, email, etc.)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -558,13 +561,15 @@ def main():
         combined_score = 0.6 * val_form_top1 + 0.4 * val_pool_acc
         if combined_score > best_form_top1:
             patience_counter = 0
+            # Resolve domain config for checkpoint metadata
+            domain = get_domain_or_default(getattr(args, "domain", None))
             checkpoint = {
                 "model_state_dict": model.state_dict(),
                 "model_type": "unified_trn",
                 "structural_dim": len(FEATURE_NAMES_V5),
                 "content_dim": 384,
                 "hidden": args.hidden,
-                "n_pools": len(POOL_VOCAB),
+                "n_pools": domain.n_pools,
                 "dropout": args.dropout,
                 "feature_version": 5,
                 "epoch": epoch,
@@ -574,7 +579,12 @@ def main():
                 "val_halt_acc": val_halt_acc,
                 "val_combined_top1": val_metrics.get("combined_top1", 0),
                 "loss_weights": weights,
-                "pool_vocab": POOL_VOCAB,
+                # Domain metadata for multi-domain support
+                "domain_id": domain.domain_id,
+                "pool_vocab": dict(domain.pool_vocab),
+                "component_to_pool": dict(domain.component_to_pool),
+                "specificity_order": list(domain.specificity_order),
+                "rewrap_rules": dict(domain.rewrap_rules),
                 "best_pool_acc": val_pool_acc,
                 "best_content_top1": val_content_top1,
             }
