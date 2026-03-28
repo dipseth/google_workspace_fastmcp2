@@ -809,25 +809,35 @@ async function toggleStar() {{
 </div></body></html>"""
             )
 
-        # Fallback: no upstream Google URL (e.g. GitHub-only mode or
-        # direct /auth/github/authorize without going through /auth/select).
-        # Return the GitHub token directly for browser-based clients.
-        client_redirect = txn.get("client_redirect_uri", "")
-        client_state = txn.get("client_state", "")
+        # Fallback: no upstream Google URL (e.g. direct /auth/github/authorize
+        # without going through /auth/select).
+        # GitHub is only used for star-gating — never return a raw GitHub token
+        # as the bearer token, because FastMCP expects its own JWTs.
+        # Instead, redirect through Google OAuth to get proper tokens.
+        original_params = txn.get("original_params", {})
+        base_url = self._settings.base_url.rstrip("/")
 
-        if client_redirect:
-            callback_params = {
-                "access_token": access_token,
-                "token_type": "Bearer",
-                "state": client_state,
+        if self._google_provider:
+            # Redirect to /authorize which will go through Google OAuth
+            # and issue proper FastMCP JWT tokens.
+            authorize_params = {
+                k: v
+                for k, v in original_params.items()
+                if k in ("redirect_uri", "state", "code_challenge",
+                         "code_challenge_method", "scope", "response_type",
+                         "client_id")
             }
-            sep = "&" if "?" in client_redirect else "?"
-            return RedirectResponse(
-                url=f"{client_redirect}{sep}{urlencode(callback_params)}",
-                status_code=302,
-            )
+            if authorize_params:
+                logger.info(
+                    f"✅ GitHub gating passed for {github_login}, "
+                    f"redirecting to Google OAuth (no upstream URL in txn)"
+                )
+                return RedirectResponse(
+                    url=f"{base_url}/authorize?{urlencode(authorize_params)}",
+                    status_code=302,
+                )
 
-        # No redirect info at all — show success page
+        # No Google provider or no params — show success page (manual flow)
         return HTMLResponse(
             f"""<!DOCTYPE html>
 <html><head><title>Authenticated</title>
@@ -839,7 +849,8 @@ body {{ font-family: -apple-system, sans-serif; background: #0a0a0a; color: #e5e
 h1 {{ color: #81c784; font-size: 20px; margin-bottom: 12px; }}
 p {{ color: #888; font-size: 14px; }}
 </style></head><body><div class="card">
-<h1>&#x2705; Authenticated via GitHub</h1>
-<p>Welcome, <strong>{github_login}</strong>! You can close this window.</p>
+<h1>&#x2705; Alpha Access Verified</h1>
+<p>Welcome, <strong>{github_login}</strong>!</p>
+<p>Please reconnect your MCP client to sign in with Google.</p>
 </div></body></html>"""
         )

@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -59,11 +59,11 @@ def validate_google_token_with_access_control(token: str) -> Optional[Dict[str, 
         # Step 3: Validate access control
         if not validate_user_access(email):
             logger.warning(
-                f"🚫 Token validation failed: User {email} not authorized (no stored credentials)"
+                f"🚫 Token validation failed: User {redact_email(email)} not authorized (no stored credentials)"
             )
             return None
 
-        logger.info(f"✅ Token validated for authorized user: {email}")
+        logger.info(f"✅ Token validated for authorized user: {redact_email(email)}")
         return token_info
 
     except requests.RequestException as e:

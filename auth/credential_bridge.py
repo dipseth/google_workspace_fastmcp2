@@ -46,7 +46,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -214,11 +214,11 @@ class CredentialBridge:
                         )
 
             if self._enhanced_logging:
-                logger.info(f"❌ No credentials found for {user_email}")
+                logger.info(f"❌ No credentials found for {redact_email(user_email)}")
             return None
 
         except Exception as e:
-            logger.error(f"Failed to read credentials for {user_email}: {e}")
+            logger.error(f"Failed to read credentials for {redact_email(user_email)}: {e}")
             return None
 
     def write_credentials(
@@ -284,7 +284,7 @@ class CredentialBridge:
             # Read existing credentials
             stored_cred = self.read_credentials(user_email)
             if not stored_cred:
-                logger.error(f"No credentials found for {user_email}")
+                logger.error(f"No credentials found for {redact_email(user_email)}")
                 return False
 
             source_format = stored_cred.metadata.format
@@ -315,13 +315,13 @@ class CredentialBridge:
 
             if self._enhanced_logging:
                 logger.info(
-                    f"✅ Migrated {user_email} from {source_format.value} to {target_format.value}"
+                    f"✅ Migrated {redact_email(user_email)} from {source_format.value} to {target_format.value}"
                 )
 
             return True
 
         except Exception as e:
-            logger.error(f"Migration failed for {user_email}: {e}")
+            logger.error(f"Migration failed for {redact_email(user_email)}: {e}")
             self._log_migration(
                 user_email,
                 source_format.value if "source_format" in locals() else "unknown",

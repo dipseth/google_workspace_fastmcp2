@@ -86,7 +86,7 @@ def _get_oauth_endpoint_scopes():
         logger.warning("Compatibility shim not available, using fallback scopes")
         return _FALLBACK_OAUTH_SCOPES
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -239,7 +239,6 @@ async def _store_oauth_user_data_async(
     except Exception as e:
         logger.error(
             f"❌ Failed to integrate OAuth authentication data (async): {e}",
-            exc_info=True,
         )
         # This is background processing, so we don't want to crash anything
 
@@ -521,7 +520,7 @@ async def _build_oauth_success_html(
     try:
         if session_id and _intro_privacy:
             store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
-            logger.info(f"🛡️ Privacy mode enabled from intro screen for {user_email}")
+            logger.info(f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}")
         if session_id and _intro_sampling and _intro_sampling.get("model"):
             auth_mw_sampling = get_auth_middleware()
             if auth_mw_sampling:
@@ -661,10 +660,10 @@ def setup_legacy_callback_route(mcp) -> None:
                 state=state,
                 code_verifier=code_verifier,
             )
-            logger.info(f"✅ OAuth callback processed for user: {user_email}")
+            logger.info(f"✅ OAuth callback processed for user: {redact_email(user_email)}")
 
             if not validate_user_access(user_email):
-                logger.warning(f"🚫 Access denied for user: {user_email}")
+                logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
                 from auth.ui import generate_access_denied_html
 
                 return HTMLResponse(
@@ -678,7 +677,7 @@ def setup_legacy_callback_route(mcp) -> None:
 
                 dual_bridge = get_dual_auth_bridge()
                 dual_bridge.add_secondary_account(user_email)
-                logger.info(f"✅ Registered {user_email} as secondary account")
+                logger.info(f"✅ Registered {redact_email(user_email)} as secondary account")
             except Exception as e:
                 logger.warning(
                     f"⚠️ Dual auth bridge registration error (continuing): {e}"
@@ -728,7 +727,7 @@ def setup_legacy_callback_route(mcp) -> None:
                         authed.discard(old_email)
                         authed.add(_verified)
                         store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                        logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
                     elif not sid_email and owned:
                         # Session has no USER_EMAIL but has owned accounts — set the verified email
                         store_session_data(sid, SessionKey.USER_EMAIL, user_email)
@@ -736,7 +735,7 @@ def setup_legacy_callback_route(mcp) -> None:
                         store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
                         authed.add(_verified)
                         store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Set session {sid} email to {user_email} (was empty)")
+                        logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
             except Exception as e:
                 logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -746,7 +745,7 @@ def setup_legacy_callback_route(mcp) -> None:
             return HTMLResponse(content=success_html, status_code=200)
 
         except Exception as e:
-            logger.error(f"❌ Legacy oauth2callback error: {e}", exc_info=True)
+            logger.error(f"❌ Legacy oauth2callback error: {e}")
             from auth.ui import generate_error_html
 
             return HTMLResponse(
@@ -1172,7 +1171,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             return RedirectResponse(url=google_auth_url, status_code=302)
 
         except Exception as e:
-            logger.error(f"❌ Authorization proxy failed: {e}", exc_info=True)
+            logger.error(f"❌ Authorization proxy failed: {e}")
             return JSONResponse(
                 content={
                     "error": "server_error",
@@ -1577,12 +1576,12 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
                 logger.info(
-                    f"✅ OAuth callback processed successfully for user: {user_email}"
+                    f"✅ OAuth callback processed successfully for user: {redact_email(user_email)}"
                 )
 
                 # SECURITY: Validate user access before saving credentials
                 if not validate_user_access(user_email):
-                    logger.warning(f"🚫 Access denied for user: {user_email}")
+                    logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
 
                     # Return access denied page
                     from auth.ui import generate_access_denied_html
@@ -1597,7 +1596,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     )
 
                 logger.info(
-                    f"✅ Access granted - credentials saved for user: {user_email}"
+                    f"✅ Access granted - credentials saved for user: {redact_email(user_email)}"
                 )
 
                 # Store user email in session context (get_session_context returns
@@ -1610,7 +1609,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             session_id, SessionKey.USER_EMAIL, user_email
                         )
                         logger.info(
-                            f"✅ Stored user email {user_email} in session {session_id}"
+                            f"✅ Stored user email {redact_email(user_email)} in session {session_id}"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
@@ -1646,14 +1645,14 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             authed.discard(old_email)
                             authed.add(_verified)
                             store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                            logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
                         elif not sid_email and owned:
                             store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                             owned.add(_verified)
                             store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
                             authed.add(_verified)
                             store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Set session {sid} email to {user_email} (was empty)")
+                            logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
                 except Exception as e:
                     logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -1661,7 +1660,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     user_email, credentials, session_id
                 )
                 logger.info(
-                    f"✅ Returning success page for {user_email} with credential confirmation"
+                    f"✅ Returning success page for {redact_email(user_email)} with credential confirmation"
                 )
                 return HTMLResponse(
                     content=success_html,
@@ -1677,7 +1676,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
             except Exception as oauth_error:
                 logger.error(
-                    f"❌ OAuth processing failed: {oauth_error}", exc_info=True
+                    f"❌ OAuth processing failed: {oauth_error}"
                 )
 
                 # Enhanced error messaging for OAuth issues
@@ -1705,7 +1704,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
         except Exception as e:
-            logger.error(f"🚨 CRITICAL: Basic callback error: {e}", exc_info=True)
+            logger.error(f"🚨 CRITICAL: Basic callback error: {e}")
 
             # Even if everything fails, return a basic HTML response
             from auth.ui import generate_error_html
@@ -1795,7 +1794,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             return HTMLResponse(content=generate_debug_success_html(auth_code, state))
 
         except Exception as e:
-            logger.error(f"❌ OAuth callback error: {e}", exc_info=True)
+            logger.error(f"❌ OAuth callback error: {e}")
             from auth.ui import generate_error_html
 
             return HTMLResponse(
