@@ -18,8 +18,9 @@ Usage:
     parser = wrapper.get_dsl_parser()
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Dict, Optional
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

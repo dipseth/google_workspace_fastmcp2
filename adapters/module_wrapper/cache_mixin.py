@@ -20,7 +20,6 @@ Usage:
     entry = wrapper.get_cached_entry("my_card")
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional, Type
 
 from adapters.module_wrapper.strict import warn_strict
@@ -33,6 +32,7 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
     WrapperGetter,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

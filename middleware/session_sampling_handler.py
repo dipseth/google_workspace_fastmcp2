@@ -10,7 +10,6 @@ server-default handler (LiteLLM or Anthropic) and wraps it in a
 SessionAwareSamplingHandler.
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Optional
 
 from mcp.types import CreateMessageRequestParams as SamplingParams
@@ -19,6 +18,8 @@ from mcp.types import (
     CreateMessageResultWithTools,
     SamplingMessage,
 )
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

@@ -15,8 +15,9 @@ Usage:
     create_component_text_indices(client, "mcp_gchat_cards")
 """
 
-from config.enhanced_logging import setup_logger
 from typing import List, Optional
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

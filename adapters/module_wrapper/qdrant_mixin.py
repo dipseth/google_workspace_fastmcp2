@@ -5,7 +5,6 @@ Provides Qdrant client initialization, collection management, and lazy imports
 for the ModuleWrapper system.
 """
 
-from config.enhanced_logging import setup_logger
 import os
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,6 +13,7 @@ from adapters.module_wrapper.types import (
     Payload,
     QdrantConfig,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

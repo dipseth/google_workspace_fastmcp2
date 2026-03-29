@@ -20,8 +20,9 @@ The default IntrospectionProvider wraps the existing helper functions in
 pipeline_mixin.py so existing embeddings are identical.
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Protocol, runtime_checkable
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

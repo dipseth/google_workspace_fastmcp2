@@ -29,9 +29,10 @@ Usage:
 """
 
 import functools
-from config.enhanced_logging import setup_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Type
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

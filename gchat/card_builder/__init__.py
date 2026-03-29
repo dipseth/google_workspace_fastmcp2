@@ -43,6 +43,7 @@ SmartCardBuilder = SmartCardBuilderV2
 # =============================================================================
 # PREPARED PATTERNS
 # =============================================================================
+from gchat.card_builder.component_builder import ComponentBuilder
 from gchat.card_builder.constants import (
     COMPONENT_PARAMS,
     COMPONENT_PATHS,
@@ -51,6 +52,7 @@ from gchat.card_builder.constants import (
     FIELD_NAME_TO_JSON,
     get_default_params,
 )
+from gchat.card_builder.context import consume_from_context
 from gchat.card_builder.dsl import (
     WIDGET_JSON_KEYS,
     extract_component_paths,
@@ -91,6 +93,13 @@ from gchat.card_builder.feedback import (
     DynamicFeedbackBuilder,
     get_dynamic_feedback_builder,
 )
+from gchat.card_builder.field_extractors import (
+    extract_button_fields,
+    extract_carousel_card_fields,
+    extract_chip_fields,
+    extract_content_text_fields,
+    extract_grid_item_fields,
+)
 
 # =============================================================================
 # UTILITIES
@@ -128,6 +137,8 @@ from gchat.card_builder.prepared_pattern import (
 from gchat.card_builder.rendering import (
     # Specialized component builders
     build_button_via_wrapper,
+    # Generic child builder
+    build_child_widget,
     build_icon_via_wrapper,
     # Icon building
     build_material_icon,
@@ -143,35 +154,24 @@ from gchat.card_builder.rendering import (
     # Array item handling
     unwrap_array_item,
     unwrap_array_items,
-    # Generic child builder
-    build_child_widget,
 )
 from gchat.card_builder.search import (
+    # Cache management
+    cache_pattern,
     # Pattern extraction
     extract_paths_from_pattern,
     extract_style_metadata_from_pattern,
     find_pattern_with_styles,
-    has_style_metadata,
-    # Cache management
-    cache_pattern,
-    get_cache_key,
-    get_cached_pattern,
     # Pattern search
     generate_pattern_from_wrapper,
+    get_cache_key,
+    get_cached_pattern,
+    has_style_metadata,
     query_qdrant_patterns,
     query_wrapper_patterns,
     # Pattern storage
     store_card_pattern,
     store_feedback_ui_pattern,
-)
-from gchat.card_builder.component_builder import ComponentBuilder
-from gchat.card_builder.context import consume_from_context
-from gchat.card_builder.field_extractors import (
-    extract_button_fields,
-    extract_carousel_card_fields,
-    extract_chip_fields,
-    extract_content_text_fields,
-    extract_grid_item_fields,
 )
 from gchat.card_builder.symbol_params import resolve_symbol_params
 from gchat.card_builder.utils import fire_and_forget

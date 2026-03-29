@@ -17,8 +17,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
-from config.enhanced_logging import setup_logger
 from adapters.module_wrapper.types import ComponentPaths, JsonDict, Payload
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -562,10 +562,9 @@ def store_card_pattern(
         return
 
     try:
-        from gchat.feedback_loop import get_feedback_loop
-
         from gchat.card_builder.dsl import extract_component_paths
         from gchat.card_builder.jinja_styling import extract_style_metadata
+        from gchat.feedback_loop import get_feedback_loop
 
         feedback_loop = get_feedback_loop()
 

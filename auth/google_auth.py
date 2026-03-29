@@ -1,8 +1,7 @@
 """Google OAuth 2.0 authentication implementation for FastMCP2."""
 
-import logging
-
 import json
+import logging
 import os
 import secrets
 from dataclasses import dataclass

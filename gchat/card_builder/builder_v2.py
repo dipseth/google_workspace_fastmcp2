@@ -24,7 +24,6 @@ Usage:
 """
 
 import json
-from config.enhanced_logging import setup_logger
 import os
 import random
 import threading
@@ -36,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
 
 from dotenv import load_dotenv
 
+from config.enhanced_logging import setup_logger
 from config.settings import settings as _settings
 from middleware.filters import register_all_filters
 from middleware.filters.styling_filters import SEMANTIC_COLORS
@@ -122,6 +122,7 @@ from gchat.card_builder.prepared_pattern import (
     prepare_pattern_from_dsl,
 )
 from gchat.card_builder.utils import fire_and_forget
+
 
 class SmartCardBuilderV2:
     """
@@ -1525,7 +1526,6 @@ class SmartCardBuilderV2:
             Card dict in Google Chat cardsV2 format (with cardId + card),
             or None if building failed.
         """
-        import time
 
         # Resolve symbol-keyed params (e.g., "ᵬ": [...] → "buttons": [...])
         # This enables Format A/B/C documented in the card-params skill

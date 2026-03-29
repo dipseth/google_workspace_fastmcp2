@@ -15,13 +15,12 @@ from auth.context import (
     set_session_context,
     set_user_email_context,
 )
-from auth.types import SessionKey
-from config.settings import settings
 
 # Initialize logger early
-
 # Import OAuth proxy at module level to ensure singleton behavior
 from auth.oauth_proxy import handle_token_exchange, oauth_proxy, refresh_access_token
+from auth.types import SessionKey
+from config.settings import settings
 
 # Import compatibility shim for OAuth scope management
 try:

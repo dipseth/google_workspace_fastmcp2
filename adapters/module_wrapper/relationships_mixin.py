@@ -7,7 +7,6 @@ for the ModuleWrapper system.
 
 import dataclasses
 import inspect
-from config.enhanced_logging import setup_logger
 from collections import defaultdict
 from typing import (
     Any,
@@ -29,6 +28,7 @@ from adapters.module_wrapper.types import (
     RelationshipInfo,
     RelationshipList,
 )
+from config.enhanced_logging import setup_logger
 
 from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES, ModuleComponent
 
@@ -530,7 +530,7 @@ class RelationshipsMixin:
             # Each parent class has a different payload, so we accumulate
             # SetPayloadOperation entries and flush in batches.
             try:
-                from qdrant_client.models import SetPayloadOperation, SetPayload
+                from qdrant_client.models import SetPayload, SetPayloadOperation
                 _has_batch = True
             except ImportError:
                 _has_batch = False

@@ -220,9 +220,8 @@ def prepare_children_for_container(
 # ICON BUILDING
 # =============================================================================
 
-from config.enhanced_logging import setup_logger
-
 from adapters.module_wrapper.strict import warn_strict
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

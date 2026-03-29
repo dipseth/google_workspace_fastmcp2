@@ -520,8 +520,8 @@ async def per_group_performance():
             predicted_rank = len(candidates)
 
         # Score margin: gap between highest positive and highest negative
-        pos_scores = [s for s, l in zip(score_list, labels) if l > 0.5]
-        neg_scores = [s for s, l in zip(score_list, labels) if l <= 0.5]
+        pos_scores = [s for s, lb in zip(score_list, labels) if lb > 0.5]
+        neg_scores = [s for s, lb in zip(score_list, labels) if lb <= 0.5]
         margin = (max(pos_scores) - max(neg_scores)) if pos_scores and neg_scores else 0.0
 
         is_correct = predicted_rank == 1
@@ -531,7 +531,7 @@ async def per_group_performance():
         all_margins.append(margin)
 
         group_name = group.get("query_name") or group.get("query_id", "unknown")
-        n_positive = sum(1 for l in labels if l > 0.5)
+        n_positive = sum(1 for lb in labels if lb > 0.5)
 
         groups_detail.append({
             "group_name": group_name,
@@ -1201,7 +1201,7 @@ async def head_confusion():
         # Form head: predicted vs expected
         form_predicted_idx = form_scores.argmax().item()
         form_expected_idx = next(
-            (i for i, l in enumerate(form_labels) if l > 0.5), None
+            (i for i, lb in enumerate(form_labels) if lb > 0.5), None
         )
         if form_expected_idx is not None:
             predicted_name = candidates[form_predicted_idx].get("name", "?")
@@ -1216,7 +1216,7 @@ async def head_confusion():
         if any(cl > 0.5 for cl in content_labels):
             content_predicted_idx = content_scores.argmax().item()
             content_expected_idx = next(
-                (i for i, l in enumerate(content_labels) if l > 0.5), None
+                (i for i, lb in enumerate(content_labels) if lb > 0.5), None
             )
             if content_expected_idx is not None:
                 predicted_name = candidates[content_predicted_idx].get("name", "?")
@@ -1231,7 +1231,7 @@ async def head_confusion():
             list(confusion_dict.keys())
             + [e for row in confusion_dict.values() for e in row.keys()]
         ))
-        label_idx = {l: i for i, l in enumerate(labels)}
+        label_idx = {lb: i for i, lb in enumerate(labels)}
         matrix = [[0] * len(labels) for _ in labels]
         for predicted, expecteds in confusion_dict.items():
             for expected, count in expecteds.items():
@@ -1297,8 +1297,8 @@ async def content_accuracy_detail():
             len(candidates),
         )
         form_margin = 0.0
-        form_pos = [s for s, l in zip(form_scores, form_labels) if l > 0.5]
-        form_neg = [s for s, l in zip(form_scores, form_labels) if l <= 0.5]
+        form_pos = [s for s, lb in zip(form_scores, form_labels) if lb > 0.5]
+        form_neg = [s for s, lb in zip(form_scores, form_labels) if lb <= 0.5]
         if form_pos and form_neg:
             form_margin = max(form_pos) - max(form_neg)
         form_ranks.append(form_rank)
@@ -1313,8 +1313,8 @@ async def content_accuracy_detail():
                 (rank + 1 for rank, idx in enumerate(content_sorted) if content_labels[idx] > 0.5),
                 len(candidates),
             )
-            content_pos = [s for s, l in zip(content_scores, content_labels) if l > 0.5]
-            content_neg = [s for s, l in zip(content_scores, content_labels) if l <= 0.5]
+            content_pos = [s for s, lb in zip(content_scores, content_labels) if lb > 0.5]
+            content_neg = [s for s, lb in zip(content_scores, content_labels) if lb <= 0.5]
             if content_pos and content_neg:
                 content_margin = max(content_pos) - max(content_neg)
             content_ranks.append(content_rank)

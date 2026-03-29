@@ -2,12 +2,10 @@
 
 import logging
 import os
+from datetime import datetime, timedelta
 
 import google_auth_httplib2
 import httplib2
-
-from datetime import datetime, timedelta
-
 from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build

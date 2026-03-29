@@ -17,11 +17,12 @@ Usage:
     result = semantic_icon_search("TREND_UP")
 """
 
-from config.enhanced_logging import setup_logger
 import threading
 from typing import List, Optional, Tuple
 
 import numpy as np
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

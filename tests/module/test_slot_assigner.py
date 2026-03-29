@@ -4,8 +4,8 @@ import pytest
 import torch
 
 from research.trm.h2.domain_config import (
-    GCHAT_DOMAIN,
     EMAIL_DOMAIN,
+    GCHAT_DOMAIN,
     DomainConfig,
     get_domain,
     get_domain_or_default,
@@ -19,7 +19,6 @@ from research.trm.h2.slot_assigner import (
     POOL_VOCAB,
     SlotAffinityNet,
 )
-
 
 # ── DomainConfig Tests ─────────────────────────────────────────────
 
@@ -366,8 +365,8 @@ class TestSlotAssignment:
 
     def test_reassign_no_model_returns_original(self):
         """Without a model checkpoint, reassign should return original."""
-        from gchat.card_builder.slot_assignment import reassign_supply_map
         import gchat.card_builder.slot_assignment as sa
+        from gchat.card_builder.slot_assignment import reassign_supply_map
 
         old_attempted = sa._model_load_attempted
         old_model = sa._cached_model
@@ -389,8 +388,8 @@ class TestSlotAssignment:
 
     def test_reassign_single_item_returns_original(self):
         """Pools with 0-1 total items should skip reassignment."""
-        from gchat.card_builder.slot_assignment import reassign_supply_map
         import gchat.card_builder.slot_assignment as sa
+        from gchat.card_builder.slot_assignment import reassign_supply_map
 
         old_attempted = sa._model_load_attempted
         old_model = sa._cached_model

@@ -25,11 +25,12 @@ Symbol Generation:
     or use the hardcoded defaults below for backward compatibility.
 """
 
-from config.enhanced_logging import setup_logger
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

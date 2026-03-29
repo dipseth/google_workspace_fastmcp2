@@ -35,7 +35,6 @@ Expects from other mixins:
 """
 
 import hashlib
-from config.enhanced_logging import setup_logger
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -50,6 +49,7 @@ from adapters.module_wrapper.types import (
     RelationshipDict,
     TimestampedMixin,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

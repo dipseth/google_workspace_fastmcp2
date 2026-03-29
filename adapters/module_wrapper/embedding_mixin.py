@@ -6,7 +6,6 @@ for the ModuleWrapper system. Delegates to the centralized EmbeddingService
 for model instances (thread-safe, deduplicated).
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Optional
 
 from adapters.module_wrapper.types import (
@@ -17,6 +16,7 @@ from adapters.module_wrapper.types import (
     EmbeddingVector,
     MultiVector,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

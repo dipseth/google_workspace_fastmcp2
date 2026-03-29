@@ -4,12 +4,12 @@ import pytest
 import torch
 
 from research.trm.h2.domain_config import (
-    GCHAT_DOMAIN,
     EMAIL_DOMAIN,
+    GCHAT_DOMAIN,
     DomainConfig,
 )
-from research.trm.h2.unified_trn import FEATURE_NAMES_V5, UnifiedTRN
 from research.trm.h2.slot_assigner import POOL_VOCAB
+from research.trm.h2.unified_trn import FEATURE_NAMES_V5, UnifiedTRN
 
 
 class TestUnifiedTRNArchitecture:

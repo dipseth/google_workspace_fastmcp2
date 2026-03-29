@@ -41,7 +41,6 @@ Search Strategy Overview:
 
 import asyncio
 import importlib
-from config.enhanced_logging import setup_logger
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -68,6 +67,7 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -1548,7 +1548,10 @@ class SearchMixin:
     ) -> list:
         """Build the Qdrant prefetch pipeline (shared by multidim/learned/recursive)."""
         from qdrant_client.models import (
-            FieldCondition, Filter, MatchValue, Prefetch,
+            FieldCondition,
+            Filter,
+            MatchValue,
+            Prefetch,
         )
 
         prefetch_list = []
@@ -1626,7 +1629,12 @@ class SearchMixin:
         Returns a flat list of points (with .vector and .payload) from all groups.
         """
         from qdrant_client.models import (
-            FieldCondition, Filter, Fusion, FusionQuery, MatchValue, Prefetch,
+            FieldCondition,
+            Filter,
+            Fusion,
+            FusionQuery,
+            MatchValue,
+            Prefetch,
         )
 
         prefetch_list = self._build_prefetch_list(
@@ -3323,7 +3331,8 @@ class SearchMixin:
 
         try:
             import numpy as np
-            from qdrant_client.models import Fusion, FusionQuery, Prefetch as QdrantPrefetch
+            from qdrant_client.models import Fusion, FusionQuery
+            from qdrant_client.models import Prefetch as QdrantPrefetch
 
             # --- Embed original query ---
             query_colbert_orig = self._embed_with_colbert(description, token_ratio)
@@ -3498,8 +3507,12 @@ class SearchMixin:
 
                     try:
                         from qdrant_client.models import (
-                            RecommendQuery, RecommendInput, RecommendStrategy,
-                            Filter, FieldCondition, MatchValue,
+                            FieldCondition,
+                            Filter,
+                            MatchValue,
+                            RecommendInput,
+                            RecommendQuery,
+                            RecommendStrategy,
                         )
                         # Use RecommendQuery as a prefetch source for next cycle.
                         # Qdrant natively computes average vector from top-K point IDs

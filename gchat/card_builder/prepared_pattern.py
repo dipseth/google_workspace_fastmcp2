@@ -5,7 +5,6 @@ This module provides PreparedPattern for deferred card rendering,
 using the card_builder package utilities for metadata and rendering.
 """
 
-from config.enhanced_logging import setup_logger
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +15,7 @@ from adapters.module_wrapper.types import (
     Payload,
     Serializable,
 )
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.constants import COMPONENT_PARAMS
 from gchat.card_builder.metadata import (
     get_children_field,

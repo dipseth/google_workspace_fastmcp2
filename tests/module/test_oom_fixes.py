@@ -377,10 +377,10 @@ class TestWatchdogProactiveEviction:
 
     def test_memory_limit_default_raised(self):
         """Default memory limit should be 3072MB (or overridden by env)."""
-        import lifespans.server_lifespans as mod
-
         # If MEMORY_LIMIT_MB env var is set, the default doesn't apply
         import os
+
+        import lifespans.server_lifespans as mod
 
         if os.getenv("MEMORY_LIMIT_MB"):
             assert mod._MEMORY_LIMIT_MB == int(os.getenv("MEMORY_LIMIT_MB"))
@@ -425,10 +425,8 @@ class TestRedisSettings:
 
     def test_field_is_optional_str(self):
         """redis_io_url_string should accept Optional[str]."""
-        from config.settings import Settings
-
         # Check the global settings instance has the attribute
-        from config.settings import settings
+        from config.settings import Settings, settings
 
         # Value is either None or a string (from .env)
         val = settings.redis_io_url_string

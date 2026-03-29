@@ -24,7 +24,6 @@ Usage:
     text = validator.get_enriched_relationship_text("Section")
 """
 
-from config.enhanced_logging import setup_logger
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
@@ -39,6 +38,7 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
     Validatable,
 )
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper

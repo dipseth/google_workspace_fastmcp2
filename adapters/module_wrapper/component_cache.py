@@ -35,7 +35,6 @@ Architecture:
 """
 
 import hashlib
-from config.enhanced_logging import setup_logger
 import os
 import pickle
 import threading
@@ -56,6 +55,7 @@ from adapters.module_wrapper.types import (
     TimestampedMixin,
     WrapperGetter,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

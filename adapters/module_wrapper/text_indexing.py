@@ -29,13 +29,13 @@ client and collection_name. These standalone functions are maintained for
 backwards compatibility and for use in scripts without a wrapper instance.
 """
 
-from config.enhanced_logging import setup_logger
 from typing import List, Optional
 
 from adapters.module_wrapper.types import (
     ComponentName,
     QueryText,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

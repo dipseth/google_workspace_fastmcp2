@@ -10,9 +10,9 @@ Example:
     {"items": [{"top_label": "Service", "text": "Drive"}, {"top_label": "Service", "text": "Gmail"}]}
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Optional
 
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.metadata import get_context_resource
 
 logger = setup_logger()
