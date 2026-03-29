@@ -12,8 +12,9 @@ import json
 import os
 import sys
 import time
-import requests
 from typing import Any
+
+import requests
 
 WEBHOOK_URL = os.environ.get(
     "TEST_CHAT_WEBHOOK",

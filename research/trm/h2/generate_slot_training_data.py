@@ -155,7 +155,7 @@ def generate_qdrant_pairs(
     client = QdrantClient(url=url, api_key=key)
 
     # Scroll all instance_pattern points
-    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
 
     offset = None
     points = []

@@ -149,7 +149,10 @@ def generate_structures(count: int, seed: int = 42) -> List[dict]:
     """Generate random valid card structures using DAGStructureGenerator."""
     random.seed(seed)
 
-    from gchat.testing.dag_structure_generator import DAGStructureGenerator, DAGGeneratorConfig
+    from gchat.testing.dag_structure_generator import (
+        DAGGeneratorConfig,
+        DAGStructureGenerator,
+    )
 
     config = DAGGeneratorConfig(
         max_depth=3,
@@ -211,8 +214,8 @@ def generate_variations(
 ) -> List[dict]:
     """Generate structural and parameter variations of existing structures."""
     from adapters.module_wrapper.instance_pattern_mixin import (
-        StructureVariator,
         ParameterVariator,
+        StructureVariator,
     )
 
     variator = StructureVariator()

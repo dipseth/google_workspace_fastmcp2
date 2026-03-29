@@ -21,9 +21,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from games import Connect4, Mancala, TicTacToe
 from games.base import GameState
-from recursive_search import multi_dimensional_search, recursive_search, single_pass_search
+from recursive_search import (
+    multi_dimensional_search,
+    recursive_search,
+    single_pass_search,
+)
 from ric_vectors import EMBEDDING_DIM, RICEmbedder
-
 
 # ──────────────────────────────────────────────
 #  Game Solver Tests

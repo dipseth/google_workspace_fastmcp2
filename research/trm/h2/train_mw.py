@@ -53,6 +53,7 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
         feature_version: 1-4 = single label, 5 = dual labels (form + content)
     """
     import json
+
     from research.trm.h2.generate_training_data import (
         FEATURE_NAMES_V2,
         FEATURE_NAMES_V3,

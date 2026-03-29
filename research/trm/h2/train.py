@@ -29,7 +29,7 @@ from .data_pipeline import (  # noqa: E402
     create_listwise_dataloaders,
     generate_query_groups,
 )
-from .model import SimilarityScorer, TRPNConfig, TinyProjectionNetwork  # noqa: E402
+from .model import SimilarityScorer, TinyProjectionNetwork, TRPNConfig  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

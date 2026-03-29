@@ -17,6 +17,7 @@ from typing import Optional
 
 import numpy as np
 from fastembed import TextEmbedding
+from games.base import Game, GameState
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -24,8 +25,6 @@ from qdrant_client.models import (
     PointStruct,
     VectorParams,
 )
-
-from games.base import Game, GameState
 
 logger = logging.getLogger(__name__)
 

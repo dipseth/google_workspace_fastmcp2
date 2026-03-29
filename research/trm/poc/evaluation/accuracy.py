@@ -25,12 +25,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from games import Connect4, Game, Mancala, TicTacToe
-from ric_vectors import RICEmbedder
 from recursive_search import (
     multi_dimensional_search,
     recursive_search,
     single_pass_search,
 )
+from ric_vectors import RICEmbedder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

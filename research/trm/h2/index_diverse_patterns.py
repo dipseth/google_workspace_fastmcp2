@@ -177,10 +177,9 @@ def build_diverse_recipes():
 
 def index_patterns():
     """Generate and index all diverse patterns into Qdrant."""
-    from gchat.feedback_loop import get_feedback_loop
-
     # Force wrapper initialization
     from gchat.card_framework_wrapper import get_card_framework_wrapper
+    from gchat.feedback_loop import get_feedback_loop
     wrapper = get_card_framework_wrapper()
     logger.info(f"Wrapper ready")
 

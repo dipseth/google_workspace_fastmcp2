@@ -19,6 +19,7 @@ import os
 import sys
 
 import numpy as np
+
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
@@ -33,9 +34,9 @@ def backfill(collection: str, dry_run: bool = True):
         FieldCondition,
         Filter,
         MatchValue,
+        PointIdsList,
         PointVectors,
         SetPayloadOperation,
-        PointIdsList,
     )
 
     from adapters.module_wrapper.pipeline_mixin import (
