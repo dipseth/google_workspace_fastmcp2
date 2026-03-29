@@ -18,6 +18,7 @@ Key Features:
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from mcp.types import ToolListChangedNotification
 
 # Import HTTP request access for query parameter parsing
 try:
@@ -362,6 +363,10 @@ class SessionToolFilteringMiddleware(Middleware):
 
         # Track sessions we've already processed for minimal startup
         self._processed_sessions: Set[str] = set()
+
+        # Track sessions that have already received a tool list changed notification
+        # Prevents notification spam on repeated list_tools calls
+        self._notified_sessions: Set[str] = set()
 
         if self.minimal_startup:
             logger.info(
@@ -884,6 +889,26 @@ class SessionToolFilteringMiddleware(Middleware):
                 f"SessionToolFilteringMiddleware: Filtered {hidden_count} tools for session {session_id[:8]}... "
                 f"({len(filtered_tools)} visible, {len(session_disabled)} session-disabled)"
             )
+
+            # Send ToolListChangedNotification on first filter for this session
+            # This notifies clients (that support it) that the tool list differs
+            # from the full server tool set. Only sent once per session to avoid spam.
+            if session_id not in self._notified_sessions:
+                self._notified_sessions.add(session_id)
+                if context.fastmcp_context:
+                    try:
+                        await context.fastmcp_context.send_notification(
+                            ToolListChangedNotification()
+                        )
+                        logger.info(
+                            f"📢 Sent ToolListChangedNotification for session {session_id[:8]}... "
+                            f"({hidden_count} tools filtered)"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to send ToolListChangedNotification for session "
+                            f"{session_id[:8]}...: {e}"
+                        )
 
         return filtered_tools
 

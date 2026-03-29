@@ -143,13 +143,37 @@ from gchat.card_builder.rendering import (
     # Array item handling
     unwrap_array_item,
     unwrap_array_items,
+    # Generic child builder
+    build_child_widget,
 )
 from gchat.card_builder.search import (
+    # Pattern extraction
     extract_paths_from_pattern,
     extract_style_metadata_from_pattern,
     find_pattern_with_styles,
     has_style_metadata,
+    # Cache management
+    cache_pattern,
+    get_cache_key,
+    get_cached_pattern,
+    # Pattern search
+    generate_pattern_from_wrapper,
+    query_qdrant_patterns,
+    query_wrapper_patterns,
+    # Pattern storage
+    store_card_pattern,
+    store_feedback_ui_pattern,
 )
+from gchat.card_builder.component_builder import ComponentBuilder
+from gchat.card_builder.context import consume_from_context
+from gchat.card_builder.field_extractors import (
+    extract_button_fields,
+    extract_carousel_card_fields,
+    extract_chip_fields,
+    extract_content_text_fields,
+    extract_grid_item_fields,
+)
+from gchat.card_builder.symbol_params import resolve_symbol_params
 from gchat.card_builder.utils import fire_and_forget
 from gchat.card_builder.validation import (
     clean_card_metadata,
@@ -255,18 +279,43 @@ __all__ = [
     "build_icon_via_wrapper",
     "build_switch_via_wrapper",
     "build_onclick_via_wrapper",
+    # Generic child builder
+    "build_child_widget",
+    # Component builder
+    "ComponentBuilder",
     # DSL utilities
     "WIDGET_JSON_KEYS",
     "extract_component_paths",
     "generate_dsl_notation",
-    # Search utilities
+    # Search utilities - pattern extraction
     "extract_paths_from_pattern",
     "extract_style_metadata_from_pattern",
     "has_style_metadata",
     "find_pattern_with_styles",
+    # Search utilities - cache management
+    "get_cache_key",
+    "get_cached_pattern",
+    "cache_pattern",
+    # Search utilities - pattern search
+    "query_wrapper_patterns",
+    "query_qdrant_patterns",
+    "generate_pattern_from_wrapper",
+    # Search utilities - pattern storage
+    "store_card_pattern",
+    "store_feedback_ui_pattern",
     # Validation utilities
     "has_feedback",
     "clean_card_metadata",
     "validate_content",
     "make_callback_url",
+    # Context consumption
+    "consume_from_context",
+    # Symbol param resolution
+    "resolve_symbol_params",
+    # Field extractors
+    "extract_content_text_fields",
+    "extract_button_fields",
+    "extract_chip_fields",
+    "extract_carousel_card_fields",
+    "extract_grid_item_fields",
 ]

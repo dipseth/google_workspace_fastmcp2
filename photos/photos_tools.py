@@ -165,7 +165,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         Returns:
             AlbumListResponse: Structured list of photo albums with metadata.
         """
-        logger.info(f"[list_photos_albums] Invoked. Email: '{user_google_email}'")
+        logger.info("[list_photos_albums] Invoked")
 
         try:
             photos_service = await _get_photos_service_with_fallback(user_google_email)
@@ -261,7 +261,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         Returns:
             SearchPhotosResponse: Structured search results with photos and metadata.
         """
-        logger.info(f"[search_photos] Invoked. Email: '{user_google_email}'")
+        logger.info("[search_photos] Invoked")
 
         filters_applied = {
             "album_id": album_id,
@@ -709,7 +709,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         Returns:
             LibraryInfoResponse: Structured summary of the Photos library including album and photo counts.
         """
-        logger.info(f"[get_photos_library_info] Invoked. Email: '{user_google_email}'")
+        logger.info("[get_photos_library_info] Invoked")
 
         try:
             photos_service = await _get_photos_service_with_fallback(user_google_email)
@@ -755,7 +755,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             if album_count > 5:
                 text_summary += f"... and {album_count - 5} more albums\n"
 
-            logger.info(f"Successfully retrieved library info for {user_google_email}.")
+            logger.info("Successfully retrieved library info.")
 
             return LibraryInfoResponse(
                 success=True,

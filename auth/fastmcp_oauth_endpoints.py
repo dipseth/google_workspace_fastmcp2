@@ -86,7 +86,7 @@ def _get_oauth_endpoint_scopes():
         logger.warning("Compatibility shim not available, using fallback scopes")
         return _FALLBACK_OAUTH_SCOPES
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -239,7 +239,6 @@ async def _store_oauth_user_data_async(
     except Exception as e:
         logger.error(
             f"❌ Failed to integrate OAuth authentication data (async): {e}",
-            exc_info=True,
         )
         # This is background processing, so we don't want to crash anything
 
@@ -521,7 +520,7 @@ async def _build_oauth_success_html(
     try:
         if session_id and _intro_privacy:
             store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
-            logger.info(f"🛡️ Privacy mode enabled from intro screen for {user_email}")
+            logger.info(f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}")
         if session_id and _intro_sampling and _intro_sampling.get("model"):
             auth_mw_sampling = get_auth_middleware()
             if auth_mw_sampling:
@@ -661,10 +660,10 @@ def setup_legacy_callback_route(mcp) -> None:
                 state=state,
                 code_verifier=code_verifier,
             )
-            logger.info(f"✅ OAuth callback processed for user: {user_email}")
+            logger.info(f"✅ OAuth callback processed for user: {redact_email(user_email)}")
 
             if not validate_user_access(user_email):
-                logger.warning(f"🚫 Access denied for user: {user_email}")
+                logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
                 from auth.ui import generate_access_denied_html
 
                 return HTMLResponse(
@@ -678,7 +677,7 @@ def setup_legacy_callback_route(mcp) -> None:
 
                 dual_bridge = get_dual_auth_bridge()
                 dual_bridge.add_secondary_account(user_email)
-                logger.info(f"✅ Registered {user_email} as secondary account")
+                logger.info(f"✅ Registered {redact_email(user_email)} as secondary account")
             except Exception as e:
                 logger.warning(
                     f"⚠️ Dual auth bridge registration error (continuing): {e}"
@@ -728,7 +727,7 @@ def setup_legacy_callback_route(mcp) -> None:
                         authed.discard(old_email)
                         authed.add(_verified)
                         store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                        logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
                     elif not sid_email and owned:
                         # Session has no USER_EMAIL but has owned accounts — set the verified email
                         store_session_data(sid, SessionKey.USER_EMAIL, user_email)
@@ -736,7 +735,7 @@ def setup_legacy_callback_route(mcp) -> None:
                         store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
                         authed.add(_verified)
                         store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Set session {sid} email to {user_email} (was empty)")
+                        logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
             except Exception as e:
                 logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -746,7 +745,7 @@ def setup_legacy_callback_route(mcp) -> None:
             return HTMLResponse(content=success_html, status_code=200)
 
         except Exception as e:
-            logger.error(f"❌ Legacy oauth2callback error: {e}", exc_info=True)
+            logger.error(f"❌ Legacy oauth2callback error: {e}")
             from auth.ui import generate_error_html
 
             return HTMLResponse(
@@ -1172,7 +1171,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             return RedirectResponse(url=google_auth_url, status_code=302)
 
         except Exception as e:
-            logger.error(f"❌ Authorization proxy failed: {e}", exc_info=True)
+            logger.error(f"❌ Authorization proxy failed: {e}")
             return JSONResponse(
                 content={
                     "error": "server_error",
@@ -1577,12 +1576,12 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
                 logger.info(
-                    f"✅ OAuth callback processed successfully for user: {user_email}"
+                    f"✅ OAuth callback processed successfully for user: {redact_email(user_email)}"
                 )
 
                 # SECURITY: Validate user access before saving credentials
                 if not validate_user_access(user_email):
-                    logger.warning(f"🚫 Access denied for user: {user_email}")
+                    logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
 
                     # Return access denied page
                     from auth.ui import generate_access_denied_html
@@ -1597,7 +1596,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     )
 
                 logger.info(
-                    f"✅ Access granted - credentials saved for user: {user_email}"
+                    f"✅ Access granted - credentials saved for user: {redact_email(user_email)}"
                 )
 
                 # Store user email in session context (get_session_context returns
@@ -1610,7 +1609,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             session_id, SessionKey.USER_EMAIL, user_email
                         )
                         logger.info(
-                            f"✅ Stored user email {user_email} in session {session_id}"
+                            f"✅ Stored user email {redact_email(user_email)} in session {session_id}"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
@@ -1646,14 +1645,14 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             authed.discard(old_email)
                             authed.add(_verified)
                             store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Updated session {sid} email from {old_email} to {user_email}")
+                            logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
                         elif not sid_email and owned:
                             store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                             owned.add(_verified)
                             store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
                             authed.add(_verified)
                             store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Set session {sid} email to {user_email} (was empty)")
+                            logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
                 except Exception as e:
                     logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -1661,7 +1660,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     user_email, credentials, session_id
                 )
                 logger.info(
-                    f"✅ Returning success page for {user_email} with credential confirmation"
+                    f"✅ Returning success page for {redact_email(user_email)} with credential confirmation"
                 )
                 return HTMLResponse(
                     content=success_html,
@@ -1677,7 +1676,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
             except Exception as oauth_error:
                 logger.error(
-                    f"❌ OAuth processing failed: {oauth_error}", exc_info=True
+                    f"❌ OAuth processing failed: {oauth_error}"
                 )
 
                 # Enhanced error messaging for OAuth issues
@@ -1705,7 +1704,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
         except Exception as e:
-            logger.error(f"🚨 CRITICAL: Basic callback error: {e}", exc_info=True)
+            logger.error(f"🚨 CRITICAL: Basic callback error: {e}")
 
             # Even if everything fails, return a basic HTML response
             from auth.ui import generate_error_html
@@ -1795,7 +1794,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             return HTMLResponse(content=generate_debug_success_html(auth_code, state))
 
         except Exception as e:
-            logger.error(f"❌ OAuth callback error: {e}", exc_info=True)
+            logger.error(f"❌ OAuth callback error: {e}")
             from auth.ui import generate_error_html
 
             return HTMLResponse(
@@ -2704,3 +2703,153 @@ def setup_status_check_routes(mcp) -> None:
         return HTMLResponse(content=page_html)
 
     logger.info("  ✅ Status check route registered (/auth/status-check)")
+
+
+def setup_complete_oauth_endpoints(
+    mcp,
+    google_auth_provider,
+    settings,
+    use_google_oauth: bool,
+    enable_jwt_auth: bool,
+):
+    """Register all OAuth endpoints — GoogleProvider supplemental or legacy.
+
+    When GoogleProvider is active, registers only supplemental endpoints
+    (status polling, service selection, legacy callback, config API, status check).
+    When not active, registers full legacy OAuth discovery + operational endpoints
+    and configures JWT-based authentication.
+    """
+    if google_auth_provider:
+        # GoogleProvider is active — it already registered all discovery endpoints.
+        logger.info(
+            "🔍 GoogleProvider active — RFC-compliant OAuth endpoints auto-registered"
+        )
+        logger.info(
+            f"  ✅ Protected Resource:  {settings.base_url}/.well-known/oauth-protected-resource"
+        )
+        logger.info(
+            f"  ✅ Auth Server Metadata: {settings.base_url}/.well-known/oauth-authorization-server"
+        )
+        logger.info(f"  ✅ Authorization:        {settings.base_url}/authorize")
+        logger.info(f"  ✅ Token Exchange:       {settings.base_url}/token")
+        logger.info(f"  ✅ Callback:             {settings.base_url}/auth/callback")
+        logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
+
+        try:
+            @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
+            async def oauth_status_check_gp(request):
+                """OAuth authentication status polling endpoint (supplemental)."""
+                from starlette.responses import JSONResponse, Response
+
+                if request.method == "OPTIONS":
+                    return Response(
+                        status_code=200, headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                import json
+                from pathlib import Path as _Path
+
+                oauth_data_path = (
+                    _Path(settings.credentials_dir) / ".oauth_authentication.json"
+                )
+                if oauth_data_path.exists():
+                    try:
+                        with open(oauth_data_path, "r") as f:
+                            oauth_data = json.load(f)
+                    except (json.JSONDecodeError, OSError):
+                        oauth_data = {}
+                    authenticated_email = oauth_data.get("authenticated_email")
+                    if authenticated_email:
+                        return JSONResponse(
+                            content={
+                                "authenticated": True,
+                                "user_email": authenticated_email,
+                            },
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                                "Cache-Control": "no-store",
+                            },
+                        )
+                return JSONResponse(
+                    content={
+                        "authenticated": False,
+                        "message": "No authentication data found",
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-store",
+                    },
+                )
+
+            logger.info("  ✅ Supplemental /oauth/status endpoint registered")
+
+            setup_service_selection_routes(mcp)
+            logger.info("  ✅ Service selection routes registered (/auth/services/select)")
+
+            setup_legacy_callback_route(mcp)
+            logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
+
+            setup_config_api_routes(mcp)
+            logger.info("  ✅ Config API routes registered for OAuth success page")
+
+            setup_status_check_routes(mcp)
+            logger.info("  ✅ Status check route registered for credential status page")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
+
+        # Do NOT set mcp._auth — GoogleProvider already handles Bearer token validation
+        logger.info(
+            "🔐 Authentication: Handled by GoogleProvider (no manual _auth override)"
+        )
+
+    else:
+        # Legacy mode: register all custom OAuth discovery + operational endpoints
+        logger.info("🔍 Setting up legacy OAuth discovery endpoints...")
+        try:
+            setup_oauth_endpoints_fastmcp(mcp)
+            logger.info("✅ Legacy OAuth discovery endpoints configured")
+            logger.info(
+                f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
+            )
+            logger.info(
+                f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
+            )
+            logger.info(f"  Registration: {settings.base_url}/oauth/register")
+            logger.info(f"  Callback: {settings.base_url}/oauth2callback")
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to setup legacy OAuth endpoints: {e}", exc_info=True
+            )
+
+        # Legacy Authentication System Setup with Access Control
+        if use_google_oauth:
+            from auth.token_validator import create_access_controlled_auth_provider
+
+            jwt_auth_provider = create_access_controlled_auth_provider(
+                jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+                issuer="https://accounts.google.com",
+                required_scopes=["openid", "email"],
+            )
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Legacy Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+            )
+            logger.info(
+                "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+            )
+            logger.info("🎯 OAuth issuer: https://accounts.google.com")
+            logger.info(
+                "🔒 Access enforcement: Only users with stored credentials can connect"
+            )
+
+        elif enable_jwt_auth:
+            from auth.jwt_auth import setup_jwt_auth
+
+            jwt_auth_provider = setup_jwt_auth()
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Custom JWT Bearer Token authentication enabled (development mode)"
+            )
+            logger.info("⚠️  No access control on JWT tokens - for testing only")
+
+        else:
+            logger.info("⚠️ Authentication DISABLED (for testing)")

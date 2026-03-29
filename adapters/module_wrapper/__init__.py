@@ -193,6 +193,13 @@ from adapters.module_wrapper.text_indexing import (
     search_within_module,
 )
 from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
+from adapters.module_wrapper.variation_generator import register_default_wrapper_getter
+from adapters.module_wrapper.wrapper_factory import (
+    WrapperRegistry,
+    generate_dsl_field_description,
+    generate_dsl_quick_reference,
+    get_skill_resources_safe,
+)
 from adapters.module_wrapper.types import (
     # Constants (also available from core, but centralized here)
     COLBERT_DIM as TYPES_COLBERT_DIM,
@@ -431,10 +438,11 @@ class ModuleWrapper(
             raise
 
     def _initialize_collection(self):
-        """Initialize using 3-vector named-vectors schema via PipelineMixin.
+        """Initialize using 4-vector named-vectors schema via PipelineMixin.
 
-        Fast path: If collection exists with data, loads components from
-        Qdrant synchronously. The wrapper is fully ready when this returns.
+        Fast path: If collection exists with all expected vectors and data,
+        loads components from Qdrant synchronously. The wrapper is fully
+        ready when this returns.
 
         Slow path: If collection needs (re)creation, does module introspection
         synchronously (populating self.components and symbols), then runs the
@@ -442,6 +450,8 @@ class ModuleWrapper(
         for in-memory operations (DSL parsing, symbol lookup, etc.) while
         the pipeline indexes to Qdrant in the background.
         """
+        from adapters.module_wrapper.types import EXPECTED_VECTOR_NAMES
+
         coll_name = self.collection_name
         logger.info(f"Using named-vectors schema for collection: {coll_name}")
 
@@ -454,13 +464,20 @@ class ModuleWrapper(
                 info = self.client.get_collection(coll_name)
                 vectors_config = info.config.params.vectors
 
-                # Verify it uses named vectors (dict, not single)
+                # Verify it uses named vectors with all expected vector names
                 is_named = isinstance(vectors_config, dict)
+                actual_vectors = (
+                    set(vectors_config.keys()) if is_named else set()
+                )
+                has_all_vectors = (
+                    is_named and actual_vectors >= EXPECTED_VECTOR_NAMES
+                )
 
-                if is_named and info.points_count > 0 and not self.force_reindex:
+                if has_all_vectors and info.points_count > 0 and not self.force_reindex:
                     logger.info(
                         f"Collection {coll_name} exists with {info.points_count} points "
-                        f"and correct schema — loading existing components"
+                        f"and correct schema ({len(actual_vectors)} vectors) "
+                        f"— loading existing components"
                     )
                     self._load_existing_components(coll_name)
                     self._pipeline_status = "completed"
@@ -472,9 +489,14 @@ class ModuleWrapper(
                     "wrong schema (single vector)"
                     if not is_named
                     else (
-                        "force_reindex requested"
-                        if self.force_reindex
-                        else f"empty ({info.points_count} points)"
+                        f"missing vectors (have {actual_vectors}, "
+                        f"need {EXPECTED_VECTOR_NAMES})"
+                        if not has_all_vectors
+                        else (
+                            "force_reindex requested"
+                            if self.force_reindex
+                            else f"empty ({info.points_count} points)"
+                        )
                     )
                 )
                 logger.warning(
@@ -900,6 +922,12 @@ __all__ = [
     # Search constants
     "COLBERT_DIM",
     "RELATIONSHIPS_DIM",
+    # Wrapper factory
+    "WrapperRegistry",
+    "generate_dsl_quick_reference",
+    "generate_dsl_field_description",
+    "get_skill_resources_safe",
+    "register_default_wrapper_getter",
     # Mixin dependency contracts
     "MixinContract",
     "validate_mixin_dependencies",

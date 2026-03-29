@@ -172,6 +172,100 @@ class TestRunValidationAgent:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_structured_output_fallback_retries_without_result_type(self):
+        """When structured output fails (final_response error), retry without
+        result_type and parse JSON from text response."""
+        from fastmcp.exceptions import ToolError
+
+        mw = _make_middleware_with_validation()
+        config = mw._validation_configs["send_dynamic_card"]
+
+        ctx = _make_mock_context(
+            "send_dynamic_card",
+            {"card_description": "§[δ×2]", "card_params": {}},
+        )
+
+        # First call raises ToolError with "final_response" (structured output failure),
+        # second call returns plain text JSON
+        valid_json = json.dumps(
+            {"is_valid": True, "confidence": 0.9, "issues": [], "suggestions": []}
+        )
+        mock_text_result = MagicMock()
+        mock_text_result.result = None
+        mock_text_result.text = valid_json
+
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call with result_type — fail with structured output error
+                raise ToolError(
+                    "LLM sampling failed: Expected structured output of type "
+                    "ValidationResult, but the LLM returned a text response "
+                    "instead of calling the final_response tool."
+                )
+            # Second call without result_type — return text
+            return mock_text_result
+
+        with patch(
+            "middleware.sampling_middleware.SamplingContext.sample",
+            new_callable=AsyncMock,
+            side_effect=_side_effect,
+        ):
+            result = await mw._run_validation_agent(
+                ctx, "send_dynamic_card", config
+            )
+
+        assert result is not None
+        assert result.is_valid is True
+        assert result.confidence == 0.9
+        assert call_count == 2  # Confirms retry happened
+
+    @pytest.mark.asyncio
+    async def test_structured_output_fallback_with_markdown_fenced_json(self):
+        """Fallback should strip markdown code fences from text response."""
+        from fastmcp.exceptions import ToolError
+
+        mw = _make_middleware_with_validation()
+        config = mw._validation_configs["send_dynamic_card"]
+
+        ctx = _make_mock_context(
+            "send_dynamic_card",
+            {"card_description": "§[δ×2]", "card_params": {}},
+        )
+
+        fenced_json = '```json\n{"is_valid": false, "confidence": 0.7, "issues": ["bad structure"], "suggestions": ["fix it"]}\n```'
+        mock_text_result = MagicMock()
+        mock_text_result.result = None
+        mock_text_result.text = fenced_json
+
+        call_count = 0
+
+        async def _side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ToolError(
+                    "Expected structured output instead of calling the final_response tool."
+                )
+            return mock_text_result
+
+        with patch(
+            "middleware.sampling_middleware.SamplingContext.sample",
+            new_callable=AsyncMock,
+            side_effect=_side_effect,
+        ):
+            result = await mw._run_validation_agent(
+                ctx, "send_dynamic_card", config
+            )
+
+        assert result is not None
+        assert result.is_valid is False
+        assert result.issues == ["bad structure"]
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_global_kill_switch_off(self):
         """Global sampling_validation_enabled=False should return None."""
         mw = _make_middleware_with_validation()

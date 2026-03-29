@@ -46,7 +46,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from google.oauth2.credentials import Credentials
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 from config.settings import settings
 
 from .context import (
@@ -90,7 +90,7 @@ class DualAuthBridge:
         self._primary_account = user_email
         if credentials:
             self._memory_credentials[user_email] = credentials
-        logger.info(f"✅ Set primary account: {user_email}")
+        logger.info(f"✅ Set primary account: {redact_email(user_email)}")
 
     def add_secondary_account(self, user_email: str) -> None:
         """
@@ -100,7 +100,7 @@ class DualAuthBridge:
             user_email: Secondary account email
         """
         self._secondary_accounts.add(user_email)
-        logger.info(f"➕ Added secondary account: {user_email}")
+        logger.info(f"➕ Added secondary account: {redact_email(user_email)}")
 
     def is_primary_account(self, user_email: str) -> bool:
         """Check if an email is the primary account."""
@@ -117,7 +117,7 @@ class DualAuthBridge:
         granting that API key session access to these credentials.
         """
         self._api_key_owned_accounts.add(user_email.lower().strip())
-        logger.info(f"🔑 Registered API key owned account: {user_email}")
+        logger.info(f"🔑 Registered API key owned account: {redact_email(user_email)}")
 
     def is_api_key_owned_account(self, user_email: str) -> bool:
         """Check if an email was registered by an API key session."""
@@ -211,7 +211,7 @@ class DualAuthBridge:
                 if user_email in self._memory_credentials:
                     credentials = self._memory_credentials[user_email]
                     logger.info(
-                        f"🔄 Bridging credentials from memory to file for {user_email}"
+                        f"🔄 Bridging credentials from memory to file for {redact_email(user_email)}"
                     )
 
                     # Save to file using existing mechanism
@@ -229,7 +229,7 @@ class DualAuthBridge:
 
                 if credentials:
                     logger.info(
-                        f"🔄 Bridging credentials from file to memory for {user_email}"
+                        f"🔄 Bridging credentials from file to memory for {redact_email(user_email)}"
                     )
                     self._memory_credentials[user_email] = credentials
                     return credentials
@@ -237,7 +237,7 @@ class DualAuthBridge:
             return None
 
         except Exception as e:
-            logger.error(f"❌ Failed to bridge credentials for {user_email}: {e}")
+            logger.error(f"❌ Failed to bridge credentials for {redact_email(user_email)}: {e}")
             return None
 
     def validate_dual_flow(self) -> Dict[str, Any]:
@@ -349,10 +349,10 @@ class DualAuthBridge:
                     credentials = self.bridge_credentials(target_email, "memory")
 
         if credentials:
-            logger.info(f"✅ Got credentials for {target_email} from {prefer_source}")
+            logger.info(f"✅ Got credentials for {redact_email(target_email)} from {prefer_source}")
             return target_email, credentials
 
-        logger.warning(f"❌ No credentials found for {target_email}")
+        logger.warning(f"❌ No credentials found for {redact_email(target_email)}")
         return None, None
 
     def _try_both_sources(self, user_email: str) -> Optional[Credentials]:
@@ -360,7 +360,7 @@ class DualAuthBridge:
         # Try memory first (faster)
         credentials = self._memory_credentials.get(user_email)
         if credentials:
-            logger.debug(f"Found credentials in memory for {user_email}")
+            logger.debug(f"Found credentials in memory for {redact_email(user_email)}")
             return credentials
 
         # Try file storage
@@ -368,7 +368,7 @@ class DualAuthBridge:
 
         credentials = get_valid_credentials(user_email)
         if credentials:
-            logger.debug(f"Found credentials in file for {user_email}")
+            logger.debug(f"Found credentials in file for {redact_email(user_email)}")
             # Cache in memory for faster access
             self._memory_credentials[user_email] = credentials
             return credentials
@@ -393,7 +393,7 @@ class DualAuthBridge:
             from .google_auth import get_valid_credentials
 
             if not get_valid_credentials(user_email):
-                logger.error(f"Cannot switch to {user_email} - no credentials found")
+                logger.error(f"Cannot switch to {redact_email(user_email)} - no credentials found")
                 return False
 
             # Register as secondary account
@@ -401,7 +401,7 @@ class DualAuthBridge:
 
         # Set in session storage (sync version - can't use async context setter here)
         set_user_email_context_in_session(user_email)
-        logger.info(f"🔄 Switched active account to: {user_email}")
+        logger.info(f"🔄 Switched active account to: {redact_email(user_email)}")
         return True
 
     def get_all_accounts(self) -> Dict[str, str]:

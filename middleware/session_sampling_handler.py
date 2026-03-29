@@ -4,6 +4,10 @@ Wraps the server-default sampling handler and checks for per-session
 overrides stored via the OAuth success page. When a user has configured
 their own LLM provider (model, api_key, api_base), their sampling calls
 are routed through that provider instead of the server default.
+
+Also provides `create_sampling_handler()` factory that creates the
+server-default handler (LiteLLM or Anthropic) and wraps it in a
+SessionAwareSamplingHandler.
 """
 
 from config.enhanced_logging import setup_logger
@@ -138,3 +142,150 @@ class SessionAwareSamplingHandler:
         except Exception as e:
             logger.warning("Failed to create per-user sampling handler: %s", e)
             return None
+
+
+# ---------------------------------------------------------------------------
+# Factory: create the server-default sampling handler
+# ---------------------------------------------------------------------------
+
+
+def _create_litellm_handler(settings):
+    """Create a LiteLLM sampling handler from settings."""
+    from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
+
+    # Resolve API key: explicit LITELLM_API_KEY > VENICE_INFERENCE_KEY > None (litellm env var fallback)
+    # For anthropic/ models, let LiteLLM use ANTHROPIC_API_KEY env var directly
+    # (don't pass Venice key/base which would override the correct provider auth)
+    model = settings.litellm_model
+    if model.startswith("anthropic/"):
+        api_key = settings.litellm_api_key  # Only use explicit override, not Venice
+        api_base = settings.litellm_api_base
+    else:
+        api_key = settings.litellm_api_key or settings.venice_inference_key
+        api_base = settings.litellm_api_base
+        if (
+            not api_base
+            and settings.venice_inference_key
+            and not settings.litellm_api_key
+        ):
+            api_base = "https://api.venice.ai/api/v1"
+    return LiteLLMSamplingHandler(
+        default_model=settings.litellm_model,
+        api_key=api_key,
+        api_base=api_base,
+    )
+
+
+def _create_anthropic_handler(settings):
+    """Create an Anthropic sampling handler with cost tracking and Langfuse tracing."""
+    from anthropic import AsyncAnthropic
+    from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+
+    handler = AnthropicSamplingHandler(
+        default_model="claude-sonnet-4-6",
+        client=AsyncAnthropic(api_key=settings.anthropic_api_key),
+    )
+
+    # Wrap handler to track sampling costs
+    async def _tracking_wrapper(messages, params, context):
+        result = await handler(messages, params, context)
+        try:
+            from middleware.payment.cost_tracker import track_sample_call
+
+            # Estimate from text since Anthropic handler doesn't expose usage
+            input_text = " ".join(
+                getattr(m.content, "text", "")
+                for m in messages
+                if hasattr(m, "content") and hasattr(m.content, "text")
+            )
+            output_text = ""
+            if hasattr(result, "content"):
+                c = result.content
+                if hasattr(c, "text"):
+                    output_text = c.text
+                elif isinstance(c, list):
+                    output_text = " ".join(
+                        getattr(b, "text", "") for b in c if hasattr(b, "text")
+                    )
+            track_sample_call(
+                input_text=input_text,
+                output_text=output_text,
+                model=getattr(result, "model", "claude-sonnet-4-6")
+                or "claude-sonnet-4-6",
+            )
+        except Exception:
+            pass
+        return result
+
+    # Wrap with Langfuse @observe tracing if configured
+    try:
+        from middleware.langfuse_integration import wrap_anthropic_handler_with_langfuse
+
+        wrapped = wrap_anthropic_handler_with_langfuse(_tracking_wrapper)
+        return wrapped
+    except Exception:
+        return _tracking_wrapper
+
+
+def create_sampling_handler(settings) -> Optional["SessionAwareSamplingHandler"]:
+    """Create the server-default sampling handler and wrap in SessionAwareSamplingHandler.
+
+    Selects provider based on ``settings.sampling_provider`` (litellm / anthropic / auto).
+    Registers the raw handler with the cache-keepalive lifespan, then wraps in
+    SessionAwareSamplingHandler for per-user config routing.
+
+    Returns a SessionAwareSamplingHandler (which may wrap None if no provider is available).
+    """
+    raw_handler = None
+    provider = settings.sampling_provider.lower().strip()
+
+    if provider == "litellm":
+        try:
+            raw_handler = _create_litellm_handler(settings)
+            logger.info(
+                "🤖 LiteLLM sampling handler configured (model: %s)",
+                settings.litellm_model,
+            )
+        except Exception as e:
+            logger.warning("⚠️ Failed to configure LiteLLM handler: %s", e)
+
+    elif provider == "anthropic":
+        if settings.anthropic_api_key:
+            try:
+                raw_handler = _create_anthropic_handler(settings)
+                logger.info("🤖 Anthropic sampling handler configured")
+            except Exception as e:
+                logger.warning("⚠️ Failed to configure Anthropic handler: %s", e)
+
+    else:  # "auto"
+        # Try LiteLLM first (if venice key or litellm key set), then Anthropic
+        _has_litellm_key = settings.litellm_api_key or settings.venice_inference_key
+        if _has_litellm_key:
+            try:
+                raw_handler = _create_litellm_handler(settings)
+                logger.info(
+                    "🤖 LiteLLM sampling handler configured as default (model: %s)",
+                    settings.litellm_model,
+                )
+            except Exception as e:
+                logger.warning("⚠️ LiteLLM handler failed, trying Anthropic: %s", e)
+
+        if raw_handler is None and settings.anthropic_api_key:
+            try:
+                raw_handler = _create_anthropic_handler(settings)
+                logger.info("🤖 Anthropic sampling handler configured (fallback)")
+            except Exception as e:
+                logger.warning("⚠️ Failed to configure Anthropic handler: %s", e)
+
+    if raw_handler is None:
+        logger.warning(
+            "⚠️ No sampling handler — set VENICE_INFERENCE_KEY, LITELLM_API_KEY, or ANTHROPIC_API_KEY"
+        )
+
+    # Register raw handler for cache keepalive lifespan access
+    from lifespans.server_lifespans import register_litellm_handler
+
+    register_litellm_handler(raw_handler)
+
+    # Wrap with session-aware handler for per-user LLM provider configuration
+    return SessionAwareSamplingHandler(raw_handler)

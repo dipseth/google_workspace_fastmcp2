@@ -11,6 +11,9 @@ from typing_extensions import Dict, List, Optional, Union
 
 # Import centralized scope registry
 from auth.scope_registry import ScopeRegistry
+from config.enhanced_logging import redact_email, setup_logger
+
+logger = setup_logger()
 
 # Global key pair for development (in production, use proper key management)
 _key_pair: Optional[RSAKeyPair] = None
@@ -135,7 +138,7 @@ def generate_user_token(
         },
     )
 
-    logger.info(f"🎫 Generated JWT token for user: {user_email}")
+    logger.info(f"🎫 Generated JWT token for user: {redact_email(user_email)}")
     logger.debug(f"Token includes {len(resolved_scopes)} scopes from registry")
 
     return token
@@ -158,10 +161,10 @@ def create_test_tokens() -> Dict[str, str]:
             )
             tokens[user_email] = token
             logger.info(
-                f"✅ Created test token for {user_email} with comprehensive scopes"
+                f"✅ Created test token for {redact_email(user_email)} with comprehensive scopes"
             )
         except Exception as e:
-            logger.error(f"❌ Failed to create token for {user_email}: {e}")
+            logger.error(f"❌ Failed to create token for {redact_email(user_email)}: {e}")
 
     return tokens
 
@@ -193,14 +196,14 @@ def get_user_email_from_token() -> str:
 
             user_email = claims.get("email") or claims.get("google_email")
             if user_email:
-                logger.debug(f"✅ Got user email from JWT claims: {user_email}")
+                logger.debug(f"✅ Got user email from JWT claims: {redact_email(user_email)}")
                 return user_email
 
         # Fallback: try to extract from subject
         client_id = access_token.client_id
         if client_id and client_id.startswith("google-user-"):
             user_email = client_id.replace("google-user-", "")
-            logger.debug(f"✅ Extracted user email from subject: {user_email}")
+            logger.debug(f"✅ Extracted user email from subject: {redact_email(user_email)}")
             return user_email
 
         raise RuntimeError(
@@ -228,7 +231,7 @@ if __name__ == "__main__":
     logger.info("Audience: %s", auth_verifier.audience)
 
     for email, token in tokens.items():
-        logger.info("User: %s", email)
+        logger.info("User: %s", redact_email(email))
         logger.info("Token (first 50 chars): %s...", token[:50])
 
         # Demonstrate scope group usage

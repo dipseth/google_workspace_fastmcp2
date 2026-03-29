@@ -1,0 +1,61 @@
+{
+  "modules": {
+    "gchat": {
+      "total_calls": 195,
+      "total_cached_tokens": 209118,
+      "total_input_tokens": 456073,
+      "total_output_tokens": 19488,
+      "cache_hit_rate_pct": 45.9,
+      "total_cost_usd": 1.095918,
+      "total_full_price_usd": 1.660539,
+      "total_savings_usd": 0.564621,
+      "last_keepalive_at": 1774710689.48914,
+      "cached_tokens_last": 0
+    },
+    "email": {
+      "total_calls": 195,
+      "total_cached_tokens": 195832,
+      "total_input_tokens": 426322,
+      "total_output_tokens": 19384,
+      "cache_hit_rate_pct": 45.9,
+      "total_cost_usd": 1.040982,
+      "total_full_price_usd": 1.569726,
+      "total_savings_usd": 0.528744,
+      "last_keepalive_at": 1774710692.049026,
+      "cached_tokens_last": 0
+    },
+    "qdrant": {
+      "total_calls": 195,
+      "total_cached_tokens": 76817,
+      "total_input_tokens": 1160706,
+      "total_output_tokens": 19489,
+      "cache_hit_rate_pct": 6.6,
+      "total_cost_usd": 3.567051,
+      "total_full_price_usd": 3.774453,
+      "total_savings_usd": 0.207402,
+      "last_keepalive_at": 1774710694.75023,
+      "cached_tokens_last": 0
+    },
+    "execute": {
+      "total_calls": 193,
+      "total_cached_tokens": 326070,
+      "total_input_tokens": 743257,
+      "total_output_tokens": 6869,
+      "cache_hit_rate_pct": 43.9,
+      "total_cost_usd": 1.452417,
+      "total_full_price_usd": 2.332806,
+      "total_savings_usd": 0.880389,
+      "last_keepalive_at": 1774710696.409454,
+      "cached_tokens_last": 0
+    }
+  },
+  "total_calls": 778,
+  "total_cached_tokens": 807837,
+  "total_cost_usd": 7.156368,
+  "total_full_price_usd": 9.337524,
+  "total_savings_usd": 2.181156,
+  "savings_pct": 23.4,
+  "validation_total_cost_usd": 0.0,
+  "validation_total_calls": 0,
+  "last_saved_at": 1774710696.4098299
+}

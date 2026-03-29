@@ -26,7 +26,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Set
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 from config.settings import settings
 
 logger = setup_logger()
@@ -164,9 +164,9 @@ def mark_key_revealed(user_email: str) -> None:
             if isinstance(entry, dict) and entry.get("email") == email:
                 entry["revealed_at"] = datetime.now(timezone.utc).isoformat()
                 _save_registry(registry)
-                logger.debug(f"🔑 Marked per-user API key as revealed for {email}")
+                logger.debug(f"🔑 Marked per-user API key as revealed for {redact_email(email)}")
                 return
-    logger.debug(f"🔑 No registry entry found for {email} — cannot mark revealed")
+    logger.debug(f"🔑 No registry entry found for {redact_email(email)} — cannot mark revealed")
 
 
 def was_key_revealed(user_email: str) -> bool:
@@ -226,7 +226,7 @@ def regenerate_unrevealed_key(user_email: str) -> Optional[str]:
         }
         _save_registry(registry)
 
-    logger.info(f"🔑 Force-regenerated and revealed per-user API key for {email}")
+    logger.info(f"🔑 Force-regenerated and revealed per-user API key for {redact_email(email)}")
     return key
 
 
@@ -275,7 +275,7 @@ def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
         }
         _save_registry(registry)
 
-    logger.info(f"🔑 Generated per-user API key for {email}")
+    logger.info(f"🔑 Generated per-user API key for {redact_email(email)}")
     return key
 
 
@@ -347,7 +347,7 @@ def revoke_user_key(user_email: str) -> bool:
 
     revoked = len(registry) < before
     if revoked:
-        logger.info(f"🔑 Revoked API key for {email}")
+        logger.info(f"🔑 Revoked API key for {redact_email(email)}")
     return revoked
 
 

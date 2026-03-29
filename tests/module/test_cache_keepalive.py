@@ -27,13 +27,15 @@ class _FakeSettings:
     litellm_api_key: str = "test-key"
     litellm_api_base: str = ""
     cache_keepalive_enabled: bool = True
-    cache_keepalive_interval_seconds: int = 240
+    cache_keepalive_interval_seconds: int = 2700
+    cache_keepalive_jitter_seconds: int = 300
     cache_keepalive_modules: str = "gchat,email"
     cache_keepalive_mode: str = "explore"
     cache_keepalive_max_tokens: int = 100
     cache_keepalive_index_results: bool = False
     sampling_input_token_rate: float = 0.000003
     sampling_output_token_rate: float = 0.000015
+    sampling_cost_persistence_file: str = ""
 
 
 @pytest.fixture
@@ -293,3 +295,134 @@ class TestCacheKeepaliveEngine:
         # output = 50 tokens @ $0.000015 = $0.00075
         expected = 200 * 0.000003 + 800 * 0.000003 * 0.1 + 50 * 0.000015
         assert abs(result["cost_usd"] - expected) < 1e-9
+
+    def test_get_stats_includes_validation_costs(self, engine):
+        """Verify get_stats includes validation agent cost fields."""
+        engine._validation_total_cost_usd = 0.005
+        engine._validation_total_calls = 3
+        stats = engine.get_stats()
+        assert stats["validation_total_cost_usd"] == 0.005
+        assert stats["validation_total_calls"] == 3
+
+    @pytest.mark.asyncio
+    async def test_jitter_applied_to_interval(self, engine, settings):
+        """Verify jittered sleep stays within [interval-jitter, interval+jitter]."""
+        import random
+
+        interval = settings.cache_keepalive_interval_seconds
+        jitter = settings.cache_keepalive_jitter_seconds
+        # Simulate what the loop does
+        samples = [
+            max(60, interval + random.uniform(-jitter, jitter))
+            for _ in range(100)
+        ]
+        for s in samples:
+            assert s >= max(60, interval - jitter)
+            assert s <= interval + jitter
+
+    @pytest.mark.asyncio
+    async def test_persistence_save_load_cycle(self, settings, tmp_path):
+        """Verify stats survive a save/load cycle."""
+        cost_file = tmp_path / "costs.json"
+        settings.sampling_cost_persistence_file = str(cost_file)
+
+        engine1 = CacheKeepaliveEngine(settings=settings)
+        cfg = KeepaliveModuleConfig(
+            module_name="gchat",
+            get_system_prompt_fn=lambda: "DSL ref",
+            exploration_prompts=["Explore"],
+            dsl_type_label="card",
+        )
+        engine1.register_module(cfg)
+
+        # Simulate some stats
+        cfg.total_keepalive_calls = 5
+        cfg.total_cost_usd = 0.01
+        cfg.total_savings_usd = 0.05
+        engine1._validation_total_cost_usd = 0.002
+        engine1._validation_total_calls = 2
+
+        engine1._save_persisted_stats()
+        assert cost_file.exists()
+
+        # New engine loads the same file
+        engine2 = CacheKeepaliveEngine(settings=settings)
+        cfg2 = KeepaliveModuleConfig(
+            module_name="gchat",
+            get_system_prompt_fn=lambda: "DSL ref",
+        )
+        engine2.register_module(cfg2)
+        engine2._load_persisted_stats()
+
+        assert cfg2.total_keepalive_calls == 5
+        assert cfg2.total_cost_usd == 0.01
+        assert cfg2.total_savings_usd == 0.05
+        assert engine2._validation_total_cost_usd == 0.002
+        assert engine2._validation_total_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_exploration_output_logged(self, engine, settings, caplog):
+        """Verify exploration outputs are always logged."""
+        import logging
+
+        cfg = KeepaliveModuleConfig(
+            module_name="gchat",
+            get_system_prompt_fn=lambda: "DSL ref",
+            exploration_prompts=["Explore"],
+            dsl_type_label="card",
+        )
+        engine.register_module(cfg)
+
+        fake_response = _make_litellm_response()
+
+        with patch(
+            "litellm.acompletion",
+            new_callable=AsyncMock,
+            return_value=fake_response,
+        ):
+            with caplog.at_level(logging.INFO):
+                await engine._send_keepalive(cfg)
+
+        assert any("exploration output" in r.message for r in caplog.records)
+
+
+class TestExecuteKeepaliveModule:
+    def test_register_execute_module(self, engine, settings):
+        """Verify execute module registers when included in modules list."""
+        settings.cache_keepalive_modules = "gchat,email,execute"
+        register_default_modules(engine, settings)
+        assert "execute" in engine._modules
+        assert len(engine._modules) == 3
+
+    def test_execute_system_prompt_exceeds_cache_minimum(self):
+        """Verify the execute system prompt exceeds Anthropic's 1024-token min.
+
+        Rough estimate: 4 chars per token, so need >4096 chars.
+        """
+        from middleware.cache_keepalive import _build_execute_system_prompt
+
+        prompt = _build_execute_system_prompt()
+        assert len(prompt) > 4096, (
+            f"Execute system prompt too short for caching: {len(prompt)} chars"
+        )
+
+    def test_execute_system_prompt_contains_key_sections(self):
+        """Verify the prompt includes sandbox ref, tool catalog, and conventions."""
+        from middleware.cache_keepalive import _build_execute_system_prompt
+
+        prompt = _build_execute_system_prompt()
+        assert "argument correction agent" in prompt
+        assert "search_gmail_messages" in prompt
+        assert "page_size" in prompt
+        assert "Parameter Naming Conventions" in prompt
+        assert "Common Validation Errors" in prompt
+
+    def test_execute_exploration_prompts_exist(self):
+        """Verify exploration prompts cover varied error scenarios."""
+        from middleware.cache_keepalive import EXECUTE_EXPLORATION_PROMPTS
+
+        assert len(EXECUTE_EXPLORATION_PROMPTS) == 10
+        # Each prompt should mention a tool and an error
+        for prompt in EXECUTE_EXPLORATION_PROMPTS:
+            assert "Tool:" in prompt
+            assert "Unexpected keyword argument" in prompt

@@ -185,6 +185,8 @@ class LiteLLMSamplingHandler:
                     trace_meta["step_index"] = str(step_index)
                 if trace_ctx.phase:
                     trace_meta["phase"] = trace_ctx.phase
+                if trace_ctx.search_mode:
+                    trace_meta["search_mode"] = trace_ctx.search_mode
 
             add_langfuse_metadata(
                 kwargs,

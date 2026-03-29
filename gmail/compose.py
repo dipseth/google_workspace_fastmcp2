@@ -3570,6 +3570,35 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     btn_sym = email_symbols["ButtonBlock"]
     email_dsl_field_desc = get_email_dsl_field_description()
 
+    # Generate skill_resources annotation from wrapper (if available)
+    from adapters.module_wrapper.wrapper_factory import get_skill_resources_safe
+    from gmail.email_wrapper_setup import get_email_wrapper
+
+    _email_wrapper = None
+    try:
+        _email_wrapper = get_email_wrapper()
+    except Exception:
+        pass
+
+    email_skill_resources = get_skill_resources_safe(
+        _email_wrapper,
+        skill_name="mjml-email",
+        resource_hints={
+            "email-params.md": {
+                "purpose": "How to structure email_params with symbol keys, _shared/_items format, and per-block field reference",
+                "when_to_read": "BEFORE first call — required for correct email rendering",
+            },
+            "email-dsl-syntax.md": {
+                "purpose": "Email DSL notation syntax, symbol table, containment rules",
+                "when_to_read": "When constructing email_description DSL strings",
+            },
+            "jinja-filters.md": {
+                "purpose": "Jinja2 template filters for text styling in email content",
+                "when_to_read": "When styling text content in emails",
+            },
+        },
+    )
+
     compose_tool_description = (
         "Compose responsive HTML emails using DSL notation for block structure. "
         f"Common patterns: {spec_sym}[{hero_sym}, {text_sym}] = hero + text, "
@@ -3599,6 +3628,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
             "dsl_documentation": get_email_dsl_documentation(include_examples=True),
             "examples": get_email_tool_examples(max_examples=5),
+            "skill_resources": email_skill_resources,  # Dynamic from wrapper.get_skill_resources_annotation()
         },
     )
     async def compose_dynamic_email(

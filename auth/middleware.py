@@ -22,7 +22,7 @@ except ImportError:
     GoogleProvider = None
     GOOGLE_PROVIDER_AVAILABLE = False
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 from config.settings import settings
 
 from .context import (
@@ -196,8 +196,7 @@ class AuthMiddleware(Middleware):
             result = await call_next(context)
             return result
         except Exception as e:
-            import traceback
-            logger.error(f"Error in request processing: {e}\n{traceback.format_exc()}")
+            logger.error(f"Error in request processing: {e}")
             raise
         finally:
             # PHASE 1 FIX: Clean up request-session mapping after request completes
@@ -832,7 +831,7 @@ class AuthMiddleware(Middleware):
                 version = service_data["version"]
                 cache_enabled = service_data["cache_enabled"]
 
-                logger.debug(f"Creating {service_type} service for {user_email}")
+                logger.debug(f"Creating {service_type} service for {redact_email(user_email)}")
 
                 # Create the Google service using the new credential management
                 service = await get_google_service(
@@ -2595,7 +2594,7 @@ class AuthMiddleware(Middleware):
 
             except Exception as e:
                 results[user_email] = f"❌ Migration failed: {str(e)}"
-                logger.error(f"Failed to migrate credentials for {user_email}: {e}")
+                logger.error(f"Failed to migrate credentials for {redact_email(user_email)}: {e}")
 
         # Update to target mode
         self._storage_mode = target_mode
@@ -2705,7 +2704,7 @@ class AuthMiddleware(Middleware):
             # If no valid legacy credentials, try to bridge from GoogleProvider
             if settings.credential_migration:
                 logger.debug(
-                    f"🔄 Bridging GoogleProvider credentials to legacy system for {user_email}"
+                    f"🔄 Bridging GoogleProvider credentials to legacy system for {redact_email(user_email)}"
                 )
 
                 # Use dual auth bridge for credential bridging
@@ -2714,13 +2713,13 @@ class AuthMiddleware(Middleware):
                 )
                 if bridged_credentials:
                     logger.debug(
-                        f"✅ Successfully bridged credentials for {user_email}"
+                        f"✅ Successfully bridged credentials for {redact_email(user_email)}"
                     )
                 else:
-                    logger.debug(f"⚠️ Could not bridge credentials for {user_email}")
+                    logger.debug(f"⚠️ Could not bridge credentials for {redact_email(user_email)}")
 
         except Exception as e:
-            logger.warning(f"⚠️ Could not bridge credentials for {user_email}: {e}")
+            logger.warning(f"⚠️ Could not bridge credentials for {redact_email(user_email)}: {e}")
 
     # CodeMode meta-tools use strict Pydantic schemas — skip user_google_email injection.
     # Actual tool names: tags, search, get_schema, execute

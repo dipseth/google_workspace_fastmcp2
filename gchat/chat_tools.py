@@ -174,15 +174,29 @@ def _process_thread_key_for_webhook_url(
     return threaded_webhook_url
 
 
-def _build_chat_from_sa_info(sa_info: dict, user_google_email: str = None):
+def _build_chat_from_sa_info(
+    sa_info: dict, user_google_email: str = None, *, bot_mode: bool = False
+):
     """Build a Chat service from a parsed service account JSON dict.
 
-    Tries DWD delegation first, falls back to app-level auth.
+    Args:
+        sa_info: Parsed service account JSON
+        user_google_email: User email for DWD delegation
+        bot_mode: If True, use chat.bot scope (bot identity, can send cards).
+            If False, use chat_app scopes with DWD delegation (user identity).
     """
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
     from auth.scope_registry import ScopeRegistry
+
+    if bot_mode:
+        creds = service_account.Credentials.from_service_account_info(
+            sa_info, scopes=ScopeRegistry.resolve_scope_group("chat_bot")
+        )
+        svc = build("chat", "v1", credentials=creds)
+        logger.info("Built Chat service with chat.bot scope (bot identity)")
+        return svc
 
     scopes = ScopeRegistry.resolve_scope_group("chat_app")
     creds = service_account.Credentials.from_service_account_info(
@@ -275,6 +289,24 @@ def _get_chat_service_account(user_google_email: str = None):
     sa_file = settings.chat_service_account_file
     if not sa_file:
         return None
+
+    # 2a. Try chat.bot scope first (bot identity — required for sending cards)
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        from auth.scope_registry import ScopeRegistry
+
+        bot_creds = service_account.Credentials.from_service_account_file(
+            sa_file, scopes=ScopeRegistry.resolve_scope_group("chat_bot")
+        )
+        service = build("chat", "v1", credentials=bot_creds)
+        logger.info("Using Chat service account with chat.bot scope (bot identity)")
+        return service
+    except Exception as e:
+        logger.debug(f"chat.bot scope failed, trying delegated auth: {e}")
+
+    # 2b. Fall back to delegated auth with chat_app scopes (user identity)
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
@@ -362,11 +394,11 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
                 )
         else:
             # Different type of RuntimeError, log and return None
-            logger.error(f"Chat service injection error for {user_google_email}: {e}")
+            logger.error(f"Chat service injection error: {e}")
 
     except Exception as e:
         logger.error(
-            f"Unexpected error getting Chat service for {user_google_email}: {e}"
+            f"Unexpected error getting Chat service: {e}"
         )
 
     return None
@@ -468,7 +500,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
             if user_google_email and user_google_email.strip():
                 user_email = user_google_email.strip()
                 auth_method = "provided_parameter"
-                logger.info(f"🎯 [list_spaces] Using provided email: {user_email}")
+                logger.info("🎯 [list_spaces] Using provided email parameter")
 
             # Method 2: Try resource context (primary method)
             if not user_email:
@@ -826,7 +858,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         Returns:
             SendMessageResponse: Structured response with message details and success status.
         """
-        logger.info(f"[send_message] Email: '{user_google_email}', Space: '{space_id}'")
+        logger.info(f"[send_message] Space: '{space_id}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)
@@ -927,7 +959,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
         Returns:
             SearchMessagesResponse: Structured response with search results.
         """
-        logger.info(f"[search_messages] Email={user_google_email}, Query='{query}'")
+        logger.info(f"[search_messages] Query='{query}'")
 
         try:
             chat_service = await _get_chat_service_with_fallback(user_google_email)

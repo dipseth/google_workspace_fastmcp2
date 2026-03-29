@@ -119,6 +119,7 @@ dependencies = [
     "py-key-value-aio[redis]>=0.4.4",
     "qrcode>=8.2",
     "pillow>=11.3.0",
+    "torch>=2.10.0",
 ]
 
 [project.urls]

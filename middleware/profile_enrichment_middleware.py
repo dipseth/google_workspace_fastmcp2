@@ -49,7 +49,7 @@ from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Set
 
 from auth.context import get_auth_middleware
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -153,12 +153,12 @@ class ProfileEnrichmentMiddleware(Middleware):
             logger.debug(f"👤 Context message: {context.message}")
             return result
 
-        logger.info(f"👤 User email extracted: {user_email}")
+        logger.info(f"👤 User email extracted: {redact_email(user_email)}")
 
         # Enrich the result
         try:
             logger.info(
-                f"👤 Starting enrichment for {tool_name} with user {user_email}"
+                f"👤 Starting enrichment for {tool_name} with user {redact_email(user_email)}"
             )
             enriched_result = await self._enrich_response(result, user_email, tool_name)
             logger.info(f"👤 Enrichment completed successfully for {tool_name}")
@@ -347,7 +347,7 @@ class ProfileEnrichmentMiddleware(Middleware):
         This bypasses get_service() to avoid service type registration issues.
         """
         try:
-            logger.info(f"👤 Attempting to create People API service for {user_email}")
+            logger.info(f"👤 Attempting to create People API service for {redact_email(user_email)}")
 
             # Get AuthMiddleware to load credentials
             auth_middleware = get_auth_middleware()
@@ -360,11 +360,11 @@ class ProfileEnrichmentMiddleware(Middleware):
             # Load credentials using middleware's storage system
             credentials = auth_middleware.load_credentials(user_email)
             if not credentials:
-                logger.warning(f"👤 No credentials found for {user_email}")
+                logger.warning(f"👤 No credentials found for {redact_email(user_email)}")
                 return None
 
             logger.info(
-                f"👤 Credentials loaded for {user_email}, building People API service"
+                f"👤 Credentials loaded for {redact_email(user_email)}, building People API service"
             )
 
             # Build People service directly
@@ -372,7 +372,7 @@ class ProfileEnrichmentMiddleware(Middleware):
                 build, "people", "v1", credentials=credentials
             )
 
-            logger.info(f"✅ Successfully created People API service for {user_email}")
+            logger.info(f"✅ Successfully created People API service for {redact_email(user_email)}")
             return people_service
 
         except Exception as e:
@@ -477,11 +477,11 @@ class ProfileEnrichmentMiddleware(Middleware):
             emails = person.get("emailAddresses", [])
             email = emails[0].get("value") if emails else None
 
-            logger.info(f"👤 Extracted email: {email} from {len(emails)} email entries")
+            logger.info(f"👤 Extracted email: {redact_email(email)} from {len(emails)} email entries")
 
             if display_name or email:
                 logger.info(
-                    f"✅ People API SUCCESS: {user_id} → {display_name} ({email})"
+                    f"✅ People API SUCCESS: {user_id} → {display_name} ({redact_email(email)})"
                 )
                 return {
                     "displayName": display_name or f"User {user_id}",

@@ -197,47 +197,21 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             except Exception as e:
                 logger.debug(f"Could not stash cross-OAuth password: {e}")
 
-        # DEBUG: Log all received parameters
-        logger.info("🔧 TOOL DEBUG: start_google_auth called with parameters:")
-        logger.info(
-            f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})"
-        )
-        logger.info(
-            f"🔧 TOOL DEBUG:   service_name = {service_name} (type: {type(service_name)})"
-        )
-        logger.info(
-            f"🔧 TOOL DEBUG:   auto_open_browser = {auto_open_browser} (type: {type(auto_open_browser)})"
-        )
-
         # Try to get user email from context if not provided
         if not user_google_email:
-            logger.info(
-                "🔧 TOOL DEBUG: user_google_email is None/empty, checking context"
-            )
             from auth.context import get_user_email_context
 
             context_email = await get_user_email_context()
-            logger.info(
-                f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}"
-            )
-
             if context_email:
                 user_google_email = context_email
-                logger.info(
-                    f"🔧 TOOL DEBUG: Using email from context: {user_google_email}"
-                )
-            else:
-                logger.info("🔧 TOOL DEBUG: No email found in context either")
 
         logger.info(
-            f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})"
+            f"Starting OAuth flow (auto_open_browser={auto_open_browser})"
         )
 
         # Validate that user_google_email is provided
         if not user_google_email:
-            logger.error(
-                "🔧 TOOL DEBUG: ❌ Still no user_google_email after context check"
-            )
+            logger.error("No user_google_email after context check")
             return StartAuthResponse(
                 status="error",
                 message="❌ Authentication Setup Failed",
@@ -536,7 +510,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             except Exception as e:
                 logger.debug(f"Could not stash cross-OAuth password: {e}")
 
-        logger.info(f"Checking authentication for {user_google_email}")
+        logger.info("Checking authentication for user")
 
         # Get current session ID for reconnection support
         from auth.context import get_session_context

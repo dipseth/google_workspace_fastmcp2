@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import httpx
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -89,7 +89,7 @@ def check_google_email_allowlist(
     allowed_emails = {e.strip().lower() for e in allowlist_csv.split(",") if e.strip()}
     is_allowed = email.lower() in allowed_emails
     if not is_allowed:
-        logger.info(f"Google email {email} not on alpha allowlist")
+        logger.info(f"Google email {redact_email(email)} not on alpha allowlist")
     return is_allowed
 
 

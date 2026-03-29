@@ -42,6 +42,15 @@ class DomainConfig:
     post_pipeline_hooks: List[Callable] = field(default_factory=list)
     domain_label: str = ""  # human-readable label, e.g. "Google Chat Cards"
 
+    # Cache warm-up: which components to pre-populate in the component cache
+    cache_priority_components: Optional[List[str]] = None
+
+    # DSL doc generation: symbol categorization for quick-reference generation
+    dsl_categories: Optional[Dict[str, List[str]]] = None
+
+    # Symbol filtering: only expose these components' symbols (e.g. email blocks)
+    symbol_filter: Optional[set] = None
+
     def __post_init__(self):
         if not self.domain_label:
             self.domain_label = self.module_name

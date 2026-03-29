@@ -679,6 +679,7 @@ def get_component_cache(
     memory_limit: int = 100,
     cache_dir: Optional[str] = None,
     reset: bool = False,
+    wrapper_getter: Optional[WrapperGetter] = None,
 ) -> ComponentCache:
     """
     Get the singleton ComponentCache instance.
@@ -687,6 +688,8 @@ def get_component_cache(
         memory_limit: Max L1 cache size (only used on first call)
         cache_dir: Cache directory (only used on first call)
         reset: Force create a new instance
+        wrapper_getter: Optional callable returning a ModuleWrapper for L3 reconstruction.
+                       Consumers should pass this explicitly instead of relying on a default.
 
     Returns:
         ComponentCache singleton
@@ -695,15 +698,6 @@ def get_component_cache(
 
     with _cache_lock:
         if _cache_instance is None or reset:
-            # Default wrapper getter
-            def wrapper_getter():
-                try:
-                    from gchat.card_framework_wrapper import get_card_framework_wrapper
-
-                    return get_card_framework_wrapper()
-                except ImportError:
-                    return None
-
             _cache_instance = ComponentCache(
                 memory_limit=memory_limit,
                 cache_dir=cache_dir,

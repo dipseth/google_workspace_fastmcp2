@@ -67,7 +67,7 @@ except ImportError:
     _COMPATIBILITY_AVAILABLE = False
     logging.warning("Compatibility shim not available, using fallback scopes")
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -347,7 +347,7 @@ async def get_google_service(
         cached_result = _get_cached_service(cache_key)
         if cached_result:
             service, cached_user_email = cached_result
-            logger.debug(f"Using cached {service_type} service for {user_email}")
+            logger.debug(f"Using cached {service_type} service for {redact_email(user_email)}")
             return service
 
     # Try to get from session cache first
@@ -444,7 +444,7 @@ async def get_google_service(
         error_msg = _handle_token_refresh_error(e, user_email, service_type)
         raise GoogleServiceError(error_msg)
     except Exception as e:
-        logger.error(f"Failed to create {service_type} service for {user_email}: {e}")
+        logger.error(f"Failed to create {service_type} service for {redact_email(user_email)}: {e}")
         raise GoogleServiceError(f"Failed to create {service_type} service: {e}")
 
 def _handle_token_refresh_error(
@@ -491,7 +491,7 @@ def _handle_token_refresh_error(
         )
     else:
         # Handle other types of refresh errors
-        logger.error(f"Unexpected refresh error for user {user_email}: {error}")
+        logger.error(f"Unexpected refresh error for user {redact_email(user_email)}: {error}")
         return (
             f"Authentication error occurred for {user_email}. "
             f"Please try running `start_google_auth` with your email and the appropriate service name to reauthenticate."

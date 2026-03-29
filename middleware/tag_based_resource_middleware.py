@@ -46,7 +46,7 @@ class CacheEntry:
         return datetime.now() - self.timestamp > timedelta(seconds=self.ttl_seconds)
 
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -632,7 +632,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Log authentication source for debugging
-        logger.debug(f"🔐 Using authentication for user: {user_email}")
+        logger.debug(f"🔐 Using authentication for user: {redact_email(user_email)}")
 
         # Generate cache key (matches resource handler expectations)
         cache_key = f"service_list_response_{service}_{list_type}_{user_email}"
@@ -752,7 +752,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Log authentication source for debugging
-        logger.debug(f"🔐 Using authentication for user: {user_email}")
+        logger.debug(f"🔐 Using authentication for user: {redact_email(user_email)}")
 
         get_tool_name = list_type_info.get("get_tool")
 

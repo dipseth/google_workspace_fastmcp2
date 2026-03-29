@@ -15,7 +15,7 @@ Init order: 52 (after GraphMixin:50, SymbolsMixin:45)
 """
 
 from config.enhanced_logging import setup_logger
-from typing import Any, Callable, Dict, FrozenSet, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from adapters.module_wrapper.types import ComponentName, JsonDict
 
@@ -48,6 +48,8 @@ class InputResolverMixin:
             "register_overflow_handler",
             "register_input_resolution_batch",
             "get_param_key_for_component",
+            "detect_param_mismatches",
+            "correct_dsl_multipliers",
         }
     )
     _MIXIN_REQUIRES: FrozenSet[str] = frozenset(
@@ -301,6 +303,141 @@ class InputResolverMixin:
             context[index_key] = current_index + 1
 
         return params
+
+    # =========================================================================
+    # MISMATCH DETECTION & DSL CORRECTION
+    # =========================================================================
+
+    def detect_param_mismatches(
+        self,
+        component_demands: Dict[str, int],
+        param_supplies: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Detect mismatches between DSL component demands and param supplies.
+
+        Compares what the DSL requests (e.g., Button×5) against what the user
+        actually provided (e.g., 2 buttons). Uses registered _context_resources
+        and _param_key_overrides for domain-agnostic mapping.
+
+        Args:
+            component_demands: Component name -> count from DSL (e.g., {"Button": 5})
+            param_supplies: Flat param dict (e.g., {"buttons": [...], "items": [...]})
+
+        Returns:
+            Dict with:
+                mismatches: List of {component, demanded, supplied, action}
+                corrections: Dict of component -> corrected multiplier
+                warnings: List of human-readable warning strings
+        """
+        mismatches = []
+        corrections = {}
+        warnings = []
+
+        for component, demanded in component_demands.items():
+            resource_info = self._context_resources.get(component)
+            if not resource_info:
+                continue
+
+            context_key = resource_info[0]
+            param_key = self._param_key_overrides.get(context_key, context_key)
+            # Check both context_key and param_key in supply map
+            supply = param_supplies.get(context_key) or param_supplies.get(param_key, [])
+            supplied = len(supply) if isinstance(supply, list) else (1 if supply else 0)
+
+            if supplied == 0 and demanded > 0:
+                # No data at all — will produce only placeholders
+                mismatches.append({
+                    "component": component,
+                    "demanded": demanded,
+                    "supplied": 0,
+                    "action": "skip_all",
+                })
+                corrections[component] = 0
+                warnings.append(
+                    f"{component}×{demanded} requested but no {param_key} provided — skipping"
+                )
+            elif supplied < demanded:
+                # Partial data — correct multiplier down
+                mismatches.append({
+                    "component": component,
+                    "demanded": demanded,
+                    "supplied": supplied,
+                    "action": "correct_down",
+                })
+                corrections[component] = supplied
+                warnings.append(
+                    f"{component}×{demanded} → ×{supplied} (only {supplied} {param_key} provided)"
+                )
+            elif supplied > demanded:
+                # Extra data — log unconsumed but don't change DSL
+                mismatches.append({
+                    "component": component,
+                    "demanded": demanded,
+                    "supplied": supplied,
+                    "action": "unconsumed",
+                })
+                warnings.append(
+                    f"{component}×{demanded} but {supplied} {param_key} provided — "
+                    f"{supplied - demanded} will be unconsumed"
+                )
+
+        return {
+            "mismatches": mismatches,
+            "corrections": corrections,
+            "warnings": warnings,
+        }
+
+    def correct_dsl_multipliers(
+        self,
+        parsed_components: List[Dict[str, Any]],
+        corrections: Dict[str, int],
+    ) -> List[Dict[str, Any]]:
+        """Adjust DSL multipliers to match actual param supply counts.
+
+        Recursively walks the parsed component tree and adjusts multipliers
+        for components that have corrections. Components corrected to 0 are
+        removed from the tree entirely.
+
+        Args:
+            parsed_components: Parsed DSL tree (list of component dicts with
+                "name", "multiplier", "children" keys)
+            corrections: Component name -> corrected multiplier count
+
+        Returns:
+            New component tree with adjusted multipliers
+        """
+        result = []
+        for comp in parsed_components:
+            name = comp.get("name", "")
+            if name in corrections:
+                corrected = corrections[name]
+                if corrected <= 0:
+                    logger.info(f"🔧 Removed {name} from DSL (no params provided)")
+                    continue
+                comp = dict(comp)
+                old_mult = comp.get("multiplier", 1)
+                comp["multiplier"] = corrected
+                if old_mult != corrected:
+                    logger.info(
+                        f"🔧 Corrected {name}×{old_mult} → ×{corrected}"
+                    )
+
+            # Recurse into children
+            children = comp.get("children", [])
+            if children:
+                comp = dict(comp)
+                comp["children"] = self.correct_dsl_multipliers(
+                    children, corrections
+                )
+                # Remove container if all children were removed
+                if not comp["children"] and name not in corrections:
+                    logger.info(
+                        f"🔧 Removed empty container {name} (all children removed)"
+                    )
+                    continue
+
+            result.append(comp)
+        return result
 
 __all__ = [
     "InputResolverMixin",

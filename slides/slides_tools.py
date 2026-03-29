@@ -402,7 +402,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
                 f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             )
 
-            logger.info(f"Presentation created successfully for {user_google_email}")
+            logger.info("Presentation created successfully")
 
             return CreatePresentationResponse(
                 presentationId=presentation_id,
@@ -607,7 +607,7 @@ def setup_slides_tools(mcp: FastMCP) -> None:
             if replies and "createSlide" in replies[0]:
                 slide_id = replies[0]["createSlide"].get("objectId", "Unknown")
 
-            logger.info(f"Slide added successfully for {user_google_email}")
+            logger.info("Slide added successfully")
 
             return AddSlideResponse(
                 presentationId=presentation_id,

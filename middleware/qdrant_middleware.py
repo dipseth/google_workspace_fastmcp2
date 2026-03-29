@@ -24,7 +24,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from typing_extensions import Any, Dict, List, Optional
 
 from auth.context import get_session_context
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 from middleware.qdrant_core.client import get_or_create_client_manager
 
 # Import qdrant_core modules
@@ -389,7 +389,7 @@ class QdrantUnifiedMiddleware(Middleware):
 
                 user_email = await get_user_email_context()
                 if user_email:
-                    logger.debug(f"📧 User email from auth context: {user_email}")
+                    logger.debug(f"📧 User email from auth context: {redact_email(user_email)}")
             except Exception as e:
                 logger.debug(f"Could not get user email from auth context: {e}")
 

@@ -501,6 +501,28 @@ def setup_card_tools(mcp: FastMCP) -> None:
     tool_examples = get_tool_examples(max_examples=5)
     symbols = get_gchat_symbols()
 
+    # Generate skill_resources annotation from wrapper (if available)
+    from adapters.module_wrapper.wrapper_factory import get_skill_resources_safe
+
+    skill_resources = get_skill_resources_safe(
+        _card_framework_wrapper,
+        skill_name="gchat-cards",
+        resource_hints={
+            "card-params.md": {
+                "purpose": "How to structure card_params with symbol keys, _shared/_items format, and per-component field reference",
+                "when_to_read": "BEFORE first call — required for correct card rendering",
+            },
+            "dsl-syntax.md": {
+                "purpose": "DSL notation syntax, symbol table, containment rules",
+                "when_to_read": "When constructing card_description DSL strings",
+            },
+            "jinja-filters.md": {
+                "purpose": "Jinja2 template filters for text styling (colors, bold, etc.)",
+                "when_to_read": "When styling text content in cards",
+            },
+        },
+    )
+
     # Build dynamic tool description with actual symbols from DAG
     section_sym = symbols.get("Section", "§")
     dtext_sym = symbols.get("DecoratedText", "δ")
@@ -698,6 +720,7 @@ def setup_card_tools(mcp: FastMCP) -> None:
             "openWorldHint": True,
             "dsl_documentation": dsl_full_doc,  # Full DSL docs in annotations
             "examples": tool_examples,  # Dynamically generated from DAG symbols
+            "skill_resources": skill_resources,  # Dynamic from wrapper.get_skill_resources_annotation()
         },
     )
     async def send_dynamic_card(
@@ -985,6 +1008,18 @@ def setup_card_tools(mcp: FastMCP) -> None:
                             "Card structure built, preparing message..."
                         )
 
+                        # Extract mapping report from card (attached by builder as dict)
+                        inner_card = google_format_card.get("card", {})
+                        if isinstance(inner_card, dict):
+                            report_dict = inner_card.pop("_mapping_report", None)
+                            if isinstance(report_dict, dict):
+                                input_mapping_info = InputMappingInfo(
+                                    mappings=report_dict.get("mappings", []),
+                                    unconsumed=report_dict.get("unconsumed", {}),
+                                    dsl_demands=report_dict.get("dsl_demands"),
+                                    auto_corrections=report_dict.get("auto_corrections"),
+                                )
+
                         # Extract DSL structure and Jinja template status from card
                         inner_card = google_format_card.get("card", {})
                         if isinstance(inner_card, dict):
@@ -1258,6 +1293,23 @@ def setup_card_tools(mcp: FastMCP) -> None:
                 partsSent=parts_sent,
                 splitThreadKey=split_thread,
             )
+
+            # Log card render feedback for A/B scoring correlation
+            try:
+                from config.settings import Settings as _CfgS
+                if _CfgS().search_shadow_scoring:
+                    import hashlib as _hl
+                    _qh = _hl.md5(card_description.encode()).hexdigest()[:12]
+                    logger.info(
+                        "Card render feedback | query=%s | success=%s | search_score=%s | component=%s | dsl=%s",
+                        _qh,
+                        delivery.success,
+                        best_match.get("score"),
+                        best_match.get("name"),
+                        rendered_dsl,
+                    )
+            except Exception:
+                pass
 
             if delivery.success:
                 msg = (

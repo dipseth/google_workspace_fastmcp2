@@ -167,9 +167,9 @@ def get_email_dsl_field_description() -> str:
 
     Returns a single-line description suitable for Field(description=...).
     """
-    symbols = get_email_symbols()
+    from adapters.module_wrapper.wrapper_factory import generate_dsl_field_description
 
-    key_mappings = []
+    wrapper = _setup.get_email_wrapper()
     key_components = [
         "EmailSpec",
         "HeroBlock",
@@ -184,12 +184,10 @@ def get_email_dsl_field_description() -> str:
         "CarouselBlock",
     ]
 
-    for comp in key_components:
-        if comp in symbols:
-            key_mappings.append(f"{symbols[comp]}={comp}")
-
-    return (
-        f"DSL structure using symbols. Symbols: {', '.join(key_mappings)}."
+    return generate_dsl_field_description(
+        wrapper,
+        key_components=key_components,
+        skill_uri="skill://mjml-email/",
     )
 
 

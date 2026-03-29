@@ -36,6 +36,23 @@ from adapters.module_wrapper.instance_pattern_mixin import (
     PatternVariation as Variation,  # Alias for backwards compatibility
 )
 
+# Default wrapper getter callback — registered by consumers (e.g. gchat/wrapper_setup.py)
+_default_wrapper_getter = None
+
+
+def register_default_wrapper_getter(getter):
+    """Register a default wrapper getter for VariationGenerator fallback.
+
+    This allows domain code to register its wrapper getter without the
+    adapter layer importing domain-specific modules.
+
+    Args:
+        getter: Callable that returns a ModuleWrapper instance
+    """
+    global _default_wrapper_getter
+    _default_wrapper_getter = getter
+
+
 class VariationGenerator:
     """
     Backwards-compatible variation generator.
@@ -61,12 +78,13 @@ class VariationGenerator:
     def _ensure_wrapper(self):
         """Ensure wrapper is available."""
         if self.wrapper is None:
-            try:
-                from gchat.card_framework_wrapper import get_card_framework_wrapper
-
-                self.wrapper = get_card_framework_wrapper()
-            except ImportError:
-                logger.warning("Could not get card_framework_wrapper")
+            if _default_wrapper_getter is not None:
+                try:
+                    self.wrapper = _default_wrapper_getter()
+                except Exception:
+                    logger.warning("Default wrapper getter failed")
+            else:
+                logger.warning("No default wrapper getter registered")
 
         return self.wrapper
 

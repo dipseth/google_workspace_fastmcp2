@@ -308,6 +308,62 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 
+    # Multi-Dimensional Search (Horizon 1 — RIC-TRM)
+    # When enabled, callers use search_hybrid_multidim (multiplicative cross-dim scoring)
+    # instead of search_hybrid (RRF rank fusion). POC validated: +9.5% Top-1 accuracy.
+    enable_multidim_search: bool = Field(
+        default=False,
+        description="Use multi-dimensional scoring instead of RRF for hybrid search",
+        json_schema_extra={"env": "ENABLE_MULTIDIM_SEARCH"},
+    )
+
+    search_mode: str = Field(
+        default="rrf",
+        description="Search scoring mode: 'rrf' (legacy), 'multidim' (multiplicative), 'learned' (trained MLP), 'recursive' (iterative refinement)",
+        json_schema_extra={"env": "SEARCH_MODE"},
+    )
+
+    # Shadow A/B scoring — runs all 3 search modes on every query, logs comparison
+    search_shadow_scoring: bool = Field(
+        default=False,
+        description="Enable shadow A/B scoring: run all search modes and log comparison metrics",
+        json_schema_extra={"env": "SEARCH_SHADOW_SCORING"},
+    )
+
+    # Recursive refinement settings (H3 bridge)
+    recursive_max_cycles: int = Field(
+        default=3,
+        description="Max refinement cycles for recursive search mode",
+        json_schema_extra={"env": "RECURSIVE_MAX_CYCLES"},
+    )
+    recursive_halt_margin: float = Field(
+        default=0.5,
+        description="Score margin between #1 and #2 to stop recursion early",
+        json_schema_extra={"env": "RECURSIVE_HALT_MARGIN"},
+    )
+    recursive_alpha_init: float = Field(
+        default=0.7,
+        description="Initial query blend weight for recursive refinement (alpha * original + (1-alpha) * top-K mean)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_INIT"},
+    )
+
+    # Dual-Head Scorer Configuration
+    dual_head_form_weight: float = Field(
+        default=0.6,
+        description="Form vs content weight for dual-head scorer (1.0 = pure form, 0.0 = pure content)",
+        json_schema_extra={"env": "DUAL_HEAD_FORM_WEIGHT"},
+    )
+    recursive_alpha_decay: float = Field(
+        default=0.1,
+        description="Per-cycle alpha decay for recursive dual-head search (shifts from form to content)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_DECAY"},
+    )
+    recursive_content_pool_size: int = Field(
+        default=10,
+        description="Candidate pool size for content RecommendQuery in recursive search",
+        json_schema_extra={"env": "RECURSIVE_CONTENT_POOL_SIZE"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,
