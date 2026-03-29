@@ -6,10 +6,11 @@ using a provider/model naming convention (e.g., 'openai/zai-org-glm-4.6').
 """
 
 import json
-from config.enhanced_logging import setup_logger
 import os
 import sys
 from typing import Any
+
+from config.enhanced_logging import setup_logger
 
 # Fix SSL certificate verification on macOS Python (missing root certs)
 if sys.platform == "darwin":

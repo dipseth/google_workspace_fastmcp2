@@ -13,12 +13,13 @@ Init order: 55 (after InputResolverMixin:52, before CacheMixin)
 import importlib
 import importlib.metadata
 import importlib.util
-from config.enhanced_logging import setup_logger
 import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Union
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

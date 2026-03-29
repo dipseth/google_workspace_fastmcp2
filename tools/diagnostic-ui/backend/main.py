@@ -16,11 +16,10 @@ sys.path.insert(0, str(_backend_dir))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from routes.symbols import router as symbols_router
+from routes.collection_stats import router as stats_router
 from routes.dsl import router as dsl_router
 from routes.ml_eval import router as ml_eval_router
-from routes.collection_stats import router as stats_router
+from routes.symbols import router as symbols_router
 
 app = FastAPI(title="Card DSL Diagnostic UI", version="0.1.0")
 

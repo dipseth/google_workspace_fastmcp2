@@ -31,9 +31,10 @@ Usage:
     )
 """
 
-from config.enhanced_logging import setup_logger
 import threading
 from typing import Any, Dict, List, Optional, Set, Union
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
@@ -193,13 +194,6 @@ from adapters.module_wrapper.text_indexing import (
     search_within_module,
 )
 from adapters.module_wrapper.tool_relationship_graph import ToolRelationshipGraph
-from adapters.module_wrapper.variation_generator import register_default_wrapper_getter
-from adapters.module_wrapper.wrapper_factory import (
-    WrapperRegistry,
-    generate_dsl_field_description,
-    generate_dsl_quick_reference,
-    get_skill_resources_safe,
-)
 from adapters.module_wrapper.types import (
     # Constants (also available from core, but centralized here)
     COLBERT_DIM as TYPES_COLBERT_DIM,
@@ -245,6 +239,13 @@ from adapters.module_wrapper.types import (
 )
 from adapters.module_wrapper.types import (
     RELATIONSHIPS_DIM as TYPES_RELATIONSHIPS_DIM,
+)
+from adapters.module_wrapper.variation_generator import register_default_wrapper_getter
+from adapters.module_wrapper.wrapper_factory import (
+    WrapperRegistry,
+    generate_dsl_field_description,
+    generate_dsl_quick_reference,
+    get_skill_resources_safe,
 )
 
 # =============================================================================

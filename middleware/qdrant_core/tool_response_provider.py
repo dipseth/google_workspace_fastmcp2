@@ -9,8 +9,9 @@ domain-specific to the middleware layer.
 """
 
 import json
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, Optional
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

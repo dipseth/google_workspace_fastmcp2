@@ -177,8 +177,8 @@ def _load_slot_model():
 def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
     """Embed texts using the wrapper's MiniLM embedder."""
     try:
-        import torch
         import numpy as np
+        import torch
 
         # Try to get the embedder from the wrapper
         embedder = None

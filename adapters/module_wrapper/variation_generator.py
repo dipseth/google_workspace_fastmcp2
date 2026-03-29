@@ -13,7 +13,6 @@ This module is maintained for backwards compatibility with existing code
 that uses VariationGenerator and related classes directly.
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.types import (
@@ -22,6 +21,7 @@ from adapters.module_wrapper.types import (
     Payload,
     RelationshipDict,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

@@ -14,10 +14,10 @@ at setup time. The mixin handles:
 Init order: 52 (after GraphMixin:50, SymbolsMixin:45)
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from adapters.module_wrapper.types import ComponentName, JsonDict
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

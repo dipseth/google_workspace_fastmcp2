@@ -5,7 +5,6 @@ Provides symbol generation, DSL parsing, backfill, and embedding text
 generation for the ModuleWrapper system.
 """
 
-from config.enhanced_logging import setup_logger
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +18,7 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

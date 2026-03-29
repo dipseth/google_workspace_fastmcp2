@@ -8,7 +8,6 @@ for the ModuleWrapper system.
 import hashlib
 import importlib
 import inspect
-from config.enhanced_logging import setup_logger
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -19,6 +18,7 @@ from adapters.module_wrapper.types import (
     IndexingStats,
     Payload,
 )
+from config.enhanced_logging import setup_logger
 
 from .core import ModuleComponent
 

@@ -384,7 +384,9 @@ if settings.enable_skills_provider:
         # Qdrant wrapper is optional — only include if available
         qdrant_wrapper = None
         try:
-            from middleware.qdrant_core.qdrant_models_wrapper import get_qdrant_models_wrapper
+            from middleware.qdrant_core.qdrant_models_wrapper import (
+                get_qdrant_models_wrapper,
+            )
             qdrant_wrapper = get_qdrant_models_wrapper()
         except Exception as e:
             logger.debug(f"Qdrant models wrapper not available for skills: {e}")

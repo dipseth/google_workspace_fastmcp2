@@ -12,12 +12,12 @@ not natively support multiplicative cross-vector scoring.
 """
 
 import math
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 from typing import List
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
 
 from adapters.module_wrapper.search_mixin import SearchMixin
-
 
 # =========================================================================
 # FIXTURES

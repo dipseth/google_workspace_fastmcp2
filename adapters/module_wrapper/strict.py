@@ -11,9 +11,10 @@ Usage:
     CARD_BUILDER_STRICT=1 uv run python my_script.py
 """
 
-from config.enhanced_logging import setup_logger
 import os
 import traceback
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

@@ -14,7 +14,6 @@ the ModuleWrapper class so the pipeline can be run programmatically.
 import dataclasses
 import hashlib
 import inspect
-from config.enhanced_logging import setup_logger
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +35,7 @@ from adapters.module_wrapper.types import (
     Payload,
     RelationshipList,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

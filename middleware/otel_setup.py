@@ -14,14 +14,15 @@ Idempotent — safe to call multiple times.  No-op when Langfuse is not configur
 from __future__ import annotations
 
 import base64
-from config.enhanced_logging import setup_logger
 from typing import Optional
 
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

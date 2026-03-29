@@ -9,9 +9,10 @@ Two-layer defence:
 2. Qdrant JWT RBAC with payload-filtered access (opt-in via config).
 """
 
-from config.enhanced_logging import setup_logger
 import time
 from typing import Optional
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

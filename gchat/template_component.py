@@ -11,11 +11,12 @@ Architecture:
 """
 
 import importlib
-from config.enhanced_logging import setup_logger
 import os
 from typing import Any, Dict, List, Optional
 
 import yaml
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

@@ -30,10 +30,10 @@ Usage:
 """
 
 import asyncio
-from config.enhanced_logging import setup_logger
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from config.enhanced_logging import setup_logger
 from middleware.qdrant_core.dsl_types import (
     SearchV2Response,
     SearchV2ResultItem,

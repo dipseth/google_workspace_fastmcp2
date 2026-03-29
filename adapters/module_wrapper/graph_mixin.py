@@ -30,7 +30,6 @@ Usage:
 """
 
 import json
-from config.enhanced_logging import setup_logger
 from collections import deque
 from typing import Any, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
@@ -41,6 +40,7 @@ from adapters.module_wrapper.types import (
     ReverseSymbolMapping,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

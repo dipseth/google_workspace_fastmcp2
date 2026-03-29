@@ -24,10 +24,11 @@ Usage:
     text = validator.get_enriched_relationship_text("Section")
 """
 
-from config.enhanced_logging import setup_logger
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

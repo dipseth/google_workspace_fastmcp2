@@ -185,7 +185,10 @@ def test_timeout_flow():
     """Test that timeout works when payment never arrives."""
 
     async def _test():
-        from middleware.payment.payment_flow import register_pending_payment, reset_state
+        from middleware.payment.payment_flow import (
+            register_pending_payment,
+            reset_state,
+        )
 
         reset_state()
 

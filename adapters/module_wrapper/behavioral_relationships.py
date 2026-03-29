@@ -10,8 +10,9 @@ RelationshipsMixin._extract_relationships_from_class(), which inspects
 class field type hints for containment relationships.
 """
 
-from config.enhanced_logging import setup_logger
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

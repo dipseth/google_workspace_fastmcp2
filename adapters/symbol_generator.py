@@ -23,9 +23,10 @@ Usage:
     # => {"Button": "g:ᵬ", "Grid": "g:ℊ"}
 """
 
-from config.enhanced_logging import setup_logger
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

@@ -7,13 +7,13 @@ the 'json' module and performing various operations on it.
 """
 
 import logging
-
-from config.enhanced_logging import setup_logger
 import sys
 import time
 
 # Import the ModuleWrapper
 from module_wrapper import ModuleWrapper
+
+from config.enhanced_logging import setup_logger
 
 # Configure logging
 logging.basicConfig(

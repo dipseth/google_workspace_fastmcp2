@@ -1,7 +1,8 @@
 """DSL parsing, validation, suggestion, and containment rule endpoints."""
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 
 router = APIRouter(tags=["dsl"])
 
@@ -24,7 +25,7 @@ class SearchRequest(BaseModel):
 async def parse_dsl_endpoint(req: ParseDslRequest):
     """Parse and validate a DSL string, returning AST, expanded notation, and issues."""
     try:
-        from gchat.wrapper_api import parse_dsl, expand_dsl, validate_dsl
+        from gchat.wrapper_api import expand_dsl, parse_dsl, validate_dsl
 
         result = parse_dsl(req.dsl)
 
@@ -80,7 +81,7 @@ async def parse_dsl_endpoint(req: ParseDslRequest):
 async def suggest_dsl_endpoint(req: SuggestDslRequest):
     """Generate DSL from natural language description."""
     try:
-        from gchat.wrapper_api import extract_dsl_from_description, expand_dsl
+        from gchat.wrapper_api import expand_dsl, extract_dsl_from_description
 
         dsl = extract_dsl_from_description(req.text)
         if not dsl:
@@ -257,7 +258,10 @@ async def text_search_endpoint(req: TextSearchRequest):
 async def get_containment_rules():
     """Return parent->children adjacency graph for DSL autocomplete."""
     try:
-        from gchat.wrapper_api import get_component_relationships_for_dsl, get_gchat_symbols
+        from gchat.wrapper_api import (
+            get_component_relationships_for_dsl,
+            get_gchat_symbols,
+        )
 
         adjacency = get_component_relationships_for_dsl()
         symbols = get_gchat_symbols()

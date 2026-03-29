@@ -15,10 +15,11 @@ Graph analysis (all via rustworkx):
     - cycle detection for recurring tool loops
 """
 
-from config.enhanced_logging import setup_logger
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 

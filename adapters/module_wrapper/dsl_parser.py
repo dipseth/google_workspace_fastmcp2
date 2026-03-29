@@ -43,7 +43,6 @@ Usage:
     jinja = parser.content_to_jinja(content)  # "{{ 'Hello World' | success_text | bold }}"
 """
 
-from config.enhanced_logging import setup_logger
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -62,6 +61,7 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper

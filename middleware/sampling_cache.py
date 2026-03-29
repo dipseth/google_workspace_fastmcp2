@@ -7,11 +7,12 @@ loaded elsewhere in the project.
 """
 
 import asyncio
-from config.enhanced_logging import setup_logger
 from typing import Any
 
 from litellm._logging import print_verbose
 from litellm.caching.qdrant_semantic_cache import QdrantSemanticCache
+
+from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
