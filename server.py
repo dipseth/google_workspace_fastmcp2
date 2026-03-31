@@ -217,9 +217,7 @@ if _github_client_id and _github_client_secret:
         logger.info("✅ GitHubProvider configured for alpha OAuth")
         logger.info(f"  🔒 Required scopes: {_github_scopes}")
         if settings.alpha_mode and settings.github_oauth_gating_repo:
-            logger.info(
-                f"  ⭐ Repo star gating: {settings.github_oauth_gating_repo}"
-            )
+            logger.info(f"  ⭐ Repo star gating: {settings.github_oauth_gating_repo}")
 
         # If both Google and GitHub are configured, set up dual OAuth routing.
         # GitHub is ONLY used for star-gating (alpha access check) — all actual
@@ -227,7 +225,9 @@ if _github_client_id and _github_client_secret:
         # We do NOT add GitHubTokenVerifier to MultiAuth because GitHub tokens
         # should never be used as bearer tokens for API requests.
         if google_auth_provider:
-            logger.info("✅ GitHub configured for star-gating (Google handles all tokens)")
+            logger.info(
+                "✅ GitHub configured for star-gating (Google handles all tokens)"
+            )
 
             # Set up dual OAuth router for provider selection
             from auth.dual_oauth_provider import DualOAuthRouter
@@ -387,6 +387,7 @@ if settings.enable_skills_provider:
             from middleware.qdrant_core.qdrant_models_wrapper import (
                 get_qdrant_models_wrapper,
             )
+
             qdrant_wrapper = get_qdrant_models_wrapper()
         except Exception as e:
             logger.debug(f"Qdrant models wrapper not available for skills: {e}")
@@ -494,6 +495,34 @@ logger.info(
 # Wire data-dashboard UI to all list tools (centralized — no per-tool edits needed)
 patched = wire_dashboard_to_list_tools(mcp)
 logger.info(f"✅ Data dashboard wired to {patched} list tools")
+
+# ─── MCP App Providers (FastMCP 3.2+) ───
+if settings.enable_app_providers:
+    from fastmcp.apps.approval import Approval
+    from fastmcp.apps.choice import Choice
+
+    from tools.ui_apps import create_tool_management_app
+
+    mcp.add_provider(
+        Approval(
+            title="Google Workspace Action",
+            approve_text="Approve",
+            reject_text="Cancel",
+        )
+    )
+    mcp.add_provider(Choice(title="Select Option"))
+
+    # Interactive tool management app (Prefab UI)
+    tool_mgmt_app = create_tool_management_app(mcp)
+    if tool_mgmt_app is not None:
+        mcp.add_provider(tool_mgmt_app)
+        logger.info("✅ Interactive tool management app registered")
+
+    logger.info("✅ App providers registered (Approval, Choice)")
+else:
+    logger.info(
+        "⏭️ App providers disabled - set ENABLE_APP_PROVIDERS=true in .env to enable"
+    )
 
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)

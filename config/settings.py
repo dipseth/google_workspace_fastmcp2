@@ -308,6 +308,14 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 
+    # App Providers (FastMCP 3.2+)
+    # When enabled, registers Approval and Choice providers for interactive UIs
+    enable_app_providers: bool = Field(
+        default=False,
+        description="Enable FastMCP App providers (Approval, Choice)",
+        json_schema_extra={"env": "ENABLE_APP_PROVIDERS"},
+    )
+
     # Multi-Dimensional Search (Horizon 1 — RIC-TRM)
     # When enabled, callers use search_hybrid_multidim (multiplicative cross-dim scoring)
     # instead of search_hybrid (RRF rank fusion). POC validated: +9.5% Top-1 accuracy.
@@ -626,12 +634,18 @@ class Settings(BaseSettings):
     github_oauth_client_id: str = ""
     github_oauth_client_secret: str = ""
     github_oauth_required_scopes: str = "user:email"  # Comma-separated GitHub scopes
-    github_oauth_gating_repo: str = ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+    github_oauth_gating_repo: str = (
+        ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+    )
 
     # Alpha Access Control
     alpha_mode: bool = False  # Enable alpha access gating
-    alpha_google_email_allowlist: str = ""  # Comma-separated emails allowed via Google OAuth
-    alpha_github_require_star: bool = True  # Require GitHub users to star the gating repo
+    alpha_google_email_allowlist: str = (
+        ""  # Comma-separated emails allowed via Google OAuth
+    )
+    alpha_github_require_star: bool = (
+        True  # Require GitHub users to star the gating repo
+    )
 
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry

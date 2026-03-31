@@ -19,7 +19,7 @@ from fastmcp.experimental.transforms.code_mode import (
     Search,
 )
 from fastmcp.server.context import Context
-from fastmcp.tools.tool import Tool, ToolResult
+from fastmcp.tools import Tool, ToolResult
 from mcp.types import TextContent
 from pydantic import Field
 
@@ -261,10 +261,11 @@ class EnhancedSandboxProvider(MontySandboxProvider):
         }
 
         try:
+            # pydantic-monty >=0.0.8 removed external_functions from Monty()
+            # constructor; external_functions are now only passed to run_monty_async.
             monty = pydantic_monty.Monty(
                 code,
                 inputs=list((inputs or {}).keys()),
-                external_functions=list(all_external.keys()),
             )
         except Exception as exc:
             return _format_sandbox_error(exc)
@@ -859,13 +860,9 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     return _unwrap_tool_result(result)
                 except _VE as ve:
                     # Attempt argument recovery via LLM
-                    corrected = await _recover_args(
-                        ctx, tool, tool_name, params, ve
-                    )
+                    corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
-                        result = await ctx.fastmcp.call_tool(
-                            tool.name, corrected
-                        )
+                        result = await ctx.fastmcp.call_tool(tool.name, corrected)
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
@@ -965,9 +962,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # Strip markdown fences
             if text.startswith("```"):
                 lines = text.split("\n")
-                text = "\n".join(
-                    ln for ln in lines if not ln.strip().startswith("```")
-                )
+                text = "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
 
             corrected = json.loads(text)
             if not isinstance(corrected, dict):

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import TextContent
 
 from config.enhanced_logging import setup_logger
@@ -127,9 +127,7 @@ class DashboardCacheMiddleware(Middleware):
                     try:
                         import asyncio
 
-                        asyncio.ensure_future(
-                            self._store_to_redis(tool_name, data)
-                        )
+                        asyncio.ensure_future(self._store_to_redis(tool_name, data))
                     except Exception:
                         pass  # Best-effort Redis write
                 logger.info(

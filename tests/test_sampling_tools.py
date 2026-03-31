@@ -214,9 +214,7 @@ class TestRunValidationAgent:
             new_callable=AsyncMock,
             side_effect=_side_effect,
         ):
-            result = await mw._run_validation_agent(
-                ctx, "send_dynamic_card", config
-            )
+            result = await mw._run_validation_agent(ctx, "send_dynamic_card", config)
 
         assert result is not None
         assert result.is_valid is True
@@ -257,9 +255,7 @@ class TestRunValidationAgent:
             new_callable=AsyncMock,
             side_effect=_side_effect,
         ):
-            result = await mw._run_validation_agent(
-                ctx, "send_dynamic_card", config
-            )
+            result = await mw._run_validation_agent(ctx, "send_dynamic_card", config)
 
         assert result is not None
         assert result.is_valid is False
@@ -385,7 +381,7 @@ class TestOnCallToolValidation:
         )
 
         # Create a mock ToolResult with meta support
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
 
         mock_tool_result = ToolResult(content=[])
         call_next = AsyncMock(return_value=mock_tool_result)
@@ -960,7 +956,7 @@ class TestAttachValidationMetadata:
 
     def test_attaches_to_tool_result(self):
         """Should add validation dict to ToolResult.meta."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
 
         mw = EnhancedSamplingMiddleware()
         result = ToolResult(content=[])
@@ -989,7 +985,7 @@ class TestAttachValidationMetadata:
 
     def test_preserves_existing_meta(self):
         """Existing meta keys should not be lost."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
 
         mw = EnhancedSamplingMiddleware()
         result = ToolResult(content=[], meta={"existing_key": "value"})

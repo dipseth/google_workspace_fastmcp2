@@ -3,7 +3,7 @@
 import asyncio
 
 from fastmcp import FastMCP
-from fastmcp.server.apps import AppConfig, app_config_to_meta_dict
+from fastmcp.apps import AppConfig, app_config_to_meta_dict
 
 mcp = FastMCP("test")
 

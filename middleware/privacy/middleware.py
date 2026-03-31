@@ -18,7 +18,7 @@ import secrets
 from typing import Optional
 
 from fastmcp.server.middleware import Middleware
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 from config.enhanced_logging import setup_logger
 from middleware.privacy.constants import PRIVACY_FIELD_PATTERNS
@@ -31,6 +31,7 @@ from middleware.privacy.scanner import (
 from middleware.privacy.vault import derive_privacy_vault_key
 
 logger = setup_logger()
+
 
 class PrivacyMiddleware(Middleware):
     """Encrypts sensitive values in tool responses, masks them for the LLM.

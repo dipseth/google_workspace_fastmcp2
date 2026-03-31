@@ -1219,7 +1219,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             await ctx.debug(f"FastMCP server type: {type(fastmcp_server)}")
             await ctx.debug(f"FastMCP server attributes: {dir(fastmcp_server)}")
 
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = fastmcp_server.local_provider._components
             registered_tools = {
@@ -1557,7 +1557,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             # Access the FastMCP server instance through context
             fastmcp_server = ctx.fastmcp
 
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = fastmcp_server.local_provider._components
             registered_tools = {

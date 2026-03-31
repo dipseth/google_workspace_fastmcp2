@@ -25,7 +25,8 @@ except ImportError:
     print("⚠️ Jinja2 not available, falling back to simple templates")
 
 from fastmcp import Context, FastMCP
-from fastmcp.prompts.prompt import PromptMessage, TextContent
+from fastmcp.prompts import PromptMessage
+from mcp.types import TextContent
 
 from config.enhanced_logging import setup_logger
 from prompts.tool_optimization_helper import ToolOptimizationHelper

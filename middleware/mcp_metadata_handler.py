@@ -14,6 +14,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class MCPMetadataHandler:
     """Handler for MCP tool metadata operations"""
 
@@ -37,7 +38,7 @@ class MCPMetadataHandler:
             Dictionary of tool name to tool metadata
         """
         try:
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = self.mcp_server.local_provider._components
             tools = {v.name: v for v in components.values() if isinstance(v, Tool)}
@@ -330,6 +331,7 @@ class MCPMetadataHandler:
         report["services_detected"] = list(report["services_detected"])
         return report
 
+
 def extract_tool_metadata_from_registry(
     mcp_server: FastMCP,
 ) -> Dict[str, Dict[str, Any]]:
@@ -352,6 +354,7 @@ def extract_tool_metadata_from_registry(
             tool_metadata[tool_name] = metadata
 
     return tool_metadata
+
 
 def validate_tool_scopes_against_registry(
     mcp_server: FastMCP, available_scopes: List[str]

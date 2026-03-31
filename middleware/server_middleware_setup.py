@@ -451,6 +451,7 @@ def setup_all_middleware(
                 ResponseCachingMiddleware(
                     cache_storage=_namespaced_store,
                     call_tool_settings={"enabled": False},
+                    read_resource_settings={"enabled": False},
                 )
             )
             _safe_url = _mask_redis_url(settings.redis_io_url_string)
