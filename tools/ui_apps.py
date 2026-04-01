@@ -449,6 +449,36 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         payload = json.dumps({"data": cached, "config": config})
         return _build_data_dashboard_html(payload)
 
+    @mcp.resource(
+        "ui://data-dashboard/_latest",
+        name="latest_data_dashboard",
+        title="Latest Data Dashboard",
+        description="Dashboard for the most recently called list tool",
+        tags={"ui", "dashboard", "data"},
+        mime_type="text/html",
+        app=AppConfig(prefers_border=True),
+    )
+    def latest_data_dashboard() -> str:
+        """Serve the dashboard for the last dashboard tool that was called.
+
+        Used by Code Mode's ``execute`` tool, which sets
+        ``meta["ui"]["resourceUri"]`` to this resource.  After each
+        execute call that invokes a dashboard-enabled tool, VS Code
+        auto-fetches this resource and renders the latest dashboard.
+        """
+        from middleware.dashboard_cache_middleware import (
+            get_cached_result,
+            get_last_dashboard_tool,
+        )
+
+        tool_name = get_last_dashboard_tool()
+        if not tool_name:
+            return _build_data_dashboard_html("{}")
+        cached = get_cached_result(tool_name) or {}
+        config = get_data_dashboard_config(tool_name)
+        payload = json.dumps({"data": cached, "config": config})
+        return _build_data_dashboard_html(payload)
+
 
 # ---------------------------------------------------------------------------
 # Generic Data Dashboard — shared template for all list-tool UIs

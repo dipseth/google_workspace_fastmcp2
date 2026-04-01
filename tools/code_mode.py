@@ -871,11 +871,23 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 external_functions={"call_tool": call_tool},
             )
 
-        return Tool.from_function(
+        tool = Tool.from_function(
             fn=execute,
             name=transform.execute_tool_name,
             description=transform._build_execute_description(),
         )
+
+        # Point execute at the _latest dashboard resource so VS Code
+        # auto-renders whichever dashboard was last populated.
+        from fastmcp.apps import app_config_to_meta_dict
+        from fastmcp.apps.config import AppConfig
+
+        tool.meta = tool.meta or {}
+        tool.meta["ui"] = app_config_to_meta_dict(
+            AppConfig(resource_uri="ui://data-dashboard/_latest")
+        )
+
+        return tool
 
     async def _recover_args(
         ctx: Context,

@@ -52,6 +52,9 @@ _redis_store: Any = None
 # Set of tool names we should intercept (populated from _DASHBOARD_CONFIGS keys)
 _watched_tools: Set[str] = set()
 
+# Tracks the most recently called dashboard tool (used by _latest resource)
+_last_dashboard_tool: Optional[str] = None
+
 
 def set_redis_store(store: Any) -> None:
     """Set the Redis store for dashboard cache offloading."""
@@ -73,6 +76,17 @@ def get_cached_result(tool_name: str) -> Optional[dict]:
     """
     entry = _result_cache.get(tool_name)
     return entry.data if entry else None
+
+
+def set_last_dashboard_tool(tool_name: str) -> None:
+    """Record the most recently called dashboard tool."""
+    global _last_dashboard_tool
+    _last_dashboard_tool = tool_name
+
+
+def get_last_dashboard_tool() -> Optional[str]:
+    """Return the most recently called dashboard tool name, or ``None``."""
+    return _last_dashboard_tool
 
 
 def get_cache_age(tool_name: str) -> Optional[float]:
@@ -122,6 +136,7 @@ class DashboardCacheMiddleware(Middleware):
                     data=data,
                     timestamp=time.time(),
                 )
+                set_last_dashboard_tool(tool_name)
                 # Offload to Redis with TTL when available
                 if _redis_store is not None:
                     try:

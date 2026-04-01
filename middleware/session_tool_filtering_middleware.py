@@ -354,6 +354,9 @@ class SessionToolFilteringMiddleware(Middleware):
             "search",
             "get_schema",
             "execute",
+            "fetch_document",
+            "semantic_search",
+            "tool_activity",
         }
         self.enable_debug = enable_debug
         self.minimal_startup = minimal_startup
