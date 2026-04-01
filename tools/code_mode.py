@@ -824,6 +824,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
             NotFoundError,
             _unwrap_tool_result,
         )
+        from fastmcp.tools import ToolResult as _ToolResult
         from pydantic import ValidationError as _VE
 
         transform = code_mode
@@ -866,10 +867,41 @@ def setup_code_mode(mcp: FastMCP) -> None:
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
-            return await transform.sandbox_provider.run(
+            raw = await transform.sandbox_provider.run(
                 code,
                 external_functions={"call_tool": call_tool},
             )
+
+            # If a dashboard-enabled tool was called during this execute,
+            # embed a Prefab dashboard directly in the ToolResult so
+            # VS Code renders it inline (no resource-fetch race).
+            try:
+                from middleware.dashboard_cache_middleware import (
+                    get_cached_result,
+                    get_last_dashboard_tool,
+                )
+
+                last_tool = get_last_dashboard_tool()
+                if last_tool is not None:
+                    cached = get_cached_result(last_tool)
+                    if cached:
+                        from tools.ui_apps import (
+                            _build_prefab_data_dashboard,
+                            get_data_dashboard_config,
+                        )
+
+                        config = get_data_dashboard_config(last_tool)
+                        prefab = _build_prefab_data_dashboard(
+                            last_tool, cached, config
+                        )
+                        if prefab is not None:
+                            return _ToolResult(
+                                content=raw,
+                                structured_content=prefab.to_json(),
+                            )
+            except Exception:
+                pass
+            return raw
 
         tool = Tool.from_function(
             fn=execute,
@@ -877,15 +909,9 @@ def setup_code_mode(mcp: FastMCP) -> None:
             description=transform._build_execute_description(),
         )
 
-        # Point execute at the _latest dashboard resource so VS Code
-        # auto-renders whichever dashboard was last populated.
-        from fastmcp.apps import app_config_to_meta_dict
-        from fastmcp.apps.config import AppConfig
-
-        tool.meta = tool.meta or {}
-        tool.meta["ui"] = app_config_to_meta_dict(
-            AppConfig(resource_uri="ui://data-dashboard/_latest")
-        )
+        # Dashboard rendering is now handled inline via Prefab
+        # structured_content in the ToolResult (see execute body above),
+        # so no resourceUri is needed on the tool definition.
 
         return tool
 

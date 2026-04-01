@@ -145,6 +145,12 @@ class DashboardCacheMiddleware(Middleware):
                         asyncio.ensure_future(self._store_to_redis(tool_name, data))
                     except Exception:
                         pass  # Best-effort Redis write
+
+                # Embed a Prefab dashboard directly into the ToolResult's
+                # structured_content so VS Code renders it inline — no
+                # separate resource fetch (which races the tool execution).
+                self._inject_prefab_dashboard(response, tool_name, data)
+
                 logger.info(
                     f"📊 Dashboard cache updated for {tool_name} "
                     f"({len(str(data))} chars)"
@@ -176,6 +182,32 @@ class DashboardCacheMiddleware(Middleware):
             )
         except Exception as exc:
             logger.debug(f"Dashboard cache Redis write failed for {tool_name}: {exc}")
+
+    @staticmethod
+    def _inject_prefab_dashboard(
+        response: ToolResult, tool_name: str, data: dict
+    ) -> None:
+        """Best-effort: build a Prefab DataTable and set it as structured_content.
+
+        This embeds the dashboard directly in the ToolResult so VS Code
+        renders it inline alongside the text content.  The text content
+        (JSON) is kept for the LLM; the structured_content is rendered
+        by VS Code's Prefab renderer.
+        """
+        try:
+            from tools.ui_apps import (
+                _build_prefab_data_dashboard,
+                get_data_dashboard_config,
+            )
+
+            config = get_data_dashboard_config(tool_name)
+            prefab = _build_prefab_data_dashboard(tool_name, data, config)
+            if prefab is not None:
+                response.structured_content = prefab.to_json()
+        except Exception as exc:
+            logger.debug(
+                f"📊 Prefab dashboard injection skipped for {tool_name}: {exc}"
+            )
 
     @staticmethod
     def _extract_data(response: ToolResult) -> Optional[dict]:
