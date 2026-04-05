@@ -1948,10 +1948,40 @@ async def search_evaluation():
 
     metrics = evaluate_ranked_results(ranked_lists, k_values=[1, 3, 5, 10])
 
+    # Compute eval set metadata for UI transparency
+    all_labels = []
+    for group in val_groups:
+        for c in group.get("candidates", []):
+            all_labels.append(c.get("label", c.get("form_label", 0.0)))
+    n_total = len(all_labels)
+    n_pos = sum(1 for l in all_labels if l > 0.5)
+    pos_ratio = round(n_pos / max(n_total, 1), 3)
+
+    # Determine which data file was used
+    if _feature_version >= 5:
+        eval_data_file = _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+    elif _feature_version == 3:
+        eval_data_file = _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+    elif _feature_version == 2:
+        eval_data_file = _SYNTHETIC_GROUPS_V2.name if _SYNTHETIC_GROUPS_V2.exists() else "unknown"
+    else:
+        eval_data_file = "mw_groups.json + mw_synthetic_groups.json"
+
     return {
         "metrics": {k: round(v, 4) for k, v in metrics.items()},
         "per_group": per_group,
         "n_groups": len(per_group),
+        "eval_meta": {
+            "data_file": eval_data_file,
+            "feature_version": _feature_version,
+            "model_type": _model_type,
+            "total_candidates": n_total,
+            "total_positive": n_pos,
+            "positive_ratio": pos_ratio,
+            "split_seed": 42,
+            "split_ratio": "80/20",
+            "domain": "card_framework.v2",
+        },
     }
 
 
@@ -2000,6 +2030,8 @@ async def model_comparison():
             "n_groups": n_groups,
             "model_type": _model_type,
             "feature_version": _feature_version,
+            "checkpoint_file": _CHECKPOINT_PATH.name,
+            "domain": "card_framework.v2",
         }
 
     # --- UnifiedTRN model ---
@@ -2055,11 +2087,39 @@ async def model_comparison():
                 "pool_acc": round(ckpt.get("best_pool_acc", ckpt.get("val_pool_acc", 0)), 4),
                 "halt_acc": round(ckpt.get("val_halt_acc", 0), 4),
                 "total_params": sum(p.numel() for p in unified_model.parameters()),
+                "checkpoint_file": unified_path.name,
+                "data_version": ckpt.get("data_version", "unknown"),
+                "domain": ckpt.get("domain", "card_framework.v2"),
             }
         except Exception as e:
             results["unified_trn"] = {"error": str(e)}
     else:
         results["unified_trn"] = {"error": "Checkpoint not found"}
+
+    # Add shared eval metadata
+    all_labels = []
+    for group in val_groups:
+        for c in group.get("candidates", []):
+            all_labels.append(c.get("label", c.get("form_label", 0.0)))
+    n_total = len(all_labels)
+    n_pos = sum(1 for l in all_labels if l > 0.5)
+
+    if _feature_version >= 5:
+        eval_data_file = _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+    elif _feature_version == 3:
+        eval_data_file = _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+    else:
+        eval_data_file = "unknown"
+
+    results["eval_meta"] = {
+        "data_file": eval_data_file,
+        "feature_version": _feature_version,
+        "total_candidates": n_total,
+        "total_positive": n_pos,
+        "positive_ratio": round(n_pos / max(n_total, 1), 3),
+        "split_seed": 42,
+        "split_ratio": "80/20",
+    }
 
     return results
 

@@ -13,9 +13,36 @@ export default function ModelComparisonPanel() {
   ]
 
   const metricKeys = ['accuracy', 'mrr'] as const
+  const meta = data.eval_meta
 
   return (
     <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
+      {/* Shared eval set banner */}
+      {meta && (
+        <div className="bg-amber-950/30 border border-amber-800/40 rounded-lg px-3 py-2 mb-4 text-xs">
+          <div className="text-amber-400/80 font-medium mb-1">Both models evaluated on same data</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
+            <span>
+              <span className="text-gray-500">Eval set:</span>{' '}
+              <span className="text-gray-200 font-mono">{meta.data_file}</span>
+            </span>
+            <span>
+              <span className="text-gray-500">Features:</span> v{meta.feature_version}
+            </span>
+            <span>
+              <span className="text-gray-500">Split:</span> {meta.split_ratio} (seed={meta.split_seed})
+            </span>
+            <span>
+              <span className="text-gray-500">Candidates:</span>{' '}
+              {meta.total_candidates.toLocaleString()} ({meta.total_positive} pos,{' '}
+              <span className={meta.positive_ratio > 0.3 ? 'text-yellow-400' : 'text-gray-300'}>
+                {(meta.positive_ratio * 100).toFixed(1)}%
+              </span>)
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Side-by-side cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {models.map(({ key, label, color, data: mdata }) => (
@@ -42,8 +69,23 @@ export default function ModelComparisonPanel() {
                 <div className="text-xs text-gray-500 space-y-1 mt-2">
                   <div>Groups: {mdata.n_groups}</div>
                   {mdata.model_type && <div>Type: {mdata.model_type}</div>}
-                  {mdata.feature_version && <div>Features: v{mdata.feature_version}</div>}
+                  {mdata.feature_version !== undefined && <div>Features: v{mdata.feature_version}</div>}
                   {mdata.total_params && <div>Params: {mdata.total_params.toLocaleString()}</div>}
+                  {mdata.domain && (
+                    <div>
+                      Domain: <span className="text-cyan-400">{mdata.domain}</span>
+                    </div>
+                  )}
+                  {mdata.checkpoint_file && (
+                    <div>
+                      Checkpoint: <span className="text-gray-300 font-mono">{mdata.checkpoint_file}</span>
+                    </div>
+                  )}
+                  {mdata.data_version && mdata.data_version !== 'unknown' && (
+                    <div>
+                      Trained on: <span className="text-gray-300 font-mono">{mdata.data_version}</span>
+                    </div>
+                  )}
                   {mdata.pool_acc !== undefined && <div>Pool acc: {(mdata.pool_acc * 100).toFixed(1)}%</div>}
                   {mdata.halt_acc !== undefined && mdata.halt_acc > 0 && (
                     <div>Halt acc: {(mdata.halt_acc * 100).toFixed(1)}%</div>

@@ -18,8 +18,43 @@ export default function SearchEvalPanel() {
   else if (sortBy === 'candidates') groups.sort((a, b) => b.n_candidates - a.n_candidates)
   else groups.sort((a, b) => a.query_name.localeCompare(b.query_name))
 
+  const meta = data.eval_meta
+
   return (
     <div className="bg-gray-900 rounded-lg border border-gray-800 p-4">
+      {/* Eval context banner */}
+      {meta && (
+        <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2 mb-4 text-xs">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-400">
+            <span>
+              <span className="text-gray-500">Model:</span>{' '}
+              <span className="text-gray-200 font-medium">{meta.model_type ?? 'unknown'}</span>
+            </span>
+            <span>
+              <span className="text-gray-500">Domain:</span>{' '}
+              <span className="text-cyan-400">{meta.domain ?? 'unknown'}</span>
+            </span>
+            <span>
+              <span className="text-gray-500">Eval set:</span>{' '}
+              <span className="text-gray-200 font-mono">{meta.data_file}</span>
+            </span>
+            <span>
+              <span className="text-gray-500">Features:</span> v{meta.feature_version}
+            </span>
+            <span>
+              <span className="text-gray-500">Split:</span> {meta.split_ratio} (seed={meta.split_seed})
+            </span>
+            <span>
+              <span className="text-gray-500">Candidates:</span>{' '}
+              {meta.total_candidates.toLocaleString()} ({meta.total_positive} pos,{' '}
+              <span className={meta.positive_ratio > 0.3 ? 'text-yellow-400' : 'text-gray-300'}>
+                {(meta.positive_ratio * 100).toFixed(1)}% ratio
+              </span>)
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Aggregate metrics */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
         {['precision@1', 'precision@3', 'precision@5', 'recall@5', 'recall@10', 'mrr'].map((key) => (
