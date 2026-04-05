@@ -501,6 +501,12 @@ def main():
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = checkpoint_dir / "best_model_unified.pt"
 
+    # Loss history for diagnostic UI
+    train_losses: list[float] = []
+    val_losses: list[float] = []
+    train_accs: list[float] = []
+    val_accs: list[float] = []
+
     for epoch in range(1, args.epochs + 1):
         model.train()
         epoch_search_loss = 0.0
@@ -555,6 +561,12 @@ def main():
         val_pool_acc = val_metrics.get("pool_acc", 0)
         val_halt_acc = val_metrics.get("halt_acc", 0)
 
+        # Track loss history for diagnostic UI
+        train_losses.append(epoch_search_loss / max(n_search_batches, 1))
+        val_losses.append(val_metrics.get("form_loss", 0.0))
+        train_accs.append(avg_form_top1)
+        val_accs.append(val_form_top1)
+
         # Log
         if epoch % 5 == 0 or epoch == 1 or val_form_top1 > best_form_top1:
             logger.info(
@@ -594,6 +606,11 @@ def main():
                 "rewrap_rules": dict(domain.rewrap_rules),
                 "best_pool_acc": val_pool_acc,
                 "best_content_top1": val_content_top1,
+                # Loss history for diagnostic UI
+                "train_losses": train_losses[:],
+                "val_losses": val_losses[:],
+                "train_accs": train_accs[:],
+                "val_accs": val_accs[:],
             }
             torch.save(checkpoint, checkpoint_path)
             logger.info(f"  → Saved checkpoint (val_form={val_form_top1:.1%}, "
@@ -603,6 +620,16 @@ def main():
             if patience_counter >= args.patience:
                 logger.info(f"Early stopping at epoch {epoch}")
                 break
+
+    # Update checkpoint with full loss history (not just up to best epoch)
+    if checkpoint_path.exists():
+        saved = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+        saved["train_losses"] = train_losses
+        saved["val_losses"] = val_losses
+        saved["train_accs"] = train_accs
+        saved["val_accs"] = val_accs
+        torch.save(saved, checkpoint_path)
+        logger.info(f"Updated checkpoint with full loss history ({len(train_losses)} epochs)")
 
     # Final summary
     best = torch.load(checkpoint_path, map_location="cpu", weights_only=True)

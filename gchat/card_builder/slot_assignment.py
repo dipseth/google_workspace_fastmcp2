@@ -41,13 +41,18 @@ def _extract_item_text(item: Any) -> str:
     return ""
 
 
-def _rewrap_item(item: Any, source_pool: str, target_pool: str) -> dict:
+def _rewrap_item(
+    item: Any,
+    source_pool: str,
+    target_pool: str,
+    domain_config: Any = None,
+) -> dict:
     """Re-wrap a supply_map item for a different pool's expected schema.
 
     Uses DomainConfig rewrap_rules when available, falls back to
     hardcoded gchat rules for backward compatibility.
     """
-    domain = _get_domain_config()
+    domain = domain_config if domain_config is not None else _get_domain_config()
     return domain.rewrap_item(item, source_pool, target_pool)
 
 
@@ -204,9 +209,9 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
         return None
 
 
-def _get_constants():
+def _get_constants(domain_config: Any = None):
     """Get pool vocab, component-to-pool, and specificity order from DomainConfig."""
-    domain = _get_domain_config()
+    domain = domain_config if domain_config is not None else _get_domain_config()
     return domain.pool_vocab, domain.component_to_pool, domain.specificity_order
 
 
@@ -214,6 +219,7 @@ def reassign_supply_map(
     supply_map: Dict[str, list],
     demands: Dict[str, int],
     wrapper: Any = None,
+    domain_config: Any = None,
 ) -> Dict[str, list]:
     """Reassign and reorder supply_map pools using SlotAffinityNet.
 
@@ -225,6 +231,9 @@ def reassign_supply_map(
         supply_map: {pool_key: [items]} — the original supply_map
         demands: {component_name: count} — what the DSL demands
         wrapper: ModuleWrapper instance (for embedder access)
+        domain_config: Optional DomainConfig override. When provided,
+            uses this config instead of the checkpoint/cache default.
+            Enables domain-agnostic slot assignment across gchat, email, etc.
 
     Returns:
         Reassigned supply_map (new dict, original unchanged).
@@ -232,7 +241,7 @@ def reassign_supply_map(
     """
     import torch
 
-    VOCAB, COMP_TO_POOL, SPEC_ORDER = _get_constants()
+    VOCAB, COMP_TO_POOL, SPEC_ORDER = _get_constants(domain_config)
 
     model = _load_slot_model()
     if model is None:
@@ -346,7 +355,7 @@ def reassign_supply_map(
             for idx, _score in candidates[:count]:
                 item, source_pool = all_items[idx]
                 if source_pool != target_pool:
-                    item = _rewrap_item(item, source_pool, target_pool)
+                    item = _rewrap_item(item, source_pool, target_pool, domain_config)
                 new_pools[target_pool].append(item)
                 assigned[idx] = True
 

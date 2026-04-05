@@ -489,47 +489,43 @@ def compute_features_v2(
     sim_i = maxsim_score(query.inp_vectors, cand_inp)
     sim_r = cosine_sim(query.rel_vector, cand_rel)
 
-    # Structural features from DAG
+    # Structural features — CONTINUOUS (not binary)
     query_components = set(query.component_paths)
+    n_query = max(len(query_components), 1)
 
-    # Is candidate a parent container of any query component?
-    is_parent = 0.0
+    # parent_overlap: fraction of query components that are children of candidate
     cand_children = _dag_children.get(cand_name, set())
-    if cand_children & query_components:
-        is_parent = 1.0
+    parent_overlap = len(cand_children & query_components) / n_query
 
-    # Is candidate a child of any query component?
-    is_child = 0.0
+    # child_overlap: fraction of query components that are parents of candidate
     cand_parents = _dag_parents.get(cand_name, set())
-    if cand_parents & query_components:
-        is_child = 1.0
+    child_overlap = len(cand_parents & query_components) / n_query
 
-    # Does candidate share a parent with any query component? (sibling)
-    is_sibling = 0.0
+    # sibling_overlap: fraction of query components sharing a parent with candidate
+    sibling_count = 0
     for qc in query_components:
         qc_parents = _dag_parents.get(qc, set())
         if qc_parents & cand_parents:
-            is_sibling = 1.0
-            break
+            sibling_count += 1
+    sibling_overlap = sibling_count / n_query
 
     # Depth ratio (0.0 = root, 1.0 = deepest leaf)
     max_depth = max(_dag_depth.values()) if _dag_depth else 1
     cand_depth = _dag_depth.get(cand_name, 0)
     depth_ratio = cand_depth / max_depth if max_depth > 0 else 0.0
 
-    # Number of shared ancestors between candidate and query components
+    # Shared ancestor ratio
     cand_ancestors = _get_ancestors(cand_name)
     query_ancestors = set()
     for qc in query_components:
         query_ancestors.update(_get_ancestors(qc))
     n_shared = len(cand_ancestors & query_ancestors)
-    # Normalize by total unique ancestors to keep in [0, 1]
     total_ancestors = len(cand_ancestors | query_ancestors) if (cand_ancestors or query_ancestors) else 1
     n_shared_ratio = n_shared / total_ancestors
 
     return np.array([
         sim_c, sim_i, sim_r,
-        is_parent, is_child, is_sibling,
+        parent_overlap, child_overlap, sibling_overlap,
         depth_ratio, n_shared_ratio,
     ], dtype=np.float32)
 
@@ -572,30 +568,35 @@ def compute_features_v3(
     # Dense semantic similarity (unchanged)
     sim_r = cosine_sim(query.rel_vector, cand_rel)
 
-    # Structural features (identical to V2)
+    # Structural features — CONTINUOUS (not binary)
+    # Instead of binary is_parent/is_child/is_sibling, compute continuous
+    # measures that encode structural proximity without being trivially
+    # separable label indicators.
     query_components = set(query.component_paths)
+    n_query = max(len(query_components), 1)
 
-    is_parent = 0.0
+    # parent_overlap: fraction of query components that are children of candidate
     cand_children = _dag_children.get(cand_name, set())
-    if cand_children & query_components:
-        is_parent = 1.0
+    parent_overlap = len(cand_children & query_components) / n_query
 
-    is_child = 0.0
+    # child_overlap: fraction of query components that are parents of candidate
     cand_parents = _dag_parents.get(cand_name, set())
-    if cand_parents & query_components:
-        is_child = 1.0
+    child_overlap = len(cand_parents & query_components) / n_query
 
-    is_sibling = 0.0
+    # sibling_overlap: fraction of query components that share a parent with candidate
+    sibling_count = 0
     for qc in query_components:
         qc_parents = _dag_parents.get(qc, set())
         if qc_parents & cand_parents:
-            is_sibling = 1.0
-            break
+            sibling_count += 1
+    sibling_overlap = sibling_count / n_query
 
+    # Depth ratio (unchanged — already continuous)
     max_depth = max(_dag_depth.values()) if _dag_depth else 1
     cand_depth = _dag_depth.get(cand_name, 0)
     depth_ratio = cand_depth / max_depth if max_depth > 0 else 0.0
 
+    # Shared ancestor ratio (unchanged — already continuous)
     cand_ancestors = _get_ancestors(cand_name)
     query_ancestors = set()
     for qc in query_components:
@@ -608,7 +609,7 @@ def compute_features_v3(
         sim_c_mean, sim_c_max, sim_c_std, sim_c_cov,
         sim_i_mean, sim_i_max, sim_i_std, sim_i_cov,
         sim_r,
-        is_parent, is_child, is_sibling,
+        parent_overlap, child_overlap, sibling_overlap,
         depth_ratio, n_shared_ratio,
     ], dtype=np.float32)
 
@@ -958,13 +959,16 @@ def build_synthetic_groups(
     top_k: int = 20,
     n_random: int = 5,
     feature_version: int = 2,
+    max_positives: int = 3,
 ) -> List[dict]:
-    """Build query groups with ground-truth labels.
+    """Build query groups with ground-truth labels and controlled positive rate.
 
     For each synthetic pattern:
     - Score against all class points by component similarity
-    - Take top-K + N random (hard + easy negatives)
-    - Label = 1.0 if class name is in pattern's component_paths
+    - Select up to max_positives true positives (by similarity rank)
+    - Fill remaining slots with hard negatives (high similarity but wrong)
+    - Add N random easy negatives
+    - Target positive rate: ~12-20% (vs previous 64%)
     """
     groups = []
     unique_components = set()
@@ -985,23 +989,36 @@ def build_synthetic_groups(
 
         scored.sort(key=lambda x: x[1], reverse=True)
 
-        # Top-K by similarity (hard negatives + true positives)
-        top_candidates = [c for c, _ in scored[:top_k]]
+        # Separate positives and negatives, both sorted by similarity
+        query_components = set(query.component_paths)
+        positives = [(c, s) for c, s in scored if c["name"] in query_components]
+        negatives = [(c, s) for c, s in scored if c["name"] not in query_components]
 
-        # Add random candidates (easy negatives)
-        remaining = [c for c, _ in scored[top_k:]]
-        if remaining:
-            n_rand = min(n_random, len(remaining))
-            random_cands = random.sample(remaining, n_rand)
-            top_candidates.extend(random_cands)
+        # Select up to max_positives (highest similarity positives)
+        selected_positives = positives[:max_positives]
+
+        # Fill with hard negatives (highest similarity negatives)
+        n_neg_needed = top_k - len(selected_positives)
+        hard_negatives = negatives[:n_neg_needed]
+
+        top_candidates = [c for c, _ in selected_positives] + [c for c, _ in hard_negatives]
+
+        # Add random easy negatives from remaining
+        used_names = {c["name"] for c in top_candidates}
+        remaining_neg = [(c, s) for c, s in negatives if c["name"] not in used_names]
+        if remaining_neg:
+            n_rand = min(n_random, len(remaining_neg))
+            random_cands = random.sample(remaining_neg, n_rand)
+            top_candidates.extend([c for c, _ in random_cands])
+
+        # Shuffle to remove positional bias
+        random.shuffle(top_candidates)
 
         # Ground-truth labels
-        query_components = set(query.component_paths)
         labels = []
         has_positive = False
         for cand in top_candidates:
             cand_name = cand["name"]
-            # Label is positive if this class is used in the card
             if cand_name in query_components:
                 labels.append(1.0)
                 has_positive = True
@@ -1994,6 +2011,8 @@ def main():
                         help="Skip content-swapped hard negative generation")
     parser.add_argument("--hard-negative-fraction", type=float, default=0.5,
                         help="Fraction of groups to generate hard negatives for (default: 0.5)")
+    parser.add_argument("--max-positives", type=int, default=3,
+                        help="Max true positives per group (default: 3). Controls positive rate.")
     args = parser.parse_args()
 
     # Normalize legacy domain alias
@@ -2074,7 +2093,10 @@ def main():
 
     # Step 5: Build query groups with ground-truth labels
     logger.info(f"\n=== Step 5: Building query groups (domain={args.domain}, feature_version={fv}) ===")
-    groups = build_synthetic_groups(patterns, class_points, args.top_k, args.n_random, feature_version=fv)
+    groups = build_synthetic_groups(
+        patterns, class_points, args.top_k, args.n_random,
+        feature_version=fv, max_positives=args.max_positives,
+    )
 
     # Step 5b: Extract real user training data if requested
     if args.include_real and args.domain == "card":

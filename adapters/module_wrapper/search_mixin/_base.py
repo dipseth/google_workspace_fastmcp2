@@ -70,7 +70,7 @@ class SearchMixin:
     # --- Learned model class-level state ---
     _learned_model = None  # class-level cache for the trained model
     _learned_feature_version = 1  # 1=9D, 2=8D, 3=14D, 4=15D, 5=17D
-    _learned_model_type = "single"  # "single" or "dual_head"
+    _learned_model_type = "single"  # "single", "dual_head", or "unified" (UnifiedTRN)
     _learned_model_domain = None  # domain_id from checkpoint
     _learned_dag_children: dict = {}
     _learned_dag_parents: dict = {}

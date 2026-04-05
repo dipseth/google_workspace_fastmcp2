@@ -14,7 +14,8 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
     Priority:
       1. LEARNED_SCORER_REGISTRY JSON (domain->path mapping)
       2. LEARNED_SCORER_CHECKPOINT (single path, any domain)
-      3. Default file path
+      3. Default: best_model_unified.pt (UnifiedTRN)
+      4. Fallback: best_model_mw.pt (DualHeadScorerMW)
     """
     import json as _json
     import os
@@ -40,19 +41,21 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
     if checkpoint_path and os.path.exists(checkpoint_path):
         return checkpoint_path
 
-    # Default file path
+    # Default file paths — prefer UnifiedTRN, fall back to DualHead
     from pathlib import Path
-    candidates = [
-        Path(__file__).parent.parent.parent.parent
-        / "research" / "trm" / "h2"
-        / "checkpoints" / "best_model_mw.pt",
-        Path.cwd()
-        / "research" / "trm" / "h2"
-        / "checkpoints" / "best_model_mw.pt",
+    base_dirs = [
+        Path(__file__).parent.parent.parent.parent,
+        Path.cwd(),
     ]
-    for p in candidates:
-        if p.exists():
-            return str(p)
+    checkpoint_names = [
+        "best_model_unified.pt",  # UnifiedTRN (preferred)
+        "best_model_mw.pt",       # DualHeadScorerMW (fallback)
+    ]
+    for name in checkpoint_names:
+        for base in base_dirs:
+            p = base / "research" / "trm" / "h2" / "checkpoints" / name
+            if p.exists():
+                return str(p)
 
     return None
 
@@ -61,8 +64,10 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
 def _load_learned_model(cls, domain: str | None = None):
     """Load the trained scorer model (cached at class level).
 
-    Supports both SimilarityScorerMW (single output) and
-    DualHeadScorerMW (form_score + content_score).
+    Supports three architectures (auto-detected from checkpoint):
+      - UnifiedTRN: structural(17D) + content(384D) → form/content/halt/pool heads
+      - DualHeadScorerMW: features(17D) → form_score + content_score
+      - SimilarityScorerMW: features(9D) → single score
 
     Args:
         domain: Optional domain ID for registry-based checkpoint lookup.
@@ -135,32 +140,43 @@ def _load_learned_model(cls, domain: str | None = None):
         ckpt = torch.load(
             checkpoint_path, map_location="cpu", weights_only=False
         )
-        hidden_dim = ckpt.get("hidden_dim", 32)
-        dropout = ckpt.get("dropout", 0.15)
-        input_dim = ckpt.get("input_dim", 9)
         model_type = ckpt.get("model_type", "similarity_mw")
         cls._learned_feature_version = ckpt.get(
-            "feature_version", 1
-        )
-        cls._learned_model_type = (
-            "dual_head" if model_type == "dual_head" else "single"
+            "feature_version", 5 if model_type == "unified" else 1
         )
         cls._learned_model_domain = ckpt.get("domain_id")
 
-        if model_type == "dual_head":
+        if model_type in ("unified", "unified_trn"):
+            # UnifiedTRN: dual-encoder with 4 task heads
+            from research.trm.h2.unified_trn import UnifiedTRN
+
+            model = UnifiedTRN(
+                structural_dim=ckpt.get("structural_dim", 17),
+                content_dim=ckpt.get("content_dim", 384),
+                hidden=ckpt.get("hidden", 64),
+                n_pools=ckpt.get("n_pools", 5),
+                dropout=0.0,  # no dropout at inference
+            )
+            cls._learned_model_type = "unified"
+
+        elif model_type == "dual_head":
+            hidden_dim = ckpt.get("hidden_dim", 48)
             head_dim = ckpt.get("head_dim", 24)
             model = _DualHeadMLP(
-                input_dim=input_dim,
+                input_dim=ckpt.get("input_dim", 17),
                 hidden_dim=hidden_dim,
                 head_dim=head_dim,
-                dropout=dropout,
+                dropout=ckpt.get("dropout", 0.15),
             )
+            cls._learned_model_type = "dual_head"
+
         else:
             model = _ScorerMLP(
-                input_dim=input_dim,
-                hidden_dim=hidden_dim,
-                dropout=dropout,
+                input_dim=ckpt.get("input_dim", 9),
+                hidden_dim=ckpt.get("hidden_dim", 32),
+                dropout=ckpt.get("dropout", 0.15),
             )
+            cls._learned_model_type = "single"
 
         model.load_state_dict(ckpt["model_state_dict"])
         model.eval()
@@ -171,8 +187,7 @@ def _load_learned_model(cls, domain: str | None = None):
             f"Loaded {cls._learned_model_type} scorer "
             f"from {checkpoint_path} "
             f"(domain={domain_str}, params={n_params}, "
-            f"V{cls._learned_feature_version}, "
-            f"input_dim={input_dim})"
+            f"V{cls._learned_feature_version})"
         )
         return model
     except Exception as e:

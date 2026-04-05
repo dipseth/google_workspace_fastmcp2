@@ -1547,11 +1547,15 @@ async def slot_assigner_confusion():
 class SlotRoutingRequest(BaseModel):
     content_items: list[str]
     demands: dict[str, int] = {}
+    domain: str = "gchat"
 
 
 @router.post("/ml/slot-routing-test")
 async def slot_routing_test(req: SlotRoutingRequest):
     """Test slot routing on arbitrary content items. Shows predicted pool + scores."""
+    from research.trm.h2.domain_config import get_domain_or_default
+    domain_config = get_domain_or_default(req.domain)
+
     torch = _load_torch()
 
     model = _load_slot_model()
@@ -1559,7 +1563,7 @@ async def slot_routing_test(req: SlotRoutingRequest):
         return {"error": "No slot assigner model loaded"}
 
     ckpt = torch.load(str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True)
-    pool_vocab = ckpt.get("slot_type_vocab", {})
+    pool_vocab = ckpt.get("slot_type_vocab", domain_config.pool_vocab)
     pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
 
     # Embed content items
@@ -1833,11 +1837,15 @@ async def unified_halt_analysis():
 
 class UnifiedRoutingRequest(BaseModel):
     content_items: list[str]
+    domain: str = "gchat"
 
 
 @router.post("/ml/unified-routing-test")
 async def unified_routing_test(req: UnifiedRoutingRequest):
     """Test UnifiedTRN pool routing on arbitrary content items (build mode)."""
+    from research.trm.h2.domain_config import get_domain_or_default
+    domain_config = get_domain_or_default(req.domain)
+
     torch = _load_torch()
 
     model = _load_unified_model()
@@ -1845,7 +1853,7 @@ async def unified_routing_test(req: UnifiedRoutingRequest):
         return {"error": "No unified model loaded"}
 
     ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
-    pool_vocab = ckpt.get("pool_vocab", {})
+    pool_vocab = ckpt.get("pool_vocab", domain_config.pool_vocab)
     pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
     structural_dim = ckpt.get("structural_dim", 17)
 
@@ -1883,3 +1891,382 @@ async def unified_routing_test(req: UnifiedRoutingRequest):
         "pool_names": pool_names,
         "model": "unified_trn",
     }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: Search Evaluation Metrics
+# ---------------------------------------------------------------------------
+@router.get("/ml/search-evaluation")
+async def search_evaluation():
+    """Precision@K, Recall@K, MRR across validation groups.
+
+    Evaluates the full search+scoring pipeline by treating each
+    validation group as a query and checking if the top-ranked
+    candidate is the correct (positive-label) one.
+    """
+    model = _load_model()
+    val_groups, _ = _load_groups()
+
+    if model is None or not val_groups:
+        return {"error": "Model or validation data not available"}
+
+    from research.trm.h2.eval_metrics import (
+        evaluate_ranked_results,
+        reciprocal_rank,
+    )
+
+    ranked_lists = []
+    per_group = []
+
+    for group in val_groups:
+        candidates = group.get("candidates", [])
+        if not candidates:
+            continue
+
+        scores = _score_candidates(model, candidates)
+        labels = [c.get("label", c.get("form_label", 0.0)) for c in candidates]
+
+        # Sort by score descending, get relevance in ranked order
+        sorted_pairs = sorted(
+            zip(scores, labels, candidates),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        ranked_relevant = [lab > 0.5 for _, lab, _ in sorted_pairs]
+        ranked_lists.append(ranked_relevant)
+
+        rr = reciprocal_rank(ranked_relevant)
+        query_name = group.get("query_name", group.get("query_id", ""))
+
+        per_group.append({
+            "query_name": query_name,
+            "n_candidates": len(candidates),
+            "n_positive": sum(1 for l in labels if l > 0.5),
+            "reciprocal_rank": round(rr, 4),
+            "top_is_correct": ranked_relevant[0] if ranked_relevant else False,
+        })
+
+    metrics = evaluate_ranked_results(ranked_lists, k_values=[1, 3, 5, 10])
+
+    return {
+        "metrics": {k: round(v, 4) for k, v in metrics.items()},
+        "per_group": per_group,
+        "n_groups": len(per_group),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: Multi-Model Comparison
+# ---------------------------------------------------------------------------
+@router.get("/ml/model-comparison")
+async def model_comparison():
+    """Side-by-side comparison of DualHead MW scorer vs UnifiedTRN.
+
+    Scores the same validation set with both models and returns
+    accuracy, MRR, and per-head metrics for each.
+    """
+    torch = _load_torch()
+    import torch.nn as nn
+
+    val_groups, _ = _load_groups()
+    if not val_groups:
+        return {"error": "Validation data not available"}
+
+    from research.trm.h2.eval_metrics import reciprocal_rank
+
+    results = {}
+
+    # --- DualHead MW model ---
+    mw_model = _load_model()
+    if mw_model is not None:
+        mw_correct = 0
+        mw_rrs = []
+        for group in val_groups:
+            candidates = group.get("candidates", [])
+            if not candidates:
+                continue
+            scores = _score_candidates(mw_model, candidates)
+            labels = [c.get("label", c.get("form_label", 0.0)) for c in candidates]
+            sorted_pairs = sorted(zip(scores, labels), key=lambda x: x[0], reverse=True)
+            ranked_rel = [lab > 0.5 for _, lab in sorted_pairs]
+            if ranked_rel and ranked_rel[0]:
+                mw_correct += 1
+            mw_rrs.append(reciprocal_rank(ranked_rel))
+
+        n_groups = len(mw_rrs)
+        results["dual_head"] = {
+            "accuracy": round(mw_correct / max(n_groups, 1), 4),
+            "mrr": round(sum(mw_rrs) / max(len(mw_rrs), 1), 4),
+            "n_groups": n_groups,
+            "model_type": _model_type,
+            "feature_version": _feature_version,
+        }
+
+    # --- UnifiedTRN model ---
+    unified_path = _UNIFIED_CHECKPOINT_PATH
+
+    if unified_path.exists():
+        try:
+            from research.trm.h2.unified_trn import UnifiedTRN
+
+            ckpt = torch.load(str(unified_path), map_location="cpu", weights_only=False)
+            unified_model = UnifiedTRN(
+                structural_dim=ckpt.get("structural_dim", 17),
+                content_dim=ckpt.get("content_dim", 384),
+                hidden=ckpt.get("hidden", 64),
+                n_pools=ckpt.get("n_pools", 5),
+                dropout=0.0,
+            )
+            unified_model.load_state_dict(ckpt["model_state_dict"])
+            unified_model.eval()
+
+            # Score using unified model's form+content heads in search mode
+            uni_correct = 0
+            uni_rrs = []
+            for group in val_groups:
+                candidates = group.get("candidates", [])
+                if not candidates:
+                    continue
+
+                features = [_candidate_features(c) for c in candidates]
+                x = torch.tensor(features, dtype=torch.float32)
+                labels = [c.get("label", c.get("form_label", 0.0)) for c in candidates]
+
+                with torch.no_grad():
+                    structural_feats = x  # 17D structural features
+                    content_zeros = torch.zeros(x.shape[0], ckpt.get("content_dim", 384))
+                    out = unified_model(structural_feats, content_zeros, mode="search")
+                    form_s = out["form_score"].squeeze(-1)
+                    content_s = out["content_score"].squeeze(-1)
+                    scores = (0.6 * form_s + 0.4 * content_s).tolist()
+
+                sorted_pairs = sorted(zip(scores, labels), key=lambda x: x[0], reverse=True)
+                ranked_rel = [lab > 0.5 for _, lab in sorted_pairs]
+                if ranked_rel and ranked_rel[0]:
+                    uni_correct += 1
+                uni_rrs.append(reciprocal_rank(ranked_rel))
+
+            n_groups = len(uni_rrs)
+            results["unified_trn"] = {
+                "accuracy": round(uni_correct / max(n_groups, 1), 4),
+                "mrr": round(sum(uni_rrs) / max(len(uni_rrs), 1), 4),
+                "n_groups": n_groups,
+                "epoch": ckpt.get("epoch", 0),
+                "pool_acc": round(ckpt.get("best_pool_acc", ckpt.get("val_pool_acc", 0)), 4),
+                "halt_acc": round(ckpt.get("val_halt_acc", 0), 4),
+                "total_params": sum(p.numel() for p in unified_model.parameters()),
+            }
+        except Exception as e:
+            results["unified_trn"] = {"error": str(e)}
+    else:
+        results["unified_trn"] = {"error": "Checkpoint not found"}
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 22: Training loss curves from checkpoint metadata
+# ---------------------------------------------------------------------------
+@router.get("/ml/training-loss")
+async def training_loss():
+    """Read training/validation loss and accuracy curves from checkpoint metadata."""
+    torch = _load_torch()
+
+    def _extract_curves(ckpt_path, label):
+        info = {
+            "train_losses": [],
+            "val_losses": [],
+            "train_accs": [],
+            "val_accs": [],
+            "n_epochs": 0,
+            "best_epoch": 0,
+            "available": False,
+        }
+        if not ckpt_path.exists():
+            info["error"] = "Checkpoint not found"
+            return info
+        try:
+            ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+            info["n_epochs"] = len(ckpt.get("train_losses", [])) or ckpt.get("epoch", 0)
+            info["best_epoch"] = ckpt.get("best_epoch", ckpt.get("epoch", 0))
+
+            # Prefer per-epoch arrays if stored
+            if "train_losses" in ckpt and isinstance(ckpt["train_losses"], list):
+                info["train_losses"] = ckpt["train_losses"]
+                info["val_losses"] = ckpt.get("val_losses", [])
+                info["train_accs"] = ckpt.get("train_accs", [])
+                info["val_accs"] = ckpt.get("val_accs", [])
+                info["available"] = True
+            else:
+                # Fall back to final scalar values as single-element arrays
+                if "train_loss" in ckpt:
+                    info["train_losses"] = [float(ckpt["train_loss"])]
+                if "val_loss" in ckpt:
+                    info["val_losses"] = [float(ckpt["val_loss"])]
+                if "train_acc" in ckpt:
+                    info["train_accs"] = [float(ckpt["train_acc"])]
+                if "val_acc" in ckpt:
+                    info["val_accs"] = [float(ckpt["val_acc"])]
+                info["available"] = False
+        except Exception as e:
+            info["error"] = str(e)
+        return info
+
+    return {
+        "dual_head": _extract_curves(_CHECKPOINT_PATH, "dual_head"),
+        "unified_trn": _extract_curves(_UNIFIED_CHECKPOINT_PATH, "unified_trn"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 23: Wrapper registry lifecycle status
+# ---------------------------------------------------------------------------
+@router.get("/ml/wrapper-lifecycle")
+async def wrapper_lifecycle():
+    """Wrapper registry status: which wrappers exist, component counts, domains."""
+    result = {"wrappers": [], "total_wrappers": 0}
+    try:
+        from adapters.module_wrapper.wrapper_factory import WrapperRegistry
+
+        registry = WrapperRegistry
+
+        # WrapperRegistry uses _factories dict (no list_registered method)
+        registered_names = list(registry._factories.keys())
+
+        for name in registered_names:
+            entry = {
+                "name": name,
+                "components": 0,
+                "domain": None,
+                "collection": None,
+                "mixins": [],
+            }
+            try:
+                wrapper = registry.get(name)
+                if wrapper:
+                    entry["components"] = len(getattr(wrapper, "components", {}))
+                    entry["collection"] = getattr(wrapper, "collection_name", None)
+                    # Get domain from wrapper config
+                    dc = getattr(wrapper, "_domain_config", None)
+                    if dc:
+                        entry["domain"] = getattr(dc, "domain_id", None)
+                    # Get mixin names
+                    mixin_classes = type(wrapper).__mro__
+                    entry["mixins"] = [
+                        c.__name__
+                        for c in mixin_classes
+                        if c.__name__.endswith("Mixin") and c.__name__ != "Mixin"
+                    ]
+            except Exception as e:
+                entry["error"] = str(e)
+            result["wrappers"].append(entry)
+        result["total_wrappers"] = len(result["wrappers"])
+    except ImportError:
+        # Fallback: try importing individual wrappers directly
+        result["error"] = "WrapperRegistry not available, trying direct imports"
+        fallback_wrappers = []
+        try:
+            from gchat.wrapper_setup import get_wrapper as get_gchat_wrapper
+
+            w = get_gchat_wrapper()
+            if w:
+                fallback_wrappers.append(
+                    {
+                        "name": "card_framework",
+                        "components": len(getattr(w, "components", {})),
+                        "collection": getattr(w, "collection_name", None),
+                        "domain": "gchat",
+                        "mixins": [],
+                    }
+                )
+        except Exception:
+            pass
+        try:
+            from gmail.email_wrapper_setup import get_email_wrapper
+
+            w = get_email_wrapper()
+            if w:
+                fallback_wrappers.append(
+                    {
+                        "name": "email_framework",
+                        "components": len(getattr(w, "components", {})),
+                        "collection": getattr(w, "collection_name", None),
+                        "domain": "gmail",
+                        "mixins": [],
+                    }
+                )
+        except Exception:
+            pass
+        if fallback_wrappers:
+            result["wrappers"] = fallback_wrappers
+            result["total_wrappers"] = len(fallback_wrappers)
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 24: Candidate pool composition analysis
+# ---------------------------------------------------------------------------
+@router.get("/ml/candidate-pool-analysis")
+async def candidate_pool_analysis():
+    """Pool composition stats from training/validation data."""
+    _, all_groups = _load_groups()
+    if not all_groups:
+        return {"error": "No training data available"}
+
+    from collections import Counter
+
+    pool_counts = Counter()
+    pool_score_sums = Counter()
+    pool_score_counts = Counter()
+    total_candidates = 0
+
+    for group in all_groups:
+        for c in group.get("candidates", []):
+            total_candidates += 1
+            pool = c.get("pool", c.get("predicted_pool", "unknown"))
+            pool_counts[pool] += 1
+            label = c.get("label", c.get("form_label", 0.0))
+            pool_score_sums[pool] += label
+            pool_score_counts[pool] += 1
+
+    pools = []
+    for pool_name, count in pool_counts.most_common():
+        avg_label = pool_score_sums[pool_name] / max(pool_score_counts[pool_name], 1)
+        pools.append(
+            {
+                "pool": pool_name,
+                "count": count,
+                "percentage": round(count / max(total_candidates, 1) * 100, 1),
+                "avg_positive_rate": round(avg_label, 4),
+            }
+        )
+
+    return {
+        "pools": pools,
+        "total_candidates": total_candidates,
+        "n_groups": len(all_groups),
+        "n_pools": len(pools),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 25: Available domain configurations
+# ---------------------------------------------------------------------------
+@router.get("/ml/available-domains")
+async def available_domains():
+    """List available domain configurations."""
+    try:
+        from research.trm.h2.domain_config import list_domains, get_domain
+        domains = []
+        for domain_id in list_domains():
+            d = get_domain(domain_id)
+            domains.append({
+                "id": d.domain_id,
+                "n_pools": d.n_pools,
+                "pools": list(d.pool_vocab.keys()),
+            })
+        return {"domains": domains}
+    except Exception as e:
+        return {"error": str(e), "domains": []}

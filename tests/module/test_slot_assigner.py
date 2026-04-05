@@ -492,7 +492,7 @@ class TestSlotAssignment:
             original_count = 3 + 4 + 2
             result_count = sum(len(v) for v in result.values() if isinstance(v, list))
             assert result_count == original_count, (
-                f"Item count changed: {original_count} → {result_count}"
+                f"Item count changed: {original_count} -> {result_count}"
             )
         finally:
             sa._model_load_attempted = old_attempted
@@ -547,3 +547,75 @@ class TestSlotAssignment:
             sa._cached_model = old_model
             sa._cached_model_type = old_type
             sa._cached_domain_config = old_domain
+
+
+class TestSlotAssignmentWithDomainConfig:
+    """Test reassign_supply_map with explicit domain_config parameter."""
+
+    def test_reassign_with_gchat_domain(self):
+        """Using domain_config=GCHAT_DOMAIN preserves gchat behavior."""
+        from gchat.card_builder.slot_assignment import reassign_supply_map
+        from unittest.mock import patch
+
+        supply_map = {
+            "buttons": ["Click me"],
+            "content_texts": ["Hello"],
+            "grid_items": [],
+            "chips": [],
+            "carousel_cards": [],
+        }
+        demands = {"Button": 1, "DecoratedText": 1}
+
+        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
+            result = reassign_supply_map(supply_map, demands, domain_config=GCHAT_DOMAIN)
+            assert isinstance(result, dict)
+            assert "buttons" in result
+            assert "content_texts" in result
+
+    def test_reassign_with_email_domain(self):
+        """Using domain_config=EMAIL_DOMAIN uses email pool vocab."""
+        from gchat.card_builder.slot_assignment import reassign_supply_map
+        from unittest.mock import patch
+
+        supply_map = {
+            "content": ["Welcome text"],
+            "layout": [],
+            "chrome": [],
+            "structure": [],
+            "interactive": [],
+        }
+        demands = {"TextBlock": 1}
+
+        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
+            result = reassign_supply_map(supply_map, demands, domain_config=EMAIL_DOMAIN)
+            assert isinstance(result, dict)
+            assert "content" in result
+
+    def test_reassign_none_domain_preserves_default(self):
+        """domain_config=None falls back to gchat default."""
+        from gchat.card_builder.slot_assignment import reassign_supply_map
+        from unittest.mock import patch
+
+        supply_map = {
+            "buttons": [],
+            "content_texts": ["text"],
+            "grid_items": [],
+            "chips": [],
+            "carousel_cards": [],
+        }
+        demands = {}
+
+        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
+            result = reassign_supply_map(supply_map, demands, domain_config=None)
+            assert isinstance(result, dict)
+
+    def test_email_domain_pools_differ_from_gchat(self):
+        """Email and gchat domains have different pool vocabularies."""
+        assert set(EMAIL_DOMAIN.pool_vocab.keys()) != set(GCHAT_DOMAIN.pool_vocab.keys())
+        assert "content" in EMAIL_DOMAIN.pool_vocab
+        assert "buttons" in GCHAT_DOMAIN.pool_vocab
+
+    def test_domain_config_n_pools_match(self):
+        """Both domains have 5 pools for compatibility with UnifiedTRN."""
+        assert GCHAT_DOMAIN.n_pools == 5
+        assert EMAIL_DOMAIN.n_pools == 5

@@ -1,4 +1,4 @@
-"""Learned scorer hybrid search (Horizon 2 -- 100% val acc on MW gchat cards)."""
+"""Learned scorer hybrid search (supports UnifiedTRN, DualHead, and SingleHead)."""
 
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,15 +20,15 @@ def search_hybrid_learned(
     content_text: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Search using the trained SimilarityScorerMW for reranking.
+    Search using a trained learned scorer for reranking.
+
+    Supports three model architectures (auto-detected):
+      - UnifiedTRN: structural(17D) + content(384D) → form/content/halt heads
+      - DualHeadScorerMW: features(17D) → form_score + content_score
+      - SimilarityScorerMW: features(9D) → single score
 
     Same prefetch pipeline as search_hybrid_multidim, but replaces
-    multiplicative scoring with a trained MLP reranker.
-
-    Architecture: MLP(input_dim -> 32 -> 32 -> 1), ~1,569 params (V3).
-    Feature versions: V1=9D (norms), V2=8D (structural), V3=14D (decomposed MaxSim),
-                      V4=15D (V3 + content similarity).
-    Trained with listwise contrastive loss on gchat card + real user data.
+    multiplicative scoring with a trained reranker.
     """
     try:
         import torch
@@ -81,10 +81,8 @@ def search_hybrid_learned(
             content_text=content_text,
         )
 
-    # Reuse multidim's prefetch pipeline for candidate expansion
-    # (Steps 1-2 are identical -- embed query, build prefetch, search Qdrant)
     try:
-        # --- Step 1: Embed query (same as multidim) ---
+        # --- Step 1: Embed query ---
         query_colbert = self._embed_with_colbert(description, token_ratio)
 
         rel_text = description
@@ -103,8 +101,6 @@ def search_hybrid_learned(
             query_content_minilm = self._embed_with_minilm(content_text)
 
         # --- Step 2: Grouped prefetch + query Qdrant ---
-        # Uses query_points_groups(group_by="type") to guarantee balanced
-        # representation of classes and instance_patterns in the candidate pool.
         points = self._query_grouped_candidates(
             query_colbert, query_minilm, candidate_pool_size,
             content_feedback=content_feedback,
@@ -121,22 +117,28 @@ def search_hybrid_learned(
         if not component_paths and self._learned_feature_version in (2, 3, 4, 5):
             component_paths = self._infer_component_paths(points)
 
-        # --- Step 3: Compute features + MLP scoring ---
+        # --- Step 3: Compute features + scoring ---
         features_list, points_list = self._compute_learned_features(
             points, query_colbert, query_minilm, component_paths,
             query_content_minilm=query_content_minilm,
         )
 
         features_tensor = torch.tensor(features_list, dtype=torch.float32)
-
-        # Dual-head vs single-head scoring
+        is_unified = self._learned_model_type == "unified"
         is_dual = self._learned_model_type == "dual_head"
+
         with torch.no_grad():
-            if is_dual:
-                form_t, content_t = model(features_tensor)
-                form_scores = form_t.squeeze(-1).tolist()
-                content_scores = content_t.squeeze(-1).tolist()
-                # Alpha blend: form-weighted when content available
+            if is_unified:
+                # UnifiedTRN: split features into structural(17D) + content(384D)
+                # Content embedding = query MiniLM, broadcast to all candidates
+                content_emb = query_content_minilm if query_content_minilm else query_minilm
+                content_tensor = torch.tensor(
+                    [content_emb] * len(features_list), dtype=torch.float32
+                )
+                result = model(features_tensor, content_tensor, mode="search")
+                form_scores = result["form_score"].squeeze(-1).tolist()
+                content_scores = result["content_score"].squeeze(-1).tolist()
+                # Alpha blend
                 alpha = 1.0 if not content_text else 0.6
                 try:
                     from config.settings import Settings as _S
@@ -147,6 +149,22 @@ def search_hybrid_learned(
                     alpha * f + (1 - alpha) * c
                     for f, c in zip(form_scores, content_scores)
                 ]
+
+            elif is_dual:
+                form_t, content_t = model(features_tensor)
+                form_scores = form_t.squeeze(-1).tolist()
+                content_scores = content_t.squeeze(-1).tolist()
+                alpha = 1.0 if not content_text else 0.6
+                try:
+                    from config.settings import Settings as _S
+                    alpha = _S().dual_head_form_weight
+                except Exception:
+                    pass
+                learned_scores = [
+                    alpha * f + (1 - alpha) * c
+                    for f, c in zip(form_scores, content_scores)
+                ]
+
             else:
                 scores_tensor = model(features_tensor).squeeze(-1)
                 learned_scores = scores_tensor.tolist()
@@ -192,7 +210,8 @@ def search_hybrid_learned(
             self._categorize_scored_results(scored, limit)
 
         logger.info(
-            "Learned search: %d classes, %d patterns, %d relationships (from %d candidates)",
+            "Learned search (%s): %d classes, %d patterns, %d relationships (from %d candidates)",
+            self._learned_model_type,
             len(class_results), len(pattern_results),
             len(relationship_results), len(points),
         )

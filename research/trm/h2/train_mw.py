@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 import time
@@ -409,6 +410,8 @@ def compute_loss(model, batch, device):
     loss = -(target_dist * log_probs).sum(dim=-1).mean()
 
     with torch.no_grad():
+        sorted_indices = scores.argsort(dim=-1, descending=True)
+
         # Top-1 accuracy
         top1 = scores.argmax(dim=-1)
         correct1 = labels[torch.arange(B, device=device), top1]
@@ -422,7 +425,6 @@ def compute_loss(model, batch, device):
         acc3 = (correct3 > 0).float().mean().item()
 
         # MRR (Mean Reciprocal Rank)
-        sorted_indices = scores.argsort(dim=-1, descending=True)
         mrr = torch.zeros(B, device=device)
         for i in range(B):
             for rank, idx in enumerate(sorted_indices[i]):
@@ -431,7 +433,18 @@ def compute_loss(model, batch, device):
                     break
         mrr_val = mrr.mean().item()
 
-    return loss, {"loss": loss.item(), "accuracy": acc1, "top3": acc3, "mrr": mrr_val}
+        # NDCG@5 (Normalized Discounted Cumulative Gain)
+        ndcg_k = min(5, K)
+        ndcg_scores = torch.zeros(B, device=device)
+        for i in range(B):
+            ranked_labels = labels[i, sorted_indices[i]]
+            dcg = sum(ranked_labels[j].item() / math.log2(j + 2) for j in range(ndcg_k))
+            ideal_labels = labels[i].sort(descending=True).values
+            idcg = sum(ideal_labels[j].item() / math.log2(j + 2) for j in range(ndcg_k))
+            ndcg_scores[i] = dcg / max(idcg, 1e-8)
+        ndcg_val = ndcg_scores.mean().item()
+
+    return loss, {"loss": loss.item(), "accuracy": acc1, "top3": acc3, "mrr": mrr_val, "ndcg5": ndcg_val}
 
 
 def _listwise_ce(scores, labels, mask):
@@ -444,7 +457,7 @@ def _listwise_ce(scores, labels, mask):
 
 
 def _head_metrics(scores, labels, device):
-    """Compute top-1, top-3, MRR for a single head."""
+    """Compute top-1, top-3, MRR, NDCG@5 for a single head."""
     B, K = scores.shape
     top1 = scores.argmax(dim=-1)
     correct1 = labels[torch.arange(B, device=device), top1]
@@ -464,7 +477,18 @@ def _head_metrics(scores, labels, device):
                 mrr[i] = 1.0 / (rank + 1)
                 break
 
-    return acc1, acc3, mrr.mean().item()
+    # NDCG@5
+    ndcg_k = min(5, K)
+    ndcg_scores = torch.zeros(B, device=device)
+    for i in range(B):
+        ranked_labels = labels[i, sorted_idx[i]]
+        dcg = sum(ranked_labels[j].item() / math.log2(j + 2) for j in range(ndcg_k))
+        ideal_labels = labels[i].sort(descending=True).values
+        idcg = sum(ideal_labels[j].item() / math.log2(j + 2) for j in range(ndcg_k))
+        ndcg_scores[i] = dcg / max(idcg, 1e-8)
+    ndcg_val = ndcg_scores.mean().item()
+
+    return acc1, acc3, mrr.mean().item(), ndcg_val
 
 
 def compute_dual_loss(
@@ -524,16 +548,16 @@ def compute_dual_loss(
         cm = content_scores.masked_fill(mask == 0, -1e9)
 
         # Per-head metrics
-        f_acc1, f_acc3, f_mrr = _head_metrics(
+        f_acc1, f_acc3, f_mrr, f_ndcg = _head_metrics(
             fm, form_labels, device
         )
-        c_acc1, c_acc3, c_mrr = _head_metrics(
+        c_acc1, c_acc3, c_mrr, c_ndcg = _head_metrics(
             cm, content_labels, device
         )
 
         # Combined score (alpha=form_weight)
         combined = form_weight * fm + content_weight * cm
-        comb_acc1, comb_acc3, comb_mrr = _head_metrics(
+        comb_acc1, comb_acc3, comb_mrr, comb_ndcg = _head_metrics(
             combined, form_labels, device
         )
 
@@ -544,12 +568,15 @@ def compute_dual_loss(
         "form_top1": f_acc1,
         "form_top3": f_acc3,
         "form_mrr": f_mrr,
+        "form_ndcg5": f_ndcg,
         "content_top1": c_acc1,
         "content_top3": c_acc3,
         "content_mrr": c_mrr,
+        "content_ndcg5": c_ndcg,
         "combined_top1": comb_acc1,
         "combined_top3": comb_acc3,
         "combined_mrr": comb_mrr,
+        "combined_ndcg5": comb_ndcg,
     }
 
 
@@ -729,6 +756,12 @@ def main():
         else compute_loss
     )
 
+    # Loss history for diagnostic UI
+    train_losses: list[float] = []
+    val_losses: list[float] = []
+    train_accs: list[float] = []
+    val_accs: list[float] = []
+
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -759,33 +792,45 @@ def main():
         for k in v_metrics:
             v_metrics[k] /= max(nv, 1)
 
-        # Logging
+        # Track loss history for diagnostic UI
+        train_losses.append(t_metrics.get("loss", 0.0))
+        val_losses.append(v_metrics.get("loss", 0.0))
+        if is_dual:
+            train_accs.append(t_metrics.get("combined_top1", 0.0))
+            val_accs.append(v_metrics.get("combined_top1", 0.0))
+        else:
+            train_accs.append(t_metrics.get("accuracy", 0.0))
+            val_accs.append(v_metrics.get("accuracy", 0.0))
+
+        # Logging — primary metric is MRR (not top-1 which is too lenient)
         if is_dual:
             logger.info(
                 f"Epoch {epoch:3d}/{args.epochs} "
                 f"| train: loss={t_metrics['loss']:.4f} "
-                f"form_top1={t_metrics['form_top1']:.3f} "
-                f"content_top1={t_metrics['content_top1']:.3f} "
-                f"combined={t_metrics['combined_top1']:.3f} "
+                f"form_mrr={t_metrics['form_mrr']:.3f} "
+                f"content_mrr={t_metrics['content_mrr']:.3f} "
+                f"ndcg5={t_metrics['combined_ndcg5']:.3f} "
                 f"| val: loss={v_metrics['loss']:.4f} "
-                f"form_top1={v_metrics['form_top1']:.3f} "
-                f"content_top1={v_metrics['content_top1']:.3f} "
-                f"combined={v_metrics['combined_top1']:.3f}"
+                f"form_mrr={v_metrics['form_mrr']:.3f} "
+                f"content_mrr={v_metrics['content_mrr']:.3f} "
+                f"ndcg5={v_metrics['combined_ndcg5']:.3f}"
             )
-            val_acc = v_metrics["combined_top1"]
+            # Use combined MRR as primary metric (not top-1)
+            val_acc = v_metrics["combined_mrr"]
         else:
             logger.info(
                 f"Epoch {epoch:3d}/{args.epochs} "
                 f"| train: loss={t_metrics['loss']:.4f} "
-                f"top1={t_metrics['accuracy']:.3f} "
-                f"top3={t_metrics['top3']:.3f} "
                 f"mrr={t_metrics['mrr']:.3f} "
+                f"ndcg5={t_metrics['ndcg5']:.3f} "
+                f"top1={t_metrics['accuracy']:.3f} "
                 f"| val: loss={v_metrics['loss']:.4f} "
-                f"top1={v_metrics['accuracy']:.3f} "
-                f"top3={v_metrics['top3']:.3f} "
-                f"mrr={v_metrics['mrr']:.3f}"
+                f"mrr={v_metrics['mrr']:.3f} "
+                f"ndcg5={v_metrics['ndcg5']:.3f} "
+                f"top1={v_metrics['accuracy']:.3f}"
             )
-            val_acc = v_metrics["accuracy"]
+            # Use MRR as primary metric
+            val_acc = v_metrics["mrr"]
 
         # For dual-head: track content_top1 independently so that
         # training continues while the content head is still improving,
@@ -821,6 +866,11 @@ def main():
                 "val_accuracy": val_acc,
                 "collection": args.collection,
                 "domain": domain,
+                # Loss history for diagnostic UI
+                "train_losses": train_losses[:],
+                "val_losses": val_losses[:],
+                "train_accs": train_accs[:],
+                "val_accs": val_accs[:],
             }
             if is_dual:
                 ckpt_data["head_dim"] = args.head_dim
@@ -843,6 +893,20 @@ def main():
             if patience_counter >= args.patience:
                 logger.info(f"Early stopping at epoch {epoch}")
                 break
+
+    # Update checkpoint with full loss history (not just up to best epoch)
+    domain = getattr(args, "domain", "card")
+    ckpt_name = f"best_model_{domain}.pt" if domain != "card" else "best_model_mw.pt"
+    final_ckpt_path = ckpt_dir / ckpt_name
+    if final_ckpt_path.exists():
+        import torch as _torch
+        saved = _torch.load(str(final_ckpt_path), map_location="cpu", weights_only=False)
+        saved["train_losses"] = train_losses
+        saved["val_losses"] = val_losses
+        saved["train_accs"] = train_accs
+        saved["val_accs"] = val_accs
+        _torch.save(saved, final_ckpt_path)
+        logger.info(f"Updated checkpoint with full loss history ({len(train_losses)} epochs)")
 
     logger.info(f"\nBest validation accuracy: {best_val_acc:.3f}")
     logger.info(f"(Random baseline for K={max_k}: {1/max_k:.3f})")
