@@ -3024,15 +3024,11 @@ class SearchMixin:
             all_names = list(self._name_to_idx.keys()) if hasattr(self, '_name_to_idx') else []
 
             if not all_names:
-                # Fallback: try external wrapper
-                try:
-                    from gchat.card_framework_wrapper import get_card_framework_wrapper
-                    wrapper = get_card_framework_wrapper()
-                    wrapper.get_relationship_graph()
-                    all_names = list(wrapper._name_to_idx.keys()) if hasattr(wrapper, '_name_to_idx') else []
-                    source = wrapper
-                except Exception:
-                    source = self
+                # No graph data available — structural features will be zero.
+                # This is acceptable; the model handles missing structural features
+                # gracefully via the similarity-only features (V3 features 0-8).
+                logger.info("No DAG components found — structural features will be zero")
+                source = self
             else:
                 source = self
 
@@ -3095,9 +3091,33 @@ class SearchMixin:
                 content_text=content_text,
             )
 
-        model = self._load_learned_model()
+        # Load model with domain awareness
+        wrapper_domain = getattr(
+            getattr(self, 'domain_config', None), 'domain_label', None
+        ) or getattr(self, '_domain_id', None)
+        model = self._load_learned_model(domain=wrapper_domain)
         if model is None:
             logger.warning("Learned scorer not available, falling back to multidim")
+            return self.search_hybrid_multidim(
+                description=description,
+                component_paths=component_paths,
+                limit=limit,
+                token_ratio=token_ratio,
+                content_feedback=content_feedback,
+                form_feedback=form_feedback,
+                include_classes=include_classes,
+                candidate_pool_size=candidate_pool_size,
+                content_text=content_text,
+            )
+
+        # Domain mismatch guard: don't use a gchat model to score email components
+        cls = type(self)
+        model_domain = cls._learned_model_domain
+        if model_domain and wrapper_domain and model_domain != wrapper_domain:
+            logger.info(
+                f"Learned scorer domain '{model_domain}' != wrapper domain "
+                f"'{wrapper_domain}', falling back to multidim"
+            )
             return self.search_hybrid_multidim(
                 description=description,
                 component_paths=component_paths,

@@ -27,13 +27,9 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from .domain_config import GCHAT_DOMAIN, get_domain_or_default
+from .domain_config import get_domain, get_domain_or_default
 
-# Re-export for backward compatibility
-POOL_VOCAB = dict(GCHAT_DOMAIN.pool_vocab)
-COMPONENT_TO_POOL = dict(GCHAT_DOMAIN.component_to_pool)
-
-# V5 feature names (17D) — same as generate_training_data.py
+# V5 feature names (17D) — domain-agnostic structural + content features
 FEATURE_NAMES_V5 = [
     "sim_c_mean", "sim_c_max", "sim_c_std", "sim_c_coverage",
     "sim_i_mean", "sim_i_max", "sim_i_std", "sim_i_coverage",
@@ -44,7 +40,21 @@ FEATURE_NAMES_V5 = [
 
 STRUCTURAL_DIM = len(FEATURE_NAMES_V5)  # 17
 CONTENT_DIM = 384  # MiniLM
-N_POOLS = GCHAT_DOMAIN.n_pools  # 5 (default; overridden by constructor arg)
+DEFAULT_N_POOLS = 5  # Override via constructor or DomainConfig
+
+
+def get_domain_defaults(domain_id: str = "gchat") -> dict:
+    """Get pool vocab and component-to-pool mapping for a domain.
+
+    Returns dict with keys: pool_vocab, component_to_pool, n_pools.
+    Falls back to gchat defaults if domain not found.
+    """
+    domain = get_domain_or_default(domain_id)
+    return {
+        "pool_vocab": dict(domain.pool_vocab),
+        "component_to_pool": dict(domain.component_to_pool),
+        "n_pools": domain.n_pools,
+    }
 
 
 class UnifiedTRN(nn.Module):
@@ -59,7 +69,7 @@ class UnifiedTRN(nn.Module):
         structural_dim: int = STRUCTURAL_DIM,
         content_dim: int = CONTENT_DIM,
         hidden: int = 64,
-        n_pools: int = N_POOLS,
+        n_pools: int = DEFAULT_N_POOLS,
         dropout: float = 0.15,
     ):
         super().__init__()

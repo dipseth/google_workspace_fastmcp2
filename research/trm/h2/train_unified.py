@@ -27,8 +27,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, Dataset
 
-from .domain_config import GCHAT_DOMAIN, get_domain_or_default
-from .slot_assigner import POOL_NAMES, POOL_VOCAB
+from .domain_config import get_domain_or_default
 from .unified_trn import FEATURE_NAMES_V5, UnifiedTRN
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -462,8 +461,15 @@ def main():
     if has_build:
         train_build_ds = UnifiedBuildDataset(train_build_pairs, noise_std=args.noise_std)
         val_build_ds = UnifiedBuildDataset(val_build_pairs, noise_std=0.0)
-        train_build_loader = DataLoader(train_build_ds, batch_size=args.batch_size * 4, shuffle=True)
-        val_build_loader = DataLoader(val_build_ds, batch_size=args.batch_size * 4, shuffle=False)
+        # Guard against empty datasets after dedup/filtering (small domains)
+        if len(train_build_ds) == 0:
+            logger.warning("Build dataset empty after dedup — pool_head will not be trained")
+            has_build = False
+            train_build_loader = None
+            val_build_loader = DataLoader([], batch_size=1)
+        else:
+            train_build_loader = DataLoader(train_build_ds, batch_size=args.batch_size * 4, shuffle=True)
+            val_build_loader = DataLoader(val_build_ds, batch_size=args.batch_size * 4, shuffle=False)
     else:
         train_build_loader = None
         val_build_loader = DataLoader([], batch_size=1)
@@ -473,12 +479,13 @@ def main():
     logger.info(f"Val: {len(val_search_ds)} search groups, "
                 f"{len(val_build_ds) if has_build else 0} build items")
 
-    # Build model
+    # Build model — resolve pool count from domain config
+    domain = get_domain_or_default(args.domain)
     model = UnifiedTRN(
         structural_dim=len(FEATURE_NAMES_V5),
         content_dim=384,
         hidden=args.hidden,
-        n_pools=len(POOL_VOCAB),
+        n_pools=domain.n_pools,
         dropout=args.dropout,
     ).to(device)
 

@@ -1,13 +1,18 @@
 """Generate synthetic training data for the learned scorer.
 
-Uses DAGStructureGenerator to create random valid card structures,
+Uses DAGStructureGenerator to create random valid structures for any domain,
 embeds them with ColBERT + MiniLM, and builds query groups with
 ground-truth labels based on known component_paths.
+
+Content affinity and templates are loaded from DomainConfig, making this
+script domain-agnostic. Use --domain to select a registered domain.
 
 Usage:
     cd /path/to/repo
     PYTHONPATH=. uv run python research/trm/h2/generate_training_data.py \
-        --count 500 --variations 3 --output research/trm/h2/mw_synthetic_groups.json
+        --count 500 --variations 3 --domain gchat
+    PYTHONPATH=. uv run python research/trm/h2/generate_training_data.py \
+        --count 500 --domain email
 """
 
 from __future__ import annotations
@@ -618,186 +623,40 @@ FEATURE_NAMES_V5 = FEATURE_NAMES_V3 + [
     "content_form_alignment",
 ]
 
-# Content affinity profiles: what kind of content each component naturally carries
-CONTENT_AFFINITY: Dict[str, Dict[str, Any]] = {
-    "ButtonList": {
-        "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
-                      "send", "save", "delete", "confirm", "run", "stop", "retry",
-                      "update", "refresh", "download", "upload", "connect"],
-        "type": "action",
-    },
-    "Button": {
-        "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
-                      "send", "save", "delete", "ok", "go", "start"],
-        "type": "action",
-    },
-    "DecoratedText": {
-        "patterns": ["status", "info", "details", "label", "name", "email",
-                      "description", "version", "type", "state", "count",
-                      "total", "last updated", "created", "owner"],
-        "type": "display",
-    },
-    "TextParagraph": {
-        "patterns": ["message", "description", "note", "warning", "error",
-                      "summary", "explanation", "instructions", "help"],
-        "type": "narrative",
-    },
-    "Grid": {
-        "patterns": ["list", "items", "products", "results", "files", "users",
-                      "servers", "services", "resources", "entries"],
-        "type": "tabular",
-    },
-    "GridItem": {
-        "patterns": ["item", "product", "file", "user", "server", "result"],
-        "type": "tabular",
-    },
-    "Image": {
-        "patterns": ["photo", "screenshot", "banner", "logo", "avatar",
-                      "chart", "graph", "diagram", "icon"],
-        "type": "media",
-    },
-    "ChipList": {
-        "patterns": ["tag", "label", "category", "filter", "option",
-                      "skill", "topic", "status"],
-        "type": "categorical",
-    },
-    "Chip": {
-        "patterns": ["tag", "label", "category", "filter", "option"],
-        "type": "categorical",
-    },
-    "SelectionInput": {
-        "patterns": ["choose", "select", "pick", "option", "preference",
-                      "setting", "mode", "type"],
-        "type": "input",
-    },
-    "TextInput": {
-        "patterns": ["enter", "type", "search", "name", "email", "url",
-                      "comment", "note", "message"],
-        "type": "input",
-    },
-    "DateTimePicker": {
-        "patterns": ["date", "time", "schedule", "deadline", "start",
-                      "end", "due", "appointment"],
-        "type": "temporal",
-    },
-    "SwitchControl": {
-        "patterns": ["enable", "disable", "toggle", "on", "off",
-                      "active", "notifications", "auto"],
-        "type": "toggle",
-    },
-    "Columns": {
-        "patterns": ["compare", "side by side", "left", "right",
-                      "details", "summary"],
-        "type": "layout",
-    },
-    "Carousel": {
-        "patterns": ["slides", "gallery", "pages", "steps", "cards"],
-        "type": "sequential",
-    },
-    "CarouselCard": {
-        "patterns": ["slide", "page", "step", "card", "panel"],
-        "type": "sequential",
-    },
-    "Divider": {
-        "patterns": [],
-        "type": "structural",
-    },
-    "Section": {
-        "patterns": [],
-        "type": "structural",
-    },
-}
+# Content affinity and templates are loaded from DomainConfig at runtime.
+# These module-level references are set by _init_domain_content() in main()
+# and default to gchat for backward compatibility when imported directly.
+from .domain_config import get_domain_or_default as _get_domain
 
-# Content text templates per component type — realistic user content
-CONTENT_TEXT_TEMPLATES: Dict[str, List[str]] = {
-    "ButtonList": [
-        "Deploy Service, Rollback, View Logs",
-        "Approve Request, Deny Request",
-        "Start Pipeline, Stop Pipeline, View Status",
-        "Submit Form, Cancel",
-        "Restart Server, Check Health, View Metrics",
-        "Save Changes, Discard",
-        "Connect, Disconnect, Refresh",
-        "Download Report, Export CSV",
-        "Run Tests, Deploy to Staging, Deploy to Production",
-        "Enable Feature, Disable Feature",
-    ],
-    "Button": [
-        "Submit", "Deploy", "Approve", "Cancel", "Restart",
-        "Send", "Save", "Delete", "Confirm", "Retry",
-    ],
-    "DecoratedText": [
-        "Status: Online, Version: 2.4.1, Last Updated: 2 hours ago",
-        "Name: API Gateway, Type: Service, Region: us-west-2",
-        "Owner: platform-team, Priority: High, State: Active",
-        "CPU: 45%, Memory: 2.1GB, Uptime: 14 days",
-        "Email: admin@company.com, Role: Administrator",
-        "Total Requests: 1.2M, Error Rate: 0.03%",
-        "Created: March 15, Modified: March 20",
-        "Build: #1847, Branch: main, Commit: a3f2b1c",
-        "Latency P99: 120ms, Throughput: 5K rps",
-        "License: Enterprise, Seats: 50/100, Expires: 2027-01-01",
-    ],
-    "TextParagraph": [
-        "The deployment completed successfully. All health checks passed.",
-        "Warning: This action cannot be undone. Please confirm.",
-        "Pipeline failed at stage 3: unit tests. See logs for details.",
-        "Welcome to the dashboard. Select a service to view metrics.",
-        "Note: Maintenance window scheduled for Saturday 2am-4am UTC.",
-    ],
-    "Grid": [
-        "web-server-01, web-server-02, web-server-03, db-primary, db-replica",
-        "index.html, styles.css, app.js, config.json, README.md",
-        "Alice Johnson, Bob Smith, Carol Williams, David Brown",
-        "US West, US East, EU Central, AP Southeast",
-        "v1.0.0, v1.1.0, v1.2.0, v2.0.0-beta",
-    ],
-    "GridItem": [
-        "web-server-01", "database-primary", "cache-node-1",
-        "api-gateway", "load-balancer", "worker-queue",
-    ],
-    "Image": [
-        "Architecture Diagram", "Performance Chart", "Team Photo",
-        "System Dashboard Screenshot", "Logo", "Error Screenshot",
-    ],
-    "ChipList": [
-        "Python, JavaScript, Go, Rust, TypeScript",
-        "Bug, Feature, Enhancement, Documentation, Security",
-        "High Priority, Medium Priority, Low Priority",
-        "Active, Inactive, Pending, Archived",
-        "Frontend, Backend, DevOps, QA, Design",
-    ],
-    "Chip": [
-        "Python", "Bug", "High Priority", "Active", "Frontend",
-    ],
-    "SelectionInput": [
-        "Select region: US West, US East, EU, APAC",
-        "Choose environment: Development, Staging, Production",
-        "Select priority: Critical, High, Medium, Low",
-    ],
-    "TextInput": [
-        "Enter service name", "Search users", "Add comment",
-        "Enter email address", "Type your message",
-    ],
-    "DateTimePicker": [
-        "Schedule deployment", "Set deadline", "Pick start date",
-        "Choose maintenance window", "Select meeting time",
-    ],
-    "SwitchControl": [
-        "Enable notifications", "Auto-scaling", "Debug mode",
-        "Maintenance mode", "Feature flag: dark-theme",
-    ],
-    "Columns": [
-        "Current vs Previous, Before and After, Plan vs Actual",
-    ],
-    "Carousel": [
-        "Step 1: Configure, Step 2: Deploy, Step 3: Verify",
-        "Overview, Details, Metrics, Logs",
-    ],
-    "CarouselCard": [
-        "Configuration Panel", "Deployment Status", "Metric Dashboard",
-    ],
-}
+_active_domain_config = None  # Set by _init_domain_content()
+
+# Lazy-initialized from domain config — DO NOT set these directly
+CONTENT_AFFINITY: Dict[str, Dict[str, Any]] = {}
+CONTENT_TEXT_TEMPLATES: Dict[str, List[str]] = {}
+
+
+def _init_domain_content(domain_id: str = "gchat") -> None:
+    """Initialize CONTENT_AFFINITY and CONTENT_TEXT_TEMPLATES from DomainConfig.
+
+    Called once at the start of main(). Also callable from external code
+    that imports this module and needs domain-specific content.
+    """
+    global CONTENT_AFFINITY, CONTENT_TEXT_TEMPLATES, _active_domain_config
+    domain = _get_domain(domain_id)
+    _active_domain_config = domain
+    CONTENT_AFFINITY = dict(domain.content_affinity) if domain.content_affinity else {}
+    CONTENT_TEXT_TEMPLATES = dict(domain.content_templates) if domain.content_templates else {}
+    if not CONTENT_AFFINITY:
+        logger.warning(f"Domain '{domain_id}' has no content_affinity — content features will be zero")
+    if not CONTENT_TEXT_TEMPLATES:
+        logger.warning(f"Domain '{domain_id}' has no content_templates — synthetic content text will be empty")
+
+
+# Initialize with gchat defaults for backward compatibility when imported directly
+_init_domain_content("gchat")
+
+# NOTE: CONTENT_TEXT_TEMPLATES is now initialized by _init_domain_content() above.
+# The old hardcoded dict has been moved to GCHAT_DOMAIN.content_templates in domain_config.py.
 
 
 def _generate_content_text_for_components(component_paths: List[str]) -> str:
@@ -840,13 +699,15 @@ def compute_content_label(
         candidate_name: Component name (e.g., "ButtonList").
         min_matches: Minimum number of pool matches required.
     """
-    from .slot_assigner import COMPONENT_TO_POOL
+    # Use active domain config for component-to-pool mapping
+    domain = _active_domain_config or _get_domain()
+    component_to_pool = domain.component_to_pool
 
     if not content_text:
         return 0.0
 
     # Determine the candidate's pool
-    cand_pool = COMPONENT_TO_POOL.get(candidate_name)
+    cand_pool = component_to_pool.get(candidate_name)
     if not cand_pool:
         return 0.0
 
@@ -885,13 +746,14 @@ _ITEM_TO_POOL_CACHE: Optional[Dict[str, str]] = None
 
 def _content_item_to_pool(item: str) -> Optional[str]:
     """Map a content item back to its pool by checking CONTENT_TEXT_TEMPLATES."""
-    from .slot_assigner import COMPONENT_TO_POOL
+    domain = _active_domain_config or _get_domain()
+    component_to_pool = domain.component_to_pool
 
     global _ITEM_TO_POOL_CACHE
     if _ITEM_TO_POOL_CACHE is None:
         _ITEM_TO_POOL_CACHE = {}
         for comp_name, templates in CONTENT_TEXT_TEMPLATES.items():
-            pool = COMPONENT_TO_POOL.get(comp_name)
+            pool = component_to_pool.get(comp_name)
             if not pool:
                 continue
             for template in templates:
@@ -2119,8 +1981,9 @@ def main():
     parser.add_argument("--skip-embed", action="store_true", help="Skip embedding (use pre-computed)")
     parser.add_argument("--feature-version", type=int, default=3, choices=[2, 3, 5],
                         help="Feature version: 2=V2 (8D), 3=V3 (14D decomposed), 5=V5 (17D dual-head)")
-    parser.add_argument("--domain", default="card", choices=["card", "email"],
-                        help="Domain: 'card' (gchat cards) or 'email' (MJML email)")
+    parser.add_argument("--domain", default="gchat",
+                        help="Domain ID from registry (e.g., 'gchat', 'email'). "
+                             "Also accepts legacy 'card' as alias for 'gchat'.")
     parser.add_argument("--include-real", action="store_true",
                         help="Also extract real user training data from mcp_tool_responses")
     parser.add_argument("--include-instance-patterns", action="store_true",
@@ -2133,8 +1996,18 @@ def main():
                         help="Fraction of groups to generate hard negatives for (default: 0.5)")
     args = parser.parse_args()
 
+    # Normalize legacy domain alias
+    if args.domain == "card":
+        args.domain = "gchat"
+
     random.seed(args.seed)
     np.random.seed(args.seed)
+
+    # Initialize domain-specific content (CONTENT_AFFINITY, CONTENT_TEXT_TEMPLATES)
+    _init_domain_content(args.domain)
+    # Reset item-to-pool cache when domain changes
+    global _ITEM_TO_POOL_CACHE
+    _ITEM_TO_POOL_CACHE = None
 
     # Auto-detect collection and output based on domain
     if args.collection is None:

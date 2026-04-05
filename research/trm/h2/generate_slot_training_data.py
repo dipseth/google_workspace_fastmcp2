@@ -30,11 +30,34 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "poc"))
 
-from .generate_training_data import CONTENT_AFFINITY, CONTENT_TEXT_TEMPLATES
-from .slot_assigner import COMPONENT_TO_POOL, POOL_VOCAB
+from .domain_config import get_domain_or_default
+from .generate_training_data import (
+    CONTENT_AFFINITY,
+    CONTENT_TEXT_TEMPLATES,
+    _init_domain_content,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+# Domain-resolved constants — set by _init_slot_domain() in main()
+_slot_domain = None
+POOL_VOCAB: dict[str, int] = {}
+COMPONENT_TO_POOL: dict[str, str] = {}
+
+
+def _init_slot_domain(domain_id: str = "gchat") -> None:
+    """Initialize domain-specific pool vocab and component mapping."""
+    global _slot_domain, POOL_VOCAB, COMPONENT_TO_POOL
+    _slot_domain = get_domain_or_default(domain_id)
+    POOL_VOCAB = dict(_slot_domain.pool_vocab)
+    COMPONENT_TO_POOL = dict(_slot_domain.component_to_pool)
+    # Also re-init content from generate_training_data
+    _init_domain_content(domain_id)
+
+
+# Default to gchat for backward compatibility
+_init_slot_domain("gchat")
 
 
 def _split_template(template: str) -> list[str]:
@@ -110,17 +133,9 @@ def generate_synthetic_pairs(
                 "source": "synthetic_neg",
             })
 
-    # Add cross-pool confusion pairs (harder negatives)
-    confusion_pairs = [
-        ("Status: Online", "chips"),         # Status could be a chip filter
-        ("Deploy", "content_texts"),         # Deploy verb as label
-        ("High Priority", "buttons"),        # Priority as button
-        ("API Gateway", "chips"),            # Service name as tag
-        ("v2.0.0", "chips"),                # Version as tag
-        ("Submit", "content_texts"),         # Action verb as label
-        ("Active", "buttons"),              # Status as action
-        ("web-server-01", "buttons"),       # Server name as button text
-    ]
+    # Add cross-pool confusion pairs (harder negatives) from domain config
+    domain = _slot_domain or get_domain_or_default()
+    confusion_pairs = list(domain.confusion_pairs) if domain.confusion_pairs else []
     for text, wrong_pool in confusion_pairs:
         for _ in range(augment_factor * 2):  # Extra weight on confusion
             pairs.append({
@@ -281,13 +296,21 @@ def main():
     parser.add_argument("--augment-factor", type=int, default=3,
                         help="Augmentation factor for synthetic pairs")
     parser.add_argument("--include-qdrant", action="store_true",
-                        help="Include real card builds from Qdrant")
-    parser.add_argument("--collection", type=str, default="mcp_gchat_cards_v8",
-                        help="Qdrant collection for real data")
+                        help="Include real builds from Qdrant")
+    parser.add_argument("--collection", type=str, default=None,
+                        help="Qdrant collection for real data (auto-detected per domain)")
+    parser.add_argument("--domain", type=str, default="gchat",
+                        help="Domain ID from registry (e.g., 'gchat', 'email')")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-embeddings", action="store_true",
                         help="Skip embedding generation (for testing)")
     args = parser.parse_args()
+
+    # Initialize domain
+    _init_slot_domain(args.domain)
+
+    if args.collection is None:
+        args.collection = "email_blocks" if args.domain == "email" else "mcp_gchat_cards_v8"
 
     rng = random.Random(args.seed)
 

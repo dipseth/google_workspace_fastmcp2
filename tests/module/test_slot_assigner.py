@@ -29,8 +29,8 @@ class TestDomainConfig:
     def test_gchat_domain_has_5_pools(self):
         assert GCHAT_DOMAIN.n_pools == 5
 
-    def test_email_domain_has_4_pools(self):
-        assert EMAIL_DOMAIN.n_pools == 4
+    def test_email_domain_has_5_pools(self):
+        assert EMAIL_DOMAIN.n_pools == 5
 
     def test_pool_vocab_ids_are_contiguous(self):
         """Pool IDs must be 0..n-1 with no gaps — required for nn.Linear output."""
@@ -204,9 +204,9 @@ class TestDomainRewrap:
         result = GCHAT_DOMAIN.rewrap_item(item, "content_texts", "buttons")
         assert result["url"] == "http://real.com"
 
-    def test_email_rewrap_body_uses_content_field(self):
-        result = EMAIL_DOMAIN.rewrap_item({"text": "Hello world"}, "subject", "body_sections")
-        assert result["content"] == "Hello world"
+    def test_email_rewrap_content_pool(self):
+        result = EMAIL_DOMAIN.rewrap_item({"text": "Hello world"}, "chrome", "content")
+        assert result["text"] == "Hello world"
 
     def test_rewrap_with_no_rules_falls_back_to_text(self):
         """Domain with no rewrap rules should still produce a text field."""
