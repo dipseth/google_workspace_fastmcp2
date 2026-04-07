@@ -89,6 +89,16 @@ def get_last_dashboard_tool() -> Optional[str]:
     return _last_dashboard_tool
 
 
+def clear_last_dashboard_tool() -> None:
+    """Reset the last-dashboard-tool tracker.
+
+    Called before each ``execute`` invocation so that stale values from
+    a *previous* execute do not leak into the current one.
+    """
+    global _last_dashboard_tool
+    _last_dashboard_tool = None
+
+
 def get_cache_age(tool_name: str) -> Optional[float]:
     """Seconds since the result was cached, or ``None`` if not cached."""
     entry = _result_cache.get(tool_name)

@@ -867,12 +867,23 @@ def setup_code_mode(mcp: FastMCP) -> None:
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
+            # Clear stale dashboard-tool tracker so a *previous*
+            # execute's cached tool doesn't bleed into this one.
+            try:
+                from middleware.dashboard_cache_middleware import (
+                    clear_last_dashboard_tool,
+                )
+
+                clear_last_dashboard_tool()
+            except Exception:
+                pass
+
             raw = await transform.sandbox_provider.run(
                 code,
                 external_functions={"call_tool": call_tool},
             )
 
-            # If a dashboard-enabled tool was called during this execute,
+            # If a dashboard-enabled tool was called during THIS execute,
             # embed a Prefab dashboard directly in the ToolResult so
             # VS Code renders it inline (no resource-fetch race).
             try:
