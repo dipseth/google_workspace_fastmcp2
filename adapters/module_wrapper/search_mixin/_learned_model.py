@@ -9,9 +9,10 @@ logger = setup_logger()
 
 @classmethod
 def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
-    """Resolve checkpoint path from registry or env vars.
+    """Resolve checkpoint path from cloud artifacts, registry, or env vars.
 
     Priority:
+      0. Model artifact cache (downloaded from cloud via model_artifact_lifespan)
       1. LEARNED_SCORER_REGISTRY JSON (domain->path mapping)
       2. LEARNED_SCORER_CHECKPOINT (single path, any domain)
       3. Default: best_model_unified.pt (UnifiedTRN)
@@ -20,7 +21,33 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
     import json as _json
     import os
 
-    # Try registry first
+    # Priority 0: Cloud-downloaded artifacts (from model_artifact_lifespan)
+    try:
+        from lifespans import get_model_artifact_paths
+
+        artifact_paths = get_model_artifact_paths()
+        if artifact_paths:
+            # Try domain-specific artifact first
+            if domain and domain in artifact_paths:
+                path = artifact_paths[domain]
+                if os.path.exists(path):
+                    logger.debug(f"Using cloud artifact for domain={domain}: {path}")
+                    return path
+            # Try 'default' key (single-URI mode)
+            if "default" in artifact_paths:
+                path = artifact_paths["default"]
+                if os.path.exists(path):
+                    logger.debug(f"Using cloud artifact (default): {path}")
+                    return path
+            # Try first available
+            for d, path in artifact_paths.items():
+                if os.path.exists(path):
+                    logger.debug(f"Using cloud artifact (domain={d}): {path}")
+                    return path
+    except ImportError:
+        pass  # lifespans not available (e.g., during testing)
+
+    # Priority 1: LEARNED_SCORER_REGISTRY JSON
     registry_json = os.environ.get("LEARNED_SCORER_REGISTRY")
     if registry_json:
         try:
@@ -36,12 +63,12 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
         except _json.JSONDecodeError:
             logger.warning("LEARNED_SCORER_REGISTRY is not valid JSON")
 
-    # Single checkpoint path
+    # Priority 2: Single checkpoint path
     checkpoint_path = os.environ.get("LEARNED_SCORER_CHECKPOINT")
     if checkpoint_path and os.path.exists(checkpoint_path):
         return checkpoint_path
 
-    # Default file paths — prefer UnifiedTRN, fall back to DualHead
+    # Priority 3-4: Default file paths — prefer UnifiedTRN, fall back to DualHead
     from pathlib import Path
     base_dirs = [
         Path(__file__).parent.parent.parent.parent,

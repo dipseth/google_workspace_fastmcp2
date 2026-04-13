@@ -28,7 +28,9 @@ from .server_lifespans import (
     combined_server_lifespan,
     dynamic_instructions_lifespan,
     get_lifespan_state,
+    get_model_artifact_paths,
     memory_cleanup_lifespan,
+    model_artifact_lifespan,
     qdrant_lifespan,
     register_profile_middleware,
     register_qdrant_middleware,
@@ -37,6 +39,7 @@ from .server_lifespans import (
 )
 
 __all__ = [
+    "model_artifact_lifespan",
     "qdrant_lifespan",
     "colbert_lifespan",
     "session_state_lifespan",
@@ -48,4 +51,5 @@ __all__ = [
     "register_profile_middleware",
     "register_template_middleware",
     "get_lifespan_state",
+    "get_model_artifact_paths",
 ]

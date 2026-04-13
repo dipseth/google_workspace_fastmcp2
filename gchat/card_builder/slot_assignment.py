@@ -97,7 +97,21 @@ def _load_slot_model():
     base_dir = Path(__file__).resolve().parent.parent.parent / "research" / "trm" / "h2"
 
     # ── Try UnifiedTRN first ──────────────────────────────────────
-    unified_path = os.environ.get("UNIFIED_TRN_CHECKPOINT")
+    # Priority: cloud artifact cache → env var → default local path
+    unified_path = None
+    try:
+        from lifespans import get_model_artifact_paths
+        artifact_paths = get_model_artifact_paths()
+        if artifact_paths:
+            for key in ("gchat", "default"):
+                if key in artifact_paths and Path(artifact_paths[key]).exists():
+                    unified_path = artifact_paths[key]
+                    break
+    except ImportError:
+        pass
+
+    if not unified_path:
+        unified_path = os.environ.get("UNIFIED_TRN_CHECKPOINT")
     if not unified_path:
         candidate = base_dir / "checkpoints" / "best_model_unified.pt"
         if candidate.exists():

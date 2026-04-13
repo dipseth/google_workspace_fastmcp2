@@ -1115,9 +1115,9 @@ class TagBasedResourceMiddleware(Middleware):
         # Call the tool's function with parameters
         try:
             # Check if the function is async
-            import asyncio
+            import inspect
 
-            if asyncio.iscoroutinefunction(tool_func):
+            if inspect.iscoroutinefunction(tool_func):
                 result = await tool_func(**parameters)
             else:
                 # Some tools might be sync functions

@@ -372,6 +372,38 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "RECURSIVE_CONTENT_POOL_SIZE"},
     )
 
+    # Model Artifact Management
+    # Multi-provider model artifact download + local cache with py-key-value-aio registry
+    model_artifact_enabled: bool = Field(
+        default=False,
+        description="Enable cloud model artifact download on startup",
+        json_schema_extra={"env": "MODEL_ARTIFACT_ENABLED"},
+    )
+    model_artifact_uri: str = Field(
+        default="",
+        description=(
+            "JSON mapping of domain->artifact URI, or single URI for all domains. "
+            "Supports gs://, s3://, az://, https:// schemes. "
+            'Example: \'{"gchat": "gs://my-bucket/trm/best_model_unified.pt"}\''
+        ),
+        json_schema_extra={"env": "MODEL_ARTIFACT_URI"},
+    )
+    model_artifact_cache_dir: str = Field(
+        default="",
+        description="Local directory for cached model artifacts. If empty, uses credentials_dir/model_cache",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CACHE_DIR"},
+    )
+    model_artifact_registry_backend: str = Field(
+        default="file",
+        description="Registry backend for artifact metadata: 'memory', 'file', or 'redis'",
+        json_schema_extra={"env": "MODEL_ARTIFACT_REGISTRY_BACKEND"},
+    )
+    model_artifact_checksum_verify: bool = Field(
+        default=True,
+        description="Verify SHA-256 checksum of downloaded artifacts against registry",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CHECKSUM_VERIFY"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,
