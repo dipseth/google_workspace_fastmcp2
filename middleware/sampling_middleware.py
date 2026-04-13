@@ -1435,14 +1435,29 @@ class EnhancedSamplingMiddleware(Middleware):
                     pass
 
         try:
+            # ── Budget gate: skip all LLM-backed validation when budget exceeded ──
+            _budget_ok = True
+            try:
+                from middleware.payment.cost_tracker import is_budget_exceeded
+
+                if is_budget_exceeded():
+                    _budget_ok = False
+                    if self.enable_debug:
+                        logger.debug(
+                            "Sampling budget exceeded — skipping validation for %s",
+                            tool_name,
+                        )
+            except ImportError:
+                pass
+
             # Pre-call: DSL validation & recovery for registered DSL tools
-            if tool_name in self._dsl_configs:
+            if _budget_ok and tool_name in self._dsl_configs:
                 await self._pre_validate_dsl(context, tool_name)
 
             # Semantic validation via sampling agent
             validation_task = None
             validation = None
-            if tool_name in self._validation_configs:
+            if _budget_ok and tool_name in self._validation_configs:
                 v_config = self._validation_configs[tool_name]
                 if v_config.mode == "pre":
                     # Synchronous — block, apply corrections

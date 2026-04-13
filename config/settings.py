@@ -595,6 +595,25 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "SAMPLING_COST_PERSISTENCE_FILE"},
     )
 
+    # Sampling Monthly Budget
+    sampling_monthly_budget_usd: float = Field(
+        default=0.0,
+        description="Monthly sampling budget in USD. 0 = unlimited. When exceeded, sampling calls are skipped.",
+        json_schema_extra={"env": "SAMPLING_MONTHLY_BUDGET_USD"},
+    )
+
+    # Reactive Cache Keepalive
+    cache_keepalive_reactive: bool = Field(
+        default=True,
+        description="Reactive mode: only keep cache warm after real sampling activity (ignores continuous loop)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_REACTIVE"},
+    )
+    cache_keepalive_idle_timeout_seconds: int = Field(
+        default=3600,
+        description="Stop keepalive after this many seconds of no real sampling activity (default 1 hour)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_IDLE_TIMEOUT_SECONDS"},
+    )
+
     # Argument Recovery
     sampling_argument_recovery_enabled: bool = Field(
         default=True,

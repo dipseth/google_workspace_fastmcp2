@@ -288,5 +288,22 @@ def create_sampling_handler(settings) -> Optional["SessionAwareSamplingHandler"]
 
     register_litellm_handler(raw_handler)
 
+    # Load persisted monthly cost tracking so budget gates work from startup
+    try:
+        from middleware.payment.cost_tracker import load_monthly_costs
+
+        load_monthly_costs()
+        budget = settings.sampling_monthly_budget_usd
+        if budget > 0:
+            from middleware.payment.cost_tracker import get_monthly_cost
+
+            logger.info(
+                "Sampling budget: $%.2f / $%.2f this month",
+                get_monthly_cost(),
+                budget,
+            )
+    except Exception:
+        pass
+
     # Wrap with session-aware handler for per-user LLM provider configuration
     return SessionAwareSamplingHandler(raw_handler)
