@@ -1443,12 +1443,14 @@ class EnhancedSamplingMiddleware(Middleware):
             except Exception:
                 pass
 
+            _tool_args = context.message.arguments or {}
             _tool_span, _tool_span_token = start_tool_span(
                 tool_name,
                 input_summary=_tool_input_summary,
                 user_id=_tool_user_id,
                 session_id=_tool_session_id,
                 tags=["mcp", "sampling"],
+                tool_args=_tool_args,
             )
         except Exception:
             pass

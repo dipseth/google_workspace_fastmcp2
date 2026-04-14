@@ -160,15 +160,21 @@ class LiteLLMSamplingHandler:
             step_index = trace_ctx.step_index if trace_ctx else 0
 
             # Build generation name — include step/phase for multi-step tools
+            from middleware.langfuse_integration import (
+                build_generation_name,
+                build_trace_name,
+            )
+
             phase = trace_ctx.phase if trace_ctx else ""
-            if phase and tool_name:
-                gen_name = f"mcp::{tool_name}::{phase}"
-            elif step_index > 0 and tool_name:
-                gen_name = f"mcp::{tool_name}::step_{step_index}"
-            elif trace_ctx and trace_ctx.template and "recovery" in trace_ctx.template:
-                gen_name = f"mcp::{tool_name}::dsl_recovery::attempt_{step_index}"
-            else:
-                gen_name = f"mcp::{tool_name}" if tool_name else "mcp::sampling"
+            is_recovery = bool(
+                trace_ctx and trace_ctx.template and "recovery" in trace_ctx.template
+            )
+            gen_name = build_generation_name(
+                tool_name or "sampling",
+                phase=phase,
+                step_index=step_index,
+                is_recovery=is_recovery,
+            )
 
             trace_meta: dict = {"mcp_tool": tool_name or "unknown"}
             if trace_ctx:
@@ -189,30 +195,35 @@ class LiteLLMSamplingHandler:
                 if trace_ctx.search_mode:
                     trace_meta["search_mode"] = trace_ctx.search_mode
 
+            # Extract parent observation ID from current OTel span for hierarchy
+            _parent_obs_id = ""
+            try:
+                from opentelemetry import trace as otel_trace
+
+                current_span = otel_trace.get_current_span()
+                span_ctx = current_span.get_span_context()
+                if span_ctx.is_valid:
+                    _parent_obs_id = format(span_ctx.span_id, "016x")
+                    # Also forward OTel span as parent (for future LiteLLM support)
+                    kwargs.setdefault("metadata", {})[
+                        "litellm_parent_otel_span"
+                    ] = current_span
+            except Exception:
+                pass
+
+            _trace_id = trace_ctx.trace_id if trace_ctx else ""
             add_langfuse_metadata(
                 kwargs,
                 tool_name=tool_name,
                 session_id=get_session_context_sync() or "",
                 user_email=get_user_email_context_sync() or "",
                 generation_name=gen_name,
-                trace_name=f"mcp::{tool_name}" if tool_name else "mcp::sampling",
-                trace_id=trace_ctx.trace_id if trace_ctx else "",
+                trace_name=build_trace_name(tool_name or "sampling"),
+                trace_id=_trace_id,
+                existing_trace_id=_trace_id,
+                parent_observation_id=_parent_obs_id,
                 trace_metadata=trace_meta,
             )
-
-            # Forward-looking: propagate current OTEL span as parent for LiteLLM
-            # Currently ignored by LiteLLM's langfuse_otel callback, but positions
-            # us for when that limitation is lifted.
-            try:
-                from opentelemetry import trace as otel_trace
-
-                current_span = otel_trace.get_current_span()
-                if current_span.get_span_context().is_valid:
-                    kwargs.setdefault("metadata", {})["litellm_parent_otel_span"] = (
-                        current_span
-                    )
-            except Exception:
-                pass
         except Exception:
             pass
 
