@@ -272,7 +272,7 @@ def build_query_groups(
         candidates = [c for c, _ in scored[:top_k]]
 
         labels = [1.0 if c.name == query.name else 0.0 for c in candidates]
-        has_positive = any(l == 1.0 for l in labels)
+        has_positive = any(v == 1.0 for v in labels)
 
         if has_positive and len(candidates) >= 2:
             groups.append(MWQueryGroup(query=query, candidates=candidates, labels=labels))

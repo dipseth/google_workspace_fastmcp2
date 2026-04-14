@@ -136,7 +136,7 @@ def extract_list_items(content: str, max_items: int = 8) -> list[str]:
 
 
 def extract_table_rows(content: str, max_rows: int = 8) -> list[dict]:
-    lines = [l.strip() for l in content.split('\n') if '|' in l]
+    lines = [line.strip() for line in content.split('\n') if '|' in line]
     if len(lines) < 3:
         return []
     headers = [h.strip() for h in lines[0].split('|') if h.strip() and h.strip() != '-']
