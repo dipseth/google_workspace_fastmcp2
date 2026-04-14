@@ -66,7 +66,7 @@ def _get_domain_config():
     if _cached_domain_config is not None:
         return _cached_domain_config
     # Fallback: gchat default
-    from research.trm.h2.domain_config import GCHAT_DOMAIN
+    from adapters.domain_config import GCHAT_DOMAIN
 
     return GCHAT_DOMAIN
 
@@ -139,7 +139,7 @@ def _load_slot_model():
             _cached_model_type = "unified"
 
             # Resolve domain config from checkpoint metadata
-            from research.trm.h2.domain_config import resolve_domain
+            from adapters.domain_config import resolve_domain
 
             _cached_domain_config = resolve_domain(checkpoint=checkpoint)
             domain_id = _cached_domain_config.domain_id
@@ -186,7 +186,7 @@ def _load_slot_model():
         _cached_model_type = "slot"
 
         # Resolve domain config from checkpoint metadata
-        from research.trm.h2.domain_config import resolve_domain
+        from adapters.domain_config import resolve_domain
 
         _cached_domain_config = resolve_domain(checkpoint=checkpoint)
 

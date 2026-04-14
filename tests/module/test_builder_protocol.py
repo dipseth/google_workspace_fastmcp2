@@ -54,8 +54,8 @@ class TestRegistryPerDomain:
         assert len(builder.registry) > 0
 
     def test_gchat_registry_pools_are_gchat_pools(self):
+        from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.builder_v3 import GchatCardBuilder
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
 
         builder = GchatCardBuilder()
         valid_pools = set(GCHAT_DOMAIN.pool_vocab.keys())
@@ -66,8 +66,8 @@ class TestRegistryPerDomain:
             )
 
     def test_email_registry_pools_are_email_pools(self):
+        from adapters.domain_config import EMAIL_DOMAIN
         from gmail.email_builder import EmailBuilder
-        from research.trm.h2.domain_config import EMAIL_DOMAIN
 
         builder = EmailBuilder()
         valid_pools = set(EMAIL_DOMAIN.pool_vocab.keys())
@@ -103,8 +103,8 @@ class TestSupplyMapPerDomain:
     """Supply maps use correct pool keys per domain."""
 
     def test_gchat_supply_map_keys(self):
+        from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.builder_v3 import GchatCardBuilder
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
 
         builder = GchatCardBuilder()
         parsed = ParsedStructure(content_items={}, raw_dsl="")
@@ -112,8 +112,8 @@ class TestSupplyMapPerDomain:
         assert set(supply_map.keys()) == set(GCHAT_DOMAIN.pool_vocab.keys())
 
     def test_email_supply_map_keys(self):
+        from adapters.domain_config import EMAIL_DOMAIN
         from gmail.email_builder import EmailBuilder
-        from research.trm.h2.domain_config import EMAIL_DOMAIN
 
         builder = EmailBuilder()
         parsed = ParsedStructure(content_items={}, raw_dsl="")

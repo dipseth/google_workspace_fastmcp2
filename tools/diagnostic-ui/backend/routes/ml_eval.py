@@ -1655,7 +1655,7 @@ class SlotRoutingRequest(BaseModel):
 @router.post("/ml/slot-routing-test")
 async def slot_routing_test(req: SlotRoutingRequest):
     """Test slot routing on arbitrary content items. Shows predicted pool + scores."""
-    from research.trm.h2.domain_config import get_domain_or_default
+    from adapters.domain_config import get_domain_or_default
 
     domain_config = get_domain_or_default(req.domain)
 
@@ -1983,7 +1983,7 @@ class UnifiedRoutingRequest(BaseModel):
 @router.post("/ml/unified-routing-test")
 async def unified_routing_test(req: UnifiedRoutingRequest):
     """Test UnifiedTRN pool routing on arbitrary content items (build mode)."""
-    from research.trm.h2.domain_config import get_domain_or_default
+    from adapters.domain_config import get_domain_or_default
 
     domain_config = get_domain_or_default(req.domain)
 
@@ -2484,7 +2484,7 @@ async def candidate_pool_analysis():
 async def available_domains():
     """List available domain configurations."""
     try:
-        from research.trm.h2.domain_config import get_domain, list_domains
+        from adapters.domain_config import get_domain, list_domains
 
         domains = []
         for domain_id in list_domains():

@@ -30,8 +30,8 @@ logger = setup_logger()
 
 def _build_email_registry() -> ComponentRegistry:
     """Build ComponentRegistry from email block types."""
+    from adapters.domain_config import EMAIL_DOMAIN
     from gmail.email_wrapper_setup import EMAIL_WIDGET_TYPES
-    from research.trm.h2.domain_config import EMAIL_DOMAIN
 
     registry = ComponentRegistry(domain_id="email")
 
@@ -122,7 +122,7 @@ class EmailBuilder:
         **content_kwargs: Any,
     ) -> Dict[str, list]:
         """Build supply map from parsed structure and explicit content."""
-        from research.trm.h2.domain_config import EMAIL_DOMAIN
+        from adapters.domain_config import EMAIL_DOMAIN
 
         supply_map: Dict[str, list] = {pool: [] for pool in EMAIL_DOMAIN.pool_vocab}
 
@@ -145,8 +145,8 @@ class EmailBuilder:
         demands: Dict[str, int],
     ) -> Dict[str, list]:
         """Use TRM scoring to reassign content, passing EMAIL_DOMAIN explicitly."""
+        from adapters.domain_config import EMAIL_DOMAIN
         from gchat.card_builder.slot_assignment import reassign_supply_map
-        from research.trm.h2.domain_config import EMAIL_DOMAIN
 
         return reassign_supply_map(supply_map, demands, domain_config=EMAIL_DOMAIN)
 

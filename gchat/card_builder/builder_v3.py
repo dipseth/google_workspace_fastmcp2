@@ -30,8 +30,8 @@ logger = setup_logger()
 
 def _build_gchat_registry() -> ComponentRegistry:
     """Build a ComponentRegistry from the gchat COMPONENT_PARAMS constant."""
+    from adapters.domain_config import GCHAT_DOMAIN
     from gchat.card_builder.constants import COMPONENT_PARAMS
-    from research.trm.h2.domain_config import GCHAT_DOMAIN
 
     registry = ComponentRegistry(domain_id="gchat")
     for comp_name, fields in COMPONENT_PARAMS.items():
@@ -104,7 +104,7 @@ class GchatCardBuilder:
         **content_kwargs: Any,
     ) -> Dict[str, list]:
         """Build supply map from parsed structure and explicit content."""
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
+        from adapters.domain_config import GCHAT_DOMAIN
 
         supply_map: Dict[str, list] = {pool: [] for pool in GCHAT_DOMAIN.pool_vocab}
 
@@ -134,8 +134,8 @@ class GchatCardBuilder:
         demands: Dict[str, int],
     ) -> Dict[str, list]:
         """Use TRM scoring to reassign content, passing GCHAT_DOMAIN explicitly."""
+        from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.slot_assignment import reassign_supply_map
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
 
         return reassign_supply_map(supply_map, demands, domain_config=GCHAT_DOMAIN)
 

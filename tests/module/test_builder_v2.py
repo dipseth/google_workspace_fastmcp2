@@ -55,7 +55,7 @@ class TestSupplyMapConstruction:
     """Test supply map building and slot assignment integration."""
 
     def test_gchat_domain_pools_are_valid(self):
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
+        from adapters.domain_config import GCHAT_DOMAIN
 
         expected_pools = {
             "buttons",
@@ -68,7 +68,7 @@ class TestSupplyMapConstruction:
 
     def test_supply_map_has_all_pools(self):
         """A supply map should have entries for all GCHAT pools."""
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
+        from adapters.domain_config import GCHAT_DOMAIN
 
         supply_map = {pool: [] for pool in GCHAT_DOMAIN.pool_vocab}
         assert len(supply_map) == 5
@@ -128,8 +128,8 @@ class TestGchatCardBuilder:
         assert "Button" in builder.registry
 
     def test_gchat_builder_registry_pools_match_domain(self):
+        from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.builder_v3 import GchatCardBuilder
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
 
         builder = GchatCardBuilder()
         for comp_name in builder.registry.list_components():
@@ -155,8 +155,8 @@ class TestGchatCardBuilder:
 
     def test_gchat_builder_reassign_slots_with_domain(self):
         """reassign_slots passes GCHAT_DOMAIN to slot_assignment."""
+        from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.builder_v3 import GchatCardBuilder
-        from research.trm.h2.domain_config import GCHAT_DOMAIN
 
         builder = GchatCardBuilder()
         supply_map = {pool: [] for pool in GCHAT_DOMAIN.pool_vocab}
