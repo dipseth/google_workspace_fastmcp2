@@ -1941,7 +1941,7 @@ async def search_evaluation():
         per_group.append({
             "query_name": query_name,
             "n_candidates": len(candidates),
-            "n_positive": sum(1 for l in labels if l > 0.5),
+            "n_positive": sum(1 for v in labels if v > 0.5),
             "reciprocal_rank": round(rr, 4),
             "top_is_correct": ranked_relevant[0] if ranked_relevant else False,
         })
@@ -1954,7 +1954,7 @@ async def search_evaluation():
         for c in group.get("candidates", []):
             all_labels.append(c.get("label", c.get("form_label", 0.0)))
     n_total = len(all_labels)
-    n_pos = sum(1 for l in all_labels if l > 0.5)
+    n_pos = sum(1 for v in all_labels if v > 0.5)
     pos_ratio = round(n_pos / max(n_total, 1), 3)
 
     # Determine which data file was used
@@ -2102,7 +2102,7 @@ async def model_comparison():
         for c in group.get("candidates", []):
             all_labels.append(c.get("label", c.get("form_label", 0.0)))
     n_total = len(all_labels)
-    n_pos = sum(1 for l in all_labels if l > 0.5)
+    n_pos = sum(1 for v in all_labels if v > 0.5)
 
     if _feature_version >= 5:
         eval_data_file = _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"

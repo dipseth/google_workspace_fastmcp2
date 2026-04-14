@@ -127,7 +127,7 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
             # Content label (V5+, defaults to 0.0 for older data)
             content_labels.append(c.get("content_label", 0.0))
 
-        if any(l == 1.0 for l in form_labels) and len(candidates) >= 2:
+        if any(v == 1.0 for v in form_labels) and len(candidates) >= 2:
             groups.append(MWQueryGroup(
                 query=query,
                 candidates=candidates,
@@ -748,13 +748,10 @@ def main():
     patience_counter = 0
 
     # Select loss function based on model type
-    _loss_fn = (
-        lambda m, b, d: compute_dual_loss(
-            m, b, d, args.form_weight, args.content_weight
-        )
-        if is_dual
-        else compute_loss
-    )
+    def _loss_fn(m, b, d):
+        if is_dual:
+            return compute_dual_loss(m, b, d, args.form_weight, args.content_weight)
+        return compute_loss(m, b, d)
 
     # Loss history for diagnostic UI
     train_losses: list[float] = []
