@@ -7,15 +7,14 @@ Usage:
     from gmail.email_wrapper_api import get_email_symbols, parse_email_dsl
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import gmail.email_wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger()
 
 
 # =============================================================================
@@ -24,10 +23,26 @@ logger = setup_logger(__name__)
 
 
 class EmailDSLResult(BaseModel):
-    """Structured email DSL generation result."""
+    """Structured email DSL generation result.
 
-    email_description: str  # e.g. "ε[Ħ, ħ, τ×2, Ƀ]"
-    email_params: dict  # content for each symbol key
+    Used by DSL recovery to return corrected DSL. Fields must contain ONLY
+    the corrected values — no explanations, commentary, or reasoning.
+    """
+
+    email_description: str = Field(
+        description=(
+            "The corrected DSL notation followed by the email subject. "
+            "Must start with the DSL expression (e.g. 'ε[ħ, τ×2, Ƀ]') "
+            "followed by the original subject text. "
+            "Do NOT include explanations or commentary — ONLY the DSL and subject."
+        ),
+    )
+    email_params: dict = Field(
+        description=(
+            "Block content keyed by DSL symbol or class name. "
+            "Preserve the original content from the user's request."
+        ),
+    )
 
 
 # =============================================================================
@@ -80,7 +95,12 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
         "Layout": ["ColumnsBlock", "Column"],
         "Content": ["HeroBlock", "TextBlock", "ButtonBlock", "ImageBlock"],
         "Structure": ["SpacerBlock", "DividerBlock"],
-        "Chrome": ["HeaderBlock", "FooterBlock", "SocialBlock", "TableBlock"],
+        "Chrome": [
+            "HeaderBlock",
+            "FooterBlock",
+            "SocialBlock",
+            "TableBlock",
+        ],
         "Interactive": ["AccordionBlock", "CarouselBlock"],
     }
 
@@ -139,9 +159,9 @@ def get_email_dsl_field_description() -> str:
 
     Returns a single-line description suitable for Field(description=...).
     """
-    symbols = get_email_symbols()
+    from adapters.module_wrapper.wrapper_factory import generate_dsl_field_description
 
-    key_mappings = []
+    wrapper = _setup.get_email_wrapper()
     key_components = [
         "EmailSpec",
         "HeroBlock",
@@ -156,14 +176,16 @@ def get_email_dsl_field_description() -> str:
         "CarouselBlock",
     ]
 
-    for comp in key_components:
-        if comp in symbols:
-            key_mappings.append(f"{symbols[comp]}={comp}")
+    return generate_dsl_field_description(
+        wrapper,
+        key_components=key_components,
+        skill_uri="skill://mjml-email/",
+    )
 
-    return f"DSL structure using symbols. Symbols: {', '.join(key_mappings)}."
 
-
-def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
+def get_email_tool_examples(
+    max_examples: int = 5,
+) -> List[Dict[str, Any]]:
     """
     Generate dynamic tool examples using symbols.
 
@@ -193,7 +215,10 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "description": "Simple welcome email",
             "email_description": f"{spec}[{hero}, {text}] Welcome email",
             "email_params": {
-                hero: {"title": "Welcome!", "subtitle": "Thanks for joining"},
+                hero: {
+                    "title": "Welcome!",
+                    "subtitle": "Thanks for joining",
+                },
                 text: {"_items": [{"text": "We're glad to have you."}]},
             },
         },
@@ -201,14 +226,24 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "description": "Newsletter with CTA",
             "email_description": f"{spec}[{hero}, {text}x2, {btn}]",
             "email_params": {
-                hero: {"title": "Monthly Update", "subtitle": "March 2026"},
+                hero: {
+                    "title": "Monthly Update",
+                    "subtitle": "March 2026",
+                },
                 text: {
                     "_items": [
                         {"text": "Here's what happened this month."},
                         {"text": "Check out our latest features."},
                     ]
                 },
-                btn: {"_items": [{"text": "Read More", "url": "https://example.com"}]},
+                btn: {
+                    "_items": [
+                        {
+                            "text": "Read More",
+                            "url": "https://example.com",
+                        }
+                    ]
+                },
             },
         },
         {
@@ -227,13 +262,30 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
                 hero: {"title": "Compare Plans"},
                 col: {
                     "_items": [
-                        {"blocks": [{"block_type": "text", "text": "Basic: $10/mo"}]},
-                        {"blocks": [{"block_type": "text", "text": "Pro: $25/mo"}]},
+                        {
+                            "blocks": [
+                                {
+                                    "block_type": "text",
+                                    "text": "Basic: $10/mo",
+                                }
+                            ]
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "block_type": "text",
+                                    "text": "Pro: $25/mo",
+                                }
+                            ]
+                        },
                     ]
                 },
                 btn: {
                     "_items": [
-                        {"text": "Choose Plan", "url": "https://example.com/plans"}
+                        {
+                            "text": "Choose Plan",
+                            "url": "https://example.com/plans",
+                        }
                     ]
                 },
             },
@@ -244,12 +296,20 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
             "email_params": {
                 img: {
                     "_items": [
-                        {"src": "https://picsum.photos/600/300", "alt": "Banner"}
+                        {
+                            "src": "https://picsum.photos/600/300",
+                            "alt": "Banner",
+                        }
                     ]
                 },
                 text: {"_items": [{"text": "Check out our new product."}]},
                 btn: {
-                    "_items": [{"text": "Shop Now", "url": "https://example.com/shop"}]
+                    "_items": [
+                        {
+                            "text": "Shop Now",
+                            "url": "https://example.com/shop",
+                        }
+                    ]
                 },
             },
         },
@@ -276,7 +336,10 @@ def get_email_tool_examples(max_examples: int = 5) -> List[Dict[str, Any]]:
                 },
                 btn: {
                     "_items": [
-                        {"text": "Contact Us", "url": "https://example.com/contact"}
+                        {
+                            "text": "Contact Us",
+                            "url": "https://example.com/contact",
+                        }
                     ]
                 },
             },
@@ -373,7 +436,9 @@ def parse_email_dsl(dsl_string: str):
     return parser.parse(dsl_string)
 
 
-def extract_email_dsl_from_description(description: str) -> Optional[str]:
+def extract_email_dsl_from_description(
+    description: str,
+) -> Optional[str]:
     """
     Extract DSL notation from a description string.
 

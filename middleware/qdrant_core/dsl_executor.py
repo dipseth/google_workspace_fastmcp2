@@ -30,10 +30,10 @@ Usage:
 """
 
 import asyncio
-import logging
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from config.enhanced_logging import setup_logger
 from middleware.qdrant_core.dsl_types import (
     SearchV2Response,
     SearchV2ResultItem,
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from middleware.qdrant_core.client import QdrantClientManager
     from middleware.qdrant_core.dsl_query_builder import QueryBuilder
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 class SearchV2Executor:
@@ -302,6 +302,48 @@ class SearchV2Executor:
     # Internal execution methods
     # -------------------------------------------------------------------------
 
+    async def _resolve_using_for_collection(self, collection: str) -> Optional[str]:
+        """Detect if collection uses named vectors, return default vector name or None.
+
+        Named-vector collections require ``using=<name>`` in query_points calls.
+        Single-vector (V1) collections must omit it.
+
+        Caches result per collection name on the executor instance.
+        """
+        cache = getattr(self, "_named_vectors_cache", {})
+        if collection in cache:
+            return cache[collection]
+
+        try:
+            info = await asyncio.to_thread(
+                self.client_manager.client.get_collection, collection
+            )
+            vectors_config = info.config.params.vectors
+            if isinstance(vectors_config, dict):
+                # Pick a reasonable default — 'inputs' is the general-purpose vector
+                # in RIC schema; fall back to first available key
+                default = (
+                    "inputs"
+                    if "inputs" in vectors_config
+                    else next(iter(vectors_config))
+                )
+                logger.debug(
+                    f"Collection {collection} uses named vectors: {list(vectors_config.keys())}, "
+                    f"default={default}"
+                )
+                result = default
+            else:
+                result = None
+        except Exception as e:
+            logger.warning(f"Could not detect collection schema for {collection}: {e}")
+            result = None
+
+        if not isinstance(cache, dict):
+            cache = {}
+        cache[collection] = result
+        self._named_vectors_cache = cache
+        return result
+
     async def _execute_query_object(
         self,
         query_object: Any,
@@ -324,6 +366,11 @@ class SearchV2Executor:
             kwargs["score_threshold"] = score_threshold
         if prefetch:
             kwargs["prefetch"] = prefetch if len(prefetch) > 1 else prefetch[0]
+
+        # Add named vector for collections that require it
+        using = await self._resolve_using_for_collection(collection)
+        if using:
+            kwargs["using"] = using
 
         response = await asyncio.to_thread(
             self.client_manager.client.query_points,
@@ -355,6 +402,11 @@ class SearchV2Executor:
         }
         if prefetch:
             kwargs["prefetch"] = prefetch if len(prefetch) > 1 else prefetch[0]
+
+        # Add named vector for collections that require it
+        using = await self._resolve_using_for_collection(collection)
+        if using:
+            kwargs["using"] = using
 
         response = await asyncio.to_thread(
             self.client_manager.client.query_points,

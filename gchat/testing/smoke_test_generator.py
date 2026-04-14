@@ -18,11 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
-
-
 # =============================================================================
 # COMPONENT POOLS
 # =============================================================================

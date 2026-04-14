@@ -21,15 +21,15 @@ Security model:
 import hashlib
 import hmac
 import json
-import logging
 import secrets
 import threading
 from pathlib import Path
 from typing import Optional, Set
 
+from config.enhanced_logging import redact_email, setup_logger
 from config.settings import settings
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 _REGISTRY_FILENAME = ".user_api_keys.json"
 _LINKS_FILENAME = ".user_api_key_links.json"
@@ -148,6 +148,94 @@ def _save_links(links: dict) -> None:
         logger.warning(f"⚠️ Could not set permissions on {path}: {e}")
 
 
+def mark_key_revealed(user_email: str) -> None:
+    """Record that the per-user API key for *user_email* has been shown to the user.
+
+    Sets ``revealed_at`` on the registry entry so the legacy callback can
+    decide whether a force-regeneration is needed.
+    """
+    from datetime import datetime, timezone
+
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+        for _hash, entry in registry.items():
+            if isinstance(entry, dict) and entry.get("email") == email:
+                entry["revealed_at"] = datetime.now(timezone.utc).isoformat()
+                _save_registry(registry)
+                logger.debug(
+                    f"🔑 Marked per-user API key as revealed for {redact_email(email)}"
+                )
+                return
+    logger.debug(
+        f"🔑 No registry entry found for {redact_email(email)} — cannot mark revealed"
+    )
+
+
+def was_key_revealed(user_email: str) -> bool:
+    """Check whether the per-user API key for *user_email* was ever shown to the user."""
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+
+    for _hash, entry in registry.items():
+        if isinstance(entry, dict) and entry.get("email") == email:
+            return bool(entry.get("revealed_at"))
+    return False
+
+
+def regenerate_unrevealed_key(user_email: str) -> Optional[str]:
+    """Atomically check if key was revealed; if not, force-regenerate and mark revealed.
+
+    Performs a single load/save cycle instead of three separate operations
+    (``was_key_revealed`` + ``generate_user_key`` + ``mark_key_revealed``).
+
+    Returns:
+        The new plaintext key if regenerated, or ``None`` if the key was
+        already revealed (no regeneration needed).
+    """
+    from datetime import datetime, timezone
+
+    email = user_email.lower().strip()
+
+    with _lock:
+        registry = _load_registry()
+
+        # Check if key was already revealed
+        for _hash, entry in registry.items():
+            if isinstance(entry, dict) and entry.get("email") == email:
+                if entry.get("revealed_at"):
+                    logger.info(
+                        f"🔑 Per-user key for {email} was already revealed — "
+                        f"skipping force-regeneration to preserve active key"
+                    )
+                    return None
+                break
+
+        # Not revealed — force-regenerate in the same lock scope
+        key = secrets.token_urlsafe(32)
+        key_hash = _hash_key(key)
+
+        # Remove old entry
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != email}
+
+        # Add new entry with revealed_at already set
+        now = datetime.now(timezone.utc).isoformat()
+        registry[key_hash] = {
+            "email": email,
+            "created_at": now,
+            "revealed_at": now,
+        }
+        _save_registry(registry)
+
+    logger.info(
+        f"🔑 Force-regenerated and revealed per-user API key for {redact_email(email)}"
+    )
+    return key
+
+
 def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
     """Generate a new API key for a user.
 
@@ -193,7 +281,7 @@ def generate_user_key(user_email: str, *, force: bool = False) -> Optional[str]:
         }
         _save_registry(registry)
 
-    logger.info(f"🔑 Generated per-user API key for {email}")
+    logger.info(f"🔑 Generated per-user API key for {redact_email(email)}")
     return key
 
 
@@ -265,8 +353,43 @@ def revoke_user_key(user_email: str) -> bool:
 
     revoked = len(registry) < before
     if revoked:
-        logger.info(f"🔑 Revoked API key for {email}")
+        logger.info(f"🔑 Revoked API key for {redact_email(email)}")
     return revoked
+
+
+def rebind_key_email(old_email: str, new_email: str) -> bool:
+    """Rebind all API keys from old_email to new_email.
+
+    When OAuth completes with a different email than originally requested,
+    the client may still hold a key bound to old_email. This updates the
+    registry in place so that same key hash resolves to new_email.
+
+    Returns True if at least one key was rebound.
+    """
+    old = old_email.lower().strip()
+    new = new_email.lower().strip()
+    if old == new:
+        return False
+
+    rebound = False
+    with _lock:
+        registry = _load_registry()
+        # Remove any key already bound to new_email (avoid duplicates)
+        registry = {h: e for h, e in registry.items() if _reg_email(e) != new}
+        # Rebind old_email keys -> new_email
+        for key_hash, entry in registry.items():
+            if _reg_email(entry) == old:
+                if isinstance(entry, dict):
+                    entry["email"] = new
+                else:
+                    registry[key_hash] = new
+                rebound = True
+        if rebound:
+            _save_registry(registry)
+
+    if rebound:
+        logger.info(f"🔑 Rebound API key(s) from {old} to {new}")
+    return rebound
 
 
 # ---------------------------------------------------------------------------

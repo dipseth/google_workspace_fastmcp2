@@ -230,11 +230,10 @@ def prepare_children_for_container(
 # ICON BUILDING
 # =============================================================================
 
-import logging
-
 from adapters.module_wrapper.strict import warn_strict
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def build_material_icon(
@@ -511,6 +510,67 @@ def build_onclick_via_wrapper(wrapper, params: JsonDict) -> Optional[JsonDict]:
     return None
 
 
+# Registry of components needing specialized builders (enums, nested objects).
+# All others fall back to generic wrapper rendering.
+_SPECIALIZED_BUILDERS = {
+    "Button": build_button_via_wrapper,
+    "Icon": build_icon_via_wrapper,
+    "SwitchControl": build_switch_via_wrapper,
+    "OnClick": build_onclick_via_wrapper,
+}
+
+
+def build_child_widget(
+    wrapper,
+    child_name: str,
+    params: JsonDict,
+    build_component_fn=None,
+) -> Optional[JsonDict]:
+    """
+    Build a child widget using mapping-driven dispatch.
+
+    Checks the specialized builder registry first (for components with
+    enum fields, nested objects, etc.), then falls back to the provided
+    build_component_fn or wrapper.create_card_component().
+
+    Args:
+        wrapper: ModuleWrapper instance
+        child_name: Component name (e.g., "Button", "Icon", "DecoratedText")
+        params: Resolved params for this component
+        build_component_fn: Fallback builder function(component_name, params, wrapper=wrapper).
+            If None, uses wrapper.create_card_component() directly.
+
+    Returns:
+        Widget dict in Google Chat camelCase format, or None if build fails
+    """
+    if not wrapper:
+        logger.warning(f"No wrapper available for building {child_name}")
+        return None
+
+    try:
+        builder_fn = _SPECIALIZED_BUILDERS.get(child_name)
+        if builder_fn:
+            return builder_fn(wrapper, params)
+
+        # Fallback to provided build function or generic wrapper instantiation
+        if build_component_fn:
+            return build_component_fn(child_name, params, wrapper=wrapper)
+
+        # Direct wrapper instantiation as last resort
+        json_key = get_json_key(child_name)
+        comp_class = wrapper.get_cached_class(child_name)
+        if comp_class:
+            instance = wrapper.create_card_component(comp_class, params)
+            if instance:
+                rendered = instance.render() if hasattr(instance, "render") else {}
+                return {json_key: convert_to_camel_case(rendered)}
+
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to build {child_name} via wrapper: {e}")
+        return None
+
+
 __all__ = [
     # Key conversion utilities
     "get_json_key",
@@ -529,4 +589,6 @@ __all__ = [
     "build_icon_via_wrapper",
     "build_switch_via_wrapper",
     "build_onclick_via_wrapper",
+    # Generic child builder
+    "build_child_widget",
 ]

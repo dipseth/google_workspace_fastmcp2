@@ -29,11 +29,12 @@ Usage:
 """
 
 import functools
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Type
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 @dataclass(frozen=True)

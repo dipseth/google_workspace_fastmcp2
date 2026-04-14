@@ -2,7 +2,6 @@
 TODO:
 Make sure pipeline can support a paramter for warming up in intitiating.  this involves gnerating a bunch of random valid copmoment combinations use those (if approved by an outside process) to populate with additional instance_pattern points
 
-
 Ingestion Pipeline Mixin
 
 Provides the ingestion pipeline for creating/updating Qdrant collections
@@ -15,13 +14,15 @@ the ModuleWrapper class so the pipeline can be run programmatically.
 import dataclasses
 import hashlib
 import inspect
-import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 from adapters.module_wrapper.types import (
     COLBERT_DIM as _COLBERT_DIM,
+)
+from adapters.module_wrapper.types import (
+    CONTENT_DIM as _CONTENT_DIM,
 )
 from adapters.module_wrapper.types import (
     RELATIONSHIPS_DIM as _RELATIONSHIPS_DIM,
@@ -34,9 +35,9 @@ from adapters.module_wrapper.types import (
     Payload,
     RelationshipList,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # CONSTANTS
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Re-export constants for backwards compatibility
 COLBERT_DIM = _COLBERT_DIM  # ColBERT multi-vector
 RELATIONSHIPS_DIM = _RELATIONSHIPS_DIM  # MiniLM dense vector
-
+CONTENT_DIM = _CONTENT_DIM  # MiniLM dense vector (content)
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -207,6 +208,98 @@ def format_instance_params(params: dict) -> str:
         parts.append("layout=grid")
 
     return ", ".join(parts) if parts else "basic card"
+
+
+def extract_content_text_from_params(params: dict, card_description: str = "") -> str:
+    """Extract user content text from instance_params for content embedding.
+
+    Concatenates button texts, item labels, titles, etc.
+    NOT the description or DSL structure.
+
+    Explicitly excludes: dsl, component_count, style_metadata,
+    jinja_applied, description, description_rendered.
+
+    DSL symbols never enter this path because content values
+    in supply_map/instance_params are clean user text
+    post-resolve_symbol_params().
+
+    Args:
+        params: Instance params dict (title, buttons, items, etc.)
+        card_description: Excluded (already in inputs vector)
+
+    Returns:
+        Concatenated content text, or empty string.
+    """
+    if not params:
+        return ""
+
+    texts = []
+
+    # Extract title (if not just a repeat of description)
+    title = params.get("title")
+    if title and isinstance(title, str) and title != card_description:
+        texts.append(title)
+
+    # Extract subtitle
+    subtitle = params.get("subtitle")
+    if subtitle and isinstance(subtitle, str):
+        texts.append(subtitle)
+
+    # Extract button texts
+    buttons = params.get("buttons", [])
+    if isinstance(buttons, list):
+        for btn in buttons[:10]:
+            if isinstance(btn, dict):
+                for key in ("text", "label"):
+                    val = btn.get(key)
+                    if val and isinstance(val, str):
+                        texts.append(val)
+            elif isinstance(btn, str):
+                texts.append(btn)
+
+    # Extract item texts
+    items = params.get("items", [])
+    if isinstance(items, list):
+        for item in items[:10]:
+            if isinstance(item, dict):
+                for key in (
+                    "text",
+                    "title",
+                    "label",
+                    "subtitle",
+                    "top_label",
+                    "bottom_label",
+                ):
+                    val = item.get(key)
+                    if val and isinstance(val, str):
+                        texts.append(val)
+            elif isinstance(item, str):
+                texts.append(item)
+
+    # Extract content_texts (DecoratedText items)
+    content_texts = params.get("content_texts", [])
+    if isinstance(content_texts, list):
+        for ct in content_texts[:10]:
+            if isinstance(ct, dict):
+                for key in ("text", "top_label", "bottom_label"):
+                    val = ct.get(key)
+                    if val and isinstance(val, str):
+                        texts.append(val)
+            elif isinstance(ct, str):
+                texts.append(ct)
+
+    # Extract chip texts
+    chips = params.get("chips", [])
+    if isinstance(chips, list):
+        for chip in chips[:10]:
+            if isinstance(chip, dict):
+                val = chip.get("text") or chip.get("label")
+                if val and isinstance(val, str):
+                    texts.append(val)
+            elif isinstance(chip, str):
+                texts.append(chip)
+
+    return " ".join(texts)
 
 
 # =============================================================================
@@ -397,9 +490,9 @@ class PipelineMixin:
             else:
                 return True
 
-        logger.info(f"Creating {target_name} with three named vectors...")
+        logger.info(f"Creating {target_name} with four named vectors...")
 
-        # Create collection with all three vectors
+        # Create collection with all four vectors
         self.client.create_collection(
             collection_name=target_name,
             vectors_config={
@@ -424,6 +517,11 @@ class PipelineMixin:
                     distance=Distance.COSINE,
                     hnsw_config=HnswConfigDiff(m=32, ef_construct=200),
                 ),
+                "content": VectorParams(
+                    size=CONTENT_DIM,
+                    distance=Distance.COSINE,
+                    hnsw_config=HnswConfigDiff(m=32, ef_construct=200),
+                ),
             },
         )
 
@@ -436,6 +534,7 @@ class PipelineMixin:
             "full_path",
             "symbol",
             "symbol_dsl",
+            "has_content_vector",
         ]:
             self.client.create_payload_index(
                 collection_name=target_name,
@@ -449,21 +548,21 @@ class PipelineMixin:
 
     def _ensure_pipeline_embedders(self):
         """Ensure ColBERT and relationships embedders are initialized."""
-        if self._colbert_embedder is None:
-            from fastembed import LateInteractionTextEmbedding
+        from config.embedding_service import get_embedding_service
 
-            logger.info("Initializing ColBERT embedder for pipeline...")
-            self._colbert_embedder = LateInteractionTextEmbedding(
-                "colbert-ir/colbertv2.0"
+        service = get_embedding_service()
+
+        if self._colbert_embedder is None:
+            logger.info(
+                "Getting ColBERT embedder from EmbeddingService for pipeline..."
             )
+            self._colbert_embedder = service.get_model_sync("colbert")
 
         if self._relationships_embedder is None:
-            from fastembed import TextEmbedding
-
-            logger.info("Initializing MiniLM embedder for relationships...")
-            self._relationships_embedder = TextEmbedding(
-                "sentence-transformers/all-MiniLM-L6-v2"
+            logger.info(
+                "Getting MiniLM embedder from EmbeddingService for relationships..."
             )
+            self._relationships_embedder = service.get_model_sync("minilm")
 
     def run_ingestion_pipeline(
         self,
@@ -477,7 +576,7 @@ class PipelineMixin:
         Run the full ingestion pipeline.
 
         This is the main entry point for indexing a module into named-vectors format
-        with three vectors: components, inputs, and relationships.
+        with four vectors: components, inputs, relationships, and content.
 
         Args:
             collection_name: Target collection name
@@ -578,6 +677,20 @@ class PipelineMixin:
                     rel_emb.tolist() if hasattr(rel_emb, "tolist") else list(rel_emb)
                 )
 
+                # Content embedding (MiniLM 384D) — for class points, usually empty/zero
+                content_raw = provider.content_text(component.name, metadata)
+                if content_raw:
+                    content_emb = list(
+                        self._relationships_embedder.embed([content_raw])
+                    )[0]
+                    content_vec = (
+                        content_emb.tolist()
+                        if hasattr(content_emb, "tolist")
+                        else list(content_emb)
+                    )
+                else:
+                    content_vec = [0.0] * CONTENT_DIM
+
                 # Generate deterministic ID
                 id_string = f"{target_name}:{path}"
                 hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
@@ -602,12 +715,19 @@ class PipelineMixin:
                         "compact_text": relationship_text,
                     }
 
+                payload["has_content_vector"] = bool(content_raw)
+                payload["content_embedding_meta"] = {
+                    "model": "minilm_384",
+                    "encrypted": False,
+                }
+
                 point = PointStruct(
                     id=point_id,
                     vector={
                         "components": comp_vec,
                         "inputs": inputs_vec,
                         "relationships": rel_vec,
+                        "content": content_vec,
                     },
                     payload=payload,
                 )
@@ -750,6 +870,22 @@ class PipelineMixin:
                         else list(rel_emb)
                     )
 
+                    # Content embedding (MiniLM 384D) — extract actual user content
+                    content_raw = extract_content_text_from_params(
+                        instance_params, card_desc
+                    )
+                    if content_raw:
+                        content_emb = list(
+                            self._relationships_embedder.embed([content_raw])
+                        )[0]
+                        content_vec = (
+                            content_emb.tolist()
+                            if hasattr(content_emb, "tolist")
+                            else list(content_emb)
+                        )
+                    else:
+                        content_vec = [0.0] * CONTENT_DIM
+
                     # Generate deterministic ID
                     id_string = f"{target_collection}:instance_pattern:{p.id}"
                     hash_hex = hashlib.sha256(id_string.encode()).hexdigest()
@@ -758,6 +894,11 @@ class PipelineMixin:
                     payload["indexed_at"] = datetime.now(UTC).isoformat()
                     payload["inputs_text"] = inputs_text
                     payload["relationship_text"] = relationship_text
+                    payload["has_content_vector"] = bool(content_raw)
+                    payload["content_embedding_meta"] = {
+                        "model": "minilm_384",
+                        "encrypted": False,
+                    }
 
                     point = PointStruct(
                         id=point_id,
@@ -765,6 +906,7 @@ class PipelineMixin:
                             "components": comp_vec,
                             "inputs": inputs_vec,
                             "relationships": rel_vec,
+                            "content": content_vec,
                         },
                         payload=payload,
                     )

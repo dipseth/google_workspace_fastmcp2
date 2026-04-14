@@ -5,7 +5,6 @@ Provides symbol generation, DSL parsing, backfill, and embedding text
 generation for the ModuleWrapper system.
 """
 
-import logging
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -19,9 +18,9 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # SYMBOLS MIXIN
@@ -78,6 +77,12 @@ class SymbolsMixin:
         """
         Generate human-readable symbol table for LLM instructions.
 
+        Uses the existing ``symbol_mapping`` (which may have been filtered by
+        a domain setup hook) so that the generated text is consistent with the
+        runtime symbols used by DSL parsing, tool descriptions, and Qdrant
+        payloads.  Falls back to regenerating from all components only when no
+        mapping has been computed yet.
+
         Args:
             module_prefix: Optional module identifier
             custom_overrides: Optional symbol overrides
@@ -89,6 +94,25 @@ class SymbolsMixin:
 
         prefix = module_prefix or self.module_name
 
+        # If we already have a symbol mapping (possibly filtered by domain
+        # setup), build the table directly from it so the skill docs match
+        # the runtime symbols exactly.
+        existing = getattr(self, "_symbol_mapping", None)
+        if existing and not custom_overrides:
+            # No module_prefix: the existing mapping contains bare symbols
+            # (e.g. "ε", not "g:ε") matching what DSL parsing and tool
+            # descriptions use at runtime.
+            generator = SymbolGenerator(
+                module_prefix=None,
+                custom_symbols=existing,
+            )
+            # generate_symbols will return the pre-registered custom_symbols
+            # without reassigning, since generate_symbol() checks
+            # custom_symbols first.
+            generator.generate_symbols(list(existing.keys()))
+            return generator.get_symbol_table_text()
+
+        # Fallback: generate from all components (first-time / no filtering)
         component_names = [
             comp.name
             for comp in self.components.values()

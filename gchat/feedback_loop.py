@@ -371,31 +371,37 @@ class FeedbackLoop:
         return self._client
 
     def _get_embedder(self):
-        """Get ColBERT embedder singleton."""
+        """Get ColBERT embedder via centralized EmbeddingService (shared singleton)."""
         if self._embedder is None:
             try:
-                from fastembed import LateInteractionTextEmbedding
+                from config.embedding_service import get_embedding_service
 
-                self._embedder = LateInteractionTextEmbedding(
-                    model_name="colbert-ir/colbertv2.0"
+                self._embedder = get_embedding_service().get_model_sync("colbert")
+                logger.info(
+                    "ColBERT embedder acquired from EmbeddingService for feedback loop"
                 )
-                logger.info("✅ ColBERT embedder loaded for feedback loop")
             except Exception as e:
-                logger.warning(f"Failed to load ColBERT embedder: {e}")
+                logger.warning(
+                    f"Failed to get ColBERT embedder from EmbeddingService: {e}"
+                )
         return self._embedder
 
     def _get_relationship_embedder(self):
-        """Get MiniLM embedder singleton for relationship vectors."""
+        """Get MiniLM embedder via centralized EmbeddingService (shared singleton)."""
         if self._relationship_embedder is None:
             try:
-                from fastembed import TextEmbedding
+                from config.embedding_service import get_embedding_service
 
-                self._relationship_embedder = TextEmbedding(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                self._relationship_embedder = get_embedding_service().get_model_sync(
+                    "minilm"
                 )
-                logger.info("✅ MiniLM embedder loaded for relationships")
+                logger.info(
+                    "MiniLM embedder acquired from EmbeddingService for relationships"
+                )
             except Exception as e:
-                logger.warning(f"Failed to load MiniLM embedder: {e}")
+                logger.warning(
+                    f"Failed to get MiniLM embedder from EmbeddingService: {e}"
+                )
         return self._relationship_embedder
 
     def _embed_description(
@@ -998,10 +1004,18 @@ class FeedbackLoop:
             if isinstance(vectors_config, dict):
                 has_inputs = "inputs" in vectors_config
                 has_relationships = "relationships" in vectors_config
+                has_content = "content" in vectors_config
 
-                if has_inputs and has_relationships:
-                    logger.debug(
-                        "✅ inputs and relationships vectors exist in collection"
+                if has_inputs and has_relationships and has_content:
+                    logger.debug("✅ inputs, relationships, and content vectors exist")
+                    self._ensure_payload_indexes(client)
+                    self._description_vector_ready = True
+                    return True
+                elif has_inputs and has_relationships:
+                    # 3-vector schema (pre-content migration) — still usable
+                    logger.warning(
+                        "⚠️ content vector not found, "
+                        "content-driven retrieval disabled until re-index"
                     )
                     self._ensure_payload_indexes(client)
                     self._description_vector_ready = True
@@ -1045,6 +1059,7 @@ class FeedbackLoop:
         generate_variations: bool = False,  # Generate and cache variations
         num_structure_variations: int = 3,  # Number of structural variations
         num_param_variations: int = 2,  # Parameter variations per structure
+        content_text: Optional[str] = None,  # Actual user content for content vector
     ) -> Optional[str]:
         """
         Store a card usage pattern as an instance_pattern point.
@@ -1099,6 +1114,23 @@ class FeedbackLoop:
             component_paths, structure_description or ""
         )
 
+        # CONTENT VECTOR: Actual user content (MiniLM 384D)
+        from adapters.module_wrapper.types import CONTENT_DIM
+
+        if content_text:
+            content_embedder = self._get_relationship_embedder()
+            if content_embedder:
+                content_emb = list(content_embedder.embed([content_text]))[0]
+                content_vector = (
+                    content_emb.tolist()
+                    if hasattr(content_emb, "tolist")
+                    else list(content_emb)
+                )
+            else:
+                content_vector = [0.0] * CONTENT_DIM
+        else:
+            content_vector = [0.0] * CONTENT_DIM
+
         # Generate point ID
         point_id = str(uuid.uuid4())
 
@@ -1110,13 +1142,14 @@ class FeedbackLoop:
         try:
             from qdrant_client.models import PointStruct
 
-            # Create the point with all three named vectors
+            # Create the point with all four named vectors
             point = PointStruct(
                 id=point_id,
                 vector={
                     "components": component_vectors,
                     "inputs": inputs_vectors,
                     "relationships": relationship_vector,
+                    "content": content_vector,
                 },
                 payload={
                     "name": f"instance_pattern_{point_id[:8]}",
@@ -1134,6 +1167,12 @@ class FeedbackLoop:
                     "form_feedback": form_feedback,  # Affects relationships searches
                     # Legacy field for backwards compatibility
                     "feedback": feedback or content_feedback,
+                    # Content vector metadata
+                    "has_content_vector": bool(content_text),
+                    "content_embedding_meta": {
+                        "model": "minilm_384",
+                        "encrypted": False,
+                    },
                     "user_email": user_email,
                     "card_id": card_id,
                     "structure_description": structure_description,
@@ -2188,15 +2227,17 @@ class FeedbackLoop:
             return None
 
         try:
-            # Use wrapper's search_hybrid with positive feedback filters
-            class_results, content_patterns, form_patterns = wrapper.search_hybrid(
-                description=description,
-                component_paths=component_paths,
-                limit=limit,
-                token_ratio=token_ratio,
-                content_feedback="positive",  # Only get positive content patterns
-                form_feedback="positive",  # Only get positive form patterns
-                include_classes=True,
+            # Use wrapper's search_hybrid_dispatch (respects ENABLE_MULTIDIM_SEARCH)
+            class_results, content_patterns, form_patterns = (
+                wrapper.search_hybrid_dispatch(
+                    description=description,
+                    component_paths=component_paths,
+                    limit=limit,
+                    token_ratio=token_ratio,
+                    content_feedback="positive",  # Only get positive content patterns
+                    form_feedback="positive",  # Only get positive form patterns
+                    include_classes=True,
+                )
             )
 
             logger.info(

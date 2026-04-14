@@ -533,9 +533,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
         session_id = await get_session_context()
 
         # DIAGNOSTIC: Log context state for debugging OAuth vs start_google_auth disconnect
-        logger.info("🔍 DEBUG: get_current_user_profile called")
-        logger.info(f"   user_email_context: {user_email}")
-        logger.info(f"   session_context: {session_id}")
+        logger.info("🔍 get_current_user_profile called")
 
         if not user_email:
             response = UserProfileResponse(
@@ -966,7 +964,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             return status_info
 
         except Exception as e:
-            logger.error(f"Error checking credentials for {email}: {e}")
+            logger.error(f"Error checking credentials: {e}")
             return CredentialStatusResponse(
                 email=email,
                 status="error",
@@ -1221,7 +1219,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             await ctx.debug(f"FastMCP server type: {type(fastmcp_server)}")
             await ctx.debug(f"FastMCP server attributes: {dir(fastmcp_server)}")
 
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = fastmcp_server.local_provider._components
             registered_tools = {
@@ -1559,7 +1557,7 @@ def setup_user_resources(mcp: FastMCP) -> None:
             # Access the FastMCP server instance through context
             fastmcp_server = ctx.fastmcp
 
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = fastmcp_server.local_provider._components
             registered_tools = {

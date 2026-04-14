@@ -10,12 +10,12 @@ Example:
     {"items": [{"top_label": "Service", "text": "Drive"}, {"top_label": "Service", "text": "Gmail"}]}
 """
 
-import logging
 from typing import Any, Dict, Optional
 
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.metadata import get_context_resource
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Bridge between builder context keys and the flat card_params keys.
 # Only entries where context_key != param_key need to be listed.

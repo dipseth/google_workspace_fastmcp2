@@ -24,7 +24,6 @@ Usage:
     text = validator.get_enriched_relationship_text("Section")
 """
 
-import logging
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
@@ -39,11 +38,12 @@ from adapters.module_wrapper.types import (
     SymbolMapping,
     Validatable,
 )
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 @dataclass
@@ -155,24 +155,12 @@ class StructureValidator:
     def symbols(self) -> SymbolMapping:
         """Get symbol mappings (cached).
 
-        Uses shared symbols from structure_dsl for consistency with the DSL parser.
-        Falls back to ModuleWrapper-generated symbols if structure_dsl not available.
+        Uses wrapper.symbol_mapping as the single source of truth.
         """
         if self._symbols is None:
-            try:
-                # Use shared symbols from structure_dsl for consistency
-                from gchat.structure_dsl import COMPONENT_TO_SYMBOL, ensure_initialized
-
-                ensure_initialized()
-                if COMPONENT_TO_SYMBOL:
-                    self._symbols = COMPONENT_TO_SYMBOL.copy()
-                else:
-                    # Fallback to ModuleWrapper-generated symbols
-                    self._symbols = self.wrapper.generate_component_symbols(
-                        use_prefix=False
-                    )
-            except ImportError:
-                # structure_dsl not available, use ModuleWrapper symbols
+            if hasattr(self.wrapper, "symbol_mapping") and self.wrapper.symbol_mapping:
+                self._symbols = dict(self.wrapper.symbol_mapping)
+            else:
                 self._symbols = self.wrapper.generate_component_symbols(
                     use_prefix=False
                 )

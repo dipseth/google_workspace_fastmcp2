@@ -105,7 +105,7 @@ async def _get_people_service(user_email: UserGoogleEmail):
     try:
         return await asyncio.to_thread(build, "people", "v1", credentials=credentials)
     except Exception as exc:
-        logger.error(f"Failed to build People API service for user {user_email}: {exc}")
+        logger.error(f"Failed to build People API service: {exc}")
         return None
 
 
@@ -217,7 +217,7 @@ async def _search_contacts_for_email(people_service, email: str) -> List[str]:
                     resource_names.append(resource_name)
                     break
     except Exception as exc:
-        logger.error(f"Error searching contacts for email '{email}': {exc}")
+        logger.error(f"Error searching contacts: {exc}")
 
     return resource_names
 
@@ -250,7 +250,7 @@ async def _create_contact_for_email(people_service, email: str) -> Optional[str]
             )
         return resource_name
     except Exception as exc:
-        logger.error(f"Error creating contact for email '{email}': {exc}")
+        logger.error(f"Error creating contact: {exc}")
         return None
 
 
@@ -365,7 +365,7 @@ async def manage_people_contact_labels(
                     else:
                         failed_emails.append(addr)
             except Exception as exc:
-                logger.error(f"Error processing email '{addr}' for label_add: {exc}")
+                logger.error(f"Error processing contact for label_add: {exc}")
                 failed_emails.append(addr)
 
         resource_names_to_add = list(seen_resource_names)
@@ -443,7 +443,7 @@ async def manage_people_contact_labels(
             else:
                 no_match_emails.append(addr)
         except Exception as exc:
-            logger.error(f"Error processing email '{addr}' for label_remove: {exc}")
+            logger.error(f"Error processing contact for label_remove: {exc}")
             failed_emails.append(addr)
 
     resource_names_to_remove = list(resource_names_to_remove_set)

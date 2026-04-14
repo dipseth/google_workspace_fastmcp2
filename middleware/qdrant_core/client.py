@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 from config.enhanced_logging import setup_logger
 
 from .config import CollectionSchema, QdrantConfig
-from .lazy_imports import get_fastembed, get_qdrant_imports
+from .lazy_imports import get_qdrant_imports
 
 logger = setup_logger()
 
@@ -279,34 +279,15 @@ class QdrantClientManager:
         """Load the FastEmbed embedding model if not already loaded."""
         if self.embedder is None:
             try:
+                from config.embedding_service import get_embedding_service
+
+                service = get_embedding_service()
+                self.embedder = await service.get_model("minilm")
+                self.embedding_dim = service.get_dimension("minilm")
+
                 logger.info(
-                    f"🤖 Loading FastEmbed model: {self.config.embedding_model}"
+                    f"✅ FastEmbed model loaded via EmbeddingService (dim: {self.embedding_dim})"
                 )
-
-                def load_model():
-                    TextEmbedding = get_fastembed()
-                    return TextEmbedding(model_name=self.config.embedding_model)
-
-                self.embedder = await asyncio.to_thread(load_model)
-
-                # Get embedding dimension by generating a test embedding
-                try:
-                    test_embedding_list = list(self.embedder.embed(["test"]))
-                    test_embedding = (
-                        test_embedding_list[0] if test_embedding_list else None
-                    )
-                    self.embedding_dim = len(test_embedding) if test_embedding else 384
-                except Exception:
-                    # Fallback to known dimensions for common models
-                    model_dims = {
-                        "sentence-transformers/all-MiniLM-L6-v2": 384,
-                        "sentence-transformers/all-mpnet-base-v2": 768,
-                    }
-                    self.embedding_dim = model_dims.get(
-                        self.config.embedding_model, 384
-                    )
-
-                logger.info(f"✅ FastEmbed model loaded (dim: {self.embedding_dim})")
 
             except Exception as e:
                 logger.error(f"❌ Failed to load FastEmbed model: {e}")
@@ -328,6 +309,7 @@ class QdrantClientManager:
         "tool",
         "email",
         "type",
+        "sampling_detected",
     ]
 
     async def _ensure_collection(self):
@@ -355,6 +337,8 @@ class QdrantClientManager:
                 await self._create_indexes_parallel(
                     self._FILTERABLE_FIELDS, qdrant_models, log_prefix="Created"
                 )
+                # Create float index for cost aggregation queries
+                await self._ensure_cost_indexes(qdrant_models)
             else:
                 logger.info(
                     f"✅ Using existing collection: {self.config.collection_name}"
@@ -468,8 +452,34 @@ class QdrantClientManager:
                 await self._create_indexes_parallel(
                     missing_fields, qdrant_models, log_prefix="Created missing"
                 )
+
+            # Ensure cost tracking float indexes exist
+            await self._ensure_cost_indexes(qdrant_models)
         except Exception as e:
             logger.warning(f"⚠️ Could not check existing indexes: {e}")
+
+    async def _ensure_cost_indexes(self, qdrant_models: dict):
+        """Create float/integer payload indexes for cost tracking queries."""
+        try:
+            float_indexes = {
+                "cost_sampling_estimated": qdrant_models["PayloadSchemaType"].FLOAT,
+            }
+            integer_indexes = {
+                "sampling_calls": qdrant_models["PayloadSchemaType"].INTEGER,
+            }
+            for field_name, schema_type in {**float_indexes, **integer_indexes}.items():
+                try:
+                    await asyncio.to_thread(
+                        self.client.create_payload_index,
+                        collection_name=self.config.collection_name,
+                        field_name=field_name,
+                        field_schema=schema_type,
+                    )
+                    logger.debug(f"Created cost index: {field_name}")
+                except Exception:
+                    pass  # Index may already exist
+        except Exception as e:
+            logger.debug(f"Cost index creation skipped: {e}")
 
     async def _create_indexes_parallel(
         self,

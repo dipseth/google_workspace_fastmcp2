@@ -17,10 +17,10 @@ cache via :func:`get_cached_result`.
 import json
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import TextContent
 
 from config.enhanced_logging import setup_logger
@@ -30,6 +30,8 @@ logger = setup_logger()
 # ---------------------------------------------------------------------------
 # Module-level cache — shared between middleware and resource handler
 # ---------------------------------------------------------------------------
+
+_DASHBOARD_CACHE_TTL = 600  # 10 minutes TTL for Redis entries
 
 
 @dataclass
@@ -41,11 +43,24 @@ class _CacheEntry:
     timestamp: float
 
 
-# tool_name -> _CacheEntry
+# tool_name -> _CacheEntry (in-memory fallback, also used as L1 when Redis available)
 _result_cache: Dict[str, _CacheEntry] = {}
+
+# Optional Redis store — set from server.py when Redis is configured
+_redis_store: Any = None
 
 # Set of tool names we should intercept (populated from _DASHBOARD_CONFIGS keys)
 _watched_tools: Set[str] = set()
+
+# Tracks the most recently called dashboard tool (used by _latest resource)
+_last_dashboard_tool: Optional[str] = None
+
+
+def set_redis_store(store: Any) -> None:
+    """Set the Redis store for dashboard cache offloading."""
+    global _redis_store
+    _redis_store = store
+    logger.info("Dashboard cache: Redis store configured for offloading")
 
 
 def register_watched_tools(tool_names: set) -> None:
@@ -54,15 +69,49 @@ def register_watched_tools(tool_names: set) -> None:
 
 
 def get_cached_result(tool_name: str) -> Optional[dict]:
-    """Return the last cached result for *tool_name*, or ``None``."""
+    """Return the last cached result for *tool_name*, or ``None``.
+
+    Checks in-memory cache first; Redis is populated asynchronously
+    by the middleware's ``on_call_tool``.
+    """
     entry = _result_cache.get(tool_name)
     return entry.data if entry else None
+
+
+def set_last_dashboard_tool(tool_name: str) -> None:
+    """Record the most recently called dashboard tool."""
+    global _last_dashboard_tool
+    _last_dashboard_tool = tool_name
+
+
+def get_last_dashboard_tool() -> Optional[str]:
+    """Return the most recently called dashboard tool name, or ``None``."""
+    return _last_dashboard_tool
+
+
+def clear_last_dashboard_tool() -> None:
+    """Reset the last-dashboard-tool tracker.
+
+    Called before each ``execute`` invocation so that stale values from
+    a *previous* execute do not leak into the current one.
+    """
+    global _last_dashboard_tool
+    _last_dashboard_tool = None
 
 
 def get_cache_age(tool_name: str) -> Optional[float]:
     """Seconds since the result was cached, or ``None`` if not cached."""
     entry = _result_cache.get(tool_name)
     return (time.time() - entry.timestamp) if entry else None
+
+
+def clear_dashboard_cache() -> int:
+    """Clear the in-memory dashboard cache. Returns number of entries cleared."""
+    count = len(_result_cache)
+    _result_cache.clear()
+    if count:
+        logger.info(f"Dashboard cache: cleared {count} in-memory entries")
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +146,21 @@ class DashboardCacheMiddleware(Middleware):
                     data=data,
                     timestamp=time.time(),
                 )
+                set_last_dashboard_tool(tool_name)
+                # Offload to Redis with TTL when available
+                if _redis_store is not None:
+                    try:
+                        import asyncio
+
+                        asyncio.ensure_future(self._store_to_redis(tool_name, data))
+                    except Exception:
+                        pass  # Best-effort Redis write
+
+                # Embed a Prefab dashboard directly into the ToolResult's
+                # structured_content so VS Code renders it inline — no
+                # separate resource fetch (which races the tool execution).
+                self._inject_prefab_dashboard(response, tool_name, data)
+
                 logger.info(
                     f"📊 Dashboard cache updated for {tool_name} "
                     f"({len(str(data))} chars)"
@@ -116,6 +180,44 @@ class DashboardCacheMiddleware(Middleware):
         return response
 
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _store_to_redis(tool_name: str, data: dict) -> None:
+        """Best-effort write to Redis with TTL."""
+        try:
+            await _redis_store.put(
+                f"dashboard:{tool_name}",
+                {"data": data},
+                ttl=_DASHBOARD_CACHE_TTL,
+            )
+        except Exception as exc:
+            logger.debug(f"Dashboard cache Redis write failed for {tool_name}: {exc}")
+
+    @staticmethod
+    def _inject_prefab_dashboard(
+        response: ToolResult, tool_name: str, data: dict
+    ) -> None:
+        """Best-effort: build a Prefab DataTable and set it as structured_content.
+
+        This embeds the dashboard directly in the ToolResult so VS Code
+        renders it inline alongside the text content.  The text content
+        (JSON) is kept for the LLM; the structured_content is rendered
+        by VS Code's Prefab renderer.
+        """
+        try:
+            from tools.ui_apps import (
+                _build_prefab_data_dashboard,
+                get_data_dashboard_config,
+            )
+
+            config = get_data_dashboard_config(tool_name)
+            prefab = _build_prefab_data_dashboard(tool_name, data, config)
+            if prefab is not None:
+                response.structured_content = prefab.to_json()
+        except Exception as exc:
+            logger.debug(
+                f"📊 Prefab dashboard injection skipped for {tool_name}: {exc}"
+            )
 
     @staticmethod
     def _extract_data(response: ToolResult) -> Optional[dict]:

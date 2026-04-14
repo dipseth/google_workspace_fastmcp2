@@ -1,12 +1,17 @@
 """
 RIC Text Provider Protocol
 
-Defines the contract for generating the 3 RIC (Rich Information Content) text
-representations used by the embedding pipeline:
+Defines the contract for generating the 4 RIC (Rich Information
+Content) text representations used by the embedding pipeline:
 
-  1. component_text  -> "What IS this?"        -> components vector (ColBERT 128d)
-  2. inputs_text     -> "What does it accept?"  -> inputs vector    (ColBERT 128d)
-  3. relationships_text -> "How does it relate?" -> relationships vector (MiniLM 384d)
+  1. component_text     "What IS this?"
+     -> components vector (ColBERT 128d)
+  2. inputs_text        "What does it accept?"
+     -> inputs vector (ColBERT 128d)
+  3. relationships_text "How does it relate?"
+     -> relationships vector (MiniLM 384d)
+  4. content_text       "What user content does it carry?"
+     -> content vector (MiniLM 384d)
 
 Providers return RAW text. The pipeline applies symbol wrapping uniformly
 (ColBERT vectors get "{symbol} {text} {symbol}").
@@ -15,15 +20,16 @@ The default IntrospectionProvider wraps the existing helper functions in
 pipeline_mixin.py so existing embeddings are identical.
 """
 
-import logging
 from typing import Any, Dict, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 @runtime_checkable
 class RICTextProvider(Protocol):
-    """Generates the 3 RIC text representations for a component type.
+    """Generates the 4 RIC text representations for a component type.
 
     Providers return RAW text. The wrapper applies symbol wrapping
     uniformly (ColBERT vectors get "{symbol} {text} {symbol}").
@@ -44,6 +50,14 @@ class RICTextProvider(Protocol):
 
     def relationships_text(self, name: str, metadata: Dict[str, Any]) -> str:
         """Graph: 'How does it relate to others?' -> relationships vector (MiniLM 384d)"""
+        ...
+
+    def content_text(self, name: str, metadata: Dict[str, Any]) -> str:
+        """Content: 'What user content does it carry?' -> content vector (MiniLM 384d)
+
+        For class points: returns empty string (no real user content -> zero vector).
+        For instance_pattern points: returns concatenated actual content values.
+        """
         ...
 
 
@@ -115,6 +129,10 @@ class IntrospectionProvider:
 
         rels = metadata.get("relationships", [])
         return build_compact_relationship_text(name, rels, comp_type)
+
+    def content_text(self, name: str, metadata: Dict[str, Any]) -> str:
+        """Class points have no user content. Returns empty string -> zero vector."""
+        return ""
 
 
 __all__ = [

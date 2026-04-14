@@ -11,7 +11,6 @@ Provides ``scan_and_encrypt`` (Phase B outbound) and ``resolve_tokens``
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from config.enhanced_logging import setup_logger

@@ -5,13 +5,13 @@ Provides utilities for applying regex search and replace operations
 to document text content before updating via the Docs API.
 """
 
-import logging
 import re
 from typing import List, Tuple
 
+from config.enhanced_logging import setup_logger
 from docs.docs_types import RegexReplace
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def apply_regex_replacements(
@@ -81,7 +81,9 @@ def apply_regex_replacements(
     return modified_content, total_replacements
 
 
-def validate_regex_operations(operations: List[RegexReplace]) -> Tuple[bool, str]:
+def validate_regex_operations(
+    operations: List[RegexReplace],
+) -> Tuple[bool, str]:
     """
     Validate regex operations before applying them.
 

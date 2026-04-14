@@ -34,6 +34,7 @@ Usage:
     )
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -46,7 +47,7 @@ from fastmcp.tools import Tool
 from fastmcp.tools.tool_transform import forward
 from mcp.types import SamplingMessage as MCPSamplingMessage
 from mcp.types import TextContent as MCPTextContent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # ============================================================================
 # DSL TOOL CONFIG — registration dataclass for domain-specific DSL tools
@@ -70,6 +71,41 @@ class DSLToolConfig:
     error_keywords: Optional[List[str]] = field(
         default=None
     )  # domain-specific error keywords
+
+
+# ============================================================================
+# VALIDATION AGENT CONFIG — registration for per-tool semantic validation
+# ============================================================================
+
+
+@dataclass
+class ValidationAgentConfig:
+    """Registration config for a validation agent — carries everything the
+    middleware needs to run a secondary LLM call for semantic validation."""
+
+    tool_name: str
+    target_arg_keys: list  # e.g. ["card_description", "card_params"]
+    get_system_prompt_fn: Callable[[dict], str]  # receives tool args → expert prompt
+    mode: str = (
+        "pre"  # "pre" (sync, applies corrections) or "parallel" (async, advisory)
+    )
+    enabled: bool = True
+    max_tokens: int = 800
+    temperature: float = 0.1
+    generate_variations: bool = False
+    syntax_bypass_confidence: float = 1.0  # skip if DSL syntax already valid
+    tools: Optional[list] = None  # Agent tools for tool-equipped sampling
+
+
+class ValidationResult(BaseModel):
+    """Structured output from a validation agent sampling call."""
+
+    is_valid: bool
+    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    validated_input: dict = Field(default_factory=dict)  # corrected tool arguments
+    issues: list = Field(default_factory=list)
+    suggestions: list = Field(default_factory=list)
+    variations: list = Field(default_factory=list)  # max 2 alternatives
 
 
 # Fallback for bare SamplingContext (no middleware) — generic preamble only
@@ -886,6 +922,7 @@ Provide personalized recommendations based on historical success patterns.""",
         model_preferences: Optional[Union[str, List[str], ModelPreferences]] = None,
         template: Optional[SamplingTemplate] = None,
         result_type: Optional[Any] = None,
+        tools: Optional[list] = None,
     ) -> Any:
         """
         Request text generation from the client's LLM.
@@ -898,6 +935,7 @@ Provide personalized recommendations based on historical success patterns.""",
             model_preferences: Model selection preferences
             template: Pre-defined template for common use cases
             result_type: Pydantic model type for structured output (sets .result on SamplingResult)
+            tools: Optional list of tool functions the agent can call during sampling
 
         Returns:
             SamplingResult — callers access .text for raw text or .result for structured output
@@ -944,17 +982,81 @@ Provide personalized recommendations based on historical success patterns.""",
                 )
             if result_type is not None:
                 sampling_params["result_type"] = result_type
+            if tools is not None:
+                sampling_params["tools"] = tools
 
             if self.enable_debug:
                 logger.debug(
                     f"🔧 Sampling parameters: {json.dumps({k: str(v)[:100] + '...' if len(str(v)) > 100 else str(v) for k, v in sampling_params.items()}, indent=2)}"
                 )
 
+            # Enrich Langfuse trace context with per-call details
+            try:
+                from middleware.langfuse_integration import set_sampling_trace_context
+
+                # Estimate input size from prepared messages
+                input_chars = 0
+                for m in sampling_params.get("messages", []):
+                    if hasattr(m, "content") and hasattr(m.content, "text"):
+                        input_chars += len(m.content.text or "")
+                set_sampling_trace_context(
+                    template=template.value if template else "",
+                    result_type=result_type.__name__
+                    if (result_type and hasattr(result_type, "__name__"))
+                    else (type(result_type).__name__ if result_type else ""),
+                    has_tools=bool(sampling_params.get("tools")),
+                    input_char_count=input_chars,
+                )
+            except Exception:
+                pass
+
+            # Start OTEL phase span for main sampling — but only if we're not
+            # already inside a phase span (e.g., validation or dsl_recovery).
+            # Otherwise the main_sampling span becomes a child of the phase
+            # instead of a sibling.
+            _sample_span = None
+            _sample_token = None
+            try:
+                from middleware.langfuse_integration import (
+                    get_sampling_trace_context as _get_ctx,
+                )
+                from middleware.langfuse_integration import (
+                    start_phase_span,
+                )
+
+                _phase = ""
+                _ctx = _get_ctx()
+                if _ctx:
+                    _phase = _ctx.phase
+                if not _phase:
+                    _sample_span, _sample_token = start_phase_span(
+                        "main_sampling", self.tool_name
+                    )
+            except Exception:
+                pass
+
             # Perform the sampling using FastMCP context
             if not hasattr(self.fastmcp_context, "sample"):
                 raise ToolError("Client does not support LLM sampling")
 
-            response = await self.fastmcp_context.sample(**sampling_params)
+            try:
+                response = await self.fastmcp_context.sample(**sampling_params)
+            except Exception as sample_exc:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_sample_span, _sample_token, error=sample_exc)
+                except Exception:
+                    pass
+                _sample_span = None
+                raise
+            finally:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_sample_span, _sample_token)
+                except Exception:
+                    pass
 
             if self.enable_debug:
                 logger.debug(f"✅ Sampling completed for tool: {self.tool_name}")
@@ -1063,6 +1165,7 @@ class EnhancedSamplingMiddleware(Middleware):
         self.default_enhancement_level = default_enhancement_level
         self.transformed_tools = set()  # Track which tools we've transformed
         self._dsl_configs: Dict[str, DSLToolConfig] = dict(dsl_tool_configs or {})
+        self._validation_configs: Dict[str, ValidationAgentConfig] = {}
 
         logger.info("🎯 Enhanced SamplingMiddleware initialized")
         logger.info(f"   Debug logging: {'enabled' if enable_debug else 'disabled'}")
@@ -1082,6 +1185,185 @@ class EnhancedSamplingMiddleware(Middleware):
         """Register a DSL tool config after initialization."""
         self._dsl_configs[tool_name] = config
         logger.info(f"   DSL tool registered: {tool_name} ({config.dsl_type_label})")
+
+    def register_validation_agent(
+        self, tool_name: str, config: "ValidationAgentConfig"
+    ):
+        """Register a validation agent config for a tool."""
+        self._validation_configs[tool_name] = config
+        logger.info(f"   Validation agent registered: {tool_name} (mode={config.mode})")
+
+    async def _run_validation_agent(
+        self,
+        context: "MiddlewareContext",
+        tool_name: str,
+        config: "ValidationAgentConfig",
+    ) -> Optional["ValidationResult"]:
+        """Run a validation agent via sampling for semantic input validation.
+
+        Extracts target arguments, builds the expert system prompt from the
+        config's callable, and calls SamplingContext.sample() with
+        result_type=ValidationResult. Returns None on any failure (advisory,
+        never blocks the tool).
+        """
+        # Global kill switch
+        try:
+            from config.settings import settings as _settings
+
+            if not getattr(_settings, "sampling_validation_enabled", True):
+                return None
+        except Exception:
+            pass
+
+        if not config.enabled:
+            return None
+
+        args = context.message.arguments or {}
+
+        # Extract only the target argument keys for the prompt
+        target_args = {k: args.get(k) for k in config.target_arg_keys if k in args}
+        if not target_args:
+            return None
+
+        # Start OTEL phase span for validation
+        _val_span = None
+        _val_token = None
+        try:
+            from middleware.langfuse_integration import start_phase_span
+
+            _val_span, _val_token = start_phase_span("validation", tool_name)
+        except Exception:
+            pass
+
+        try:
+            # Set Langfuse trace phase so the generation name becomes
+            # mcp::{tool_name}::validation (distinct from the tool's own sampling)
+            try:
+                from middleware.langfuse_integration import (
+                    get_sampling_trace_context,
+                    set_sampling_trace_context,
+                )
+
+                set_sampling_trace_context(phase="validation")
+            except Exception:
+                pass
+
+            # Build domain-expert system prompt
+            system_prompt = config.get_system_prompt_fn(target_args)
+
+            # Create a SamplingContext for this validation call
+            sctx = SamplingContext(
+                fastmcp_context=context.fastmcp_context,
+                tool_name=tool_name,
+                enable_debug=self.enable_debug,
+            )
+
+            # Build user message from the target arguments
+            user_message = (
+                f"Validate the following tool arguments for '{tool_name}':\n"
+                + json.dumps(target_args, indent=2, default=str)
+            )
+
+            try:
+                result = await sctx.sample(
+                    messages=user_message,
+                    system_prompt=system_prompt,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    result_type=ValidationResult,
+                )
+            except ToolError as te:
+                # FastMCP raises RuntimeError (wrapped as ToolError) when the LLM
+                # returns text instead of calling the final_response tool.
+                # Retry without result_type and parse JSON from the text response.
+                if "final_response" not in str(te):
+                    raise
+                logger.info(
+                    f"🔄 Structured output failed for {tool_name}, "
+                    "retrying without result_type"
+                )
+                result = await sctx.sample(
+                    messages=user_message,
+                    system_prompt=system_prompt,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                )
+
+            # Clear phase so subsequent sampling calls in the tool don't inherit it
+            try:
+                trace_ctx = get_sampling_trace_context()
+                if trace_ctx:
+                    trace_ctx.phase = ""
+            except Exception:
+                pass
+
+            # sample() returns a SamplingResult; .result holds the parsed Pydantic model
+            if hasattr(result, "result") and isinstance(
+                result.result, ValidationResult
+            ):
+                validation = result.result
+            elif isinstance(result, ValidationResult):
+                validation = result
+            else:
+                # Parse ValidationResult from text (handles plain JSON or
+                # markdown-fenced JSON from the fallback path)
+                text = getattr(result, "text", str(result))
+                json_text = text.strip()
+                if json_text.startswith("```"):
+                    lines = json_text.split("\n")
+                    lines = [ln for ln in lines if not ln.strip().startswith("```")]
+                    json_text = "\n".join(lines).strip()
+                validation = ValidationResult.model_validate_json(json_text)
+
+            if self.enable_debug:
+                logger.debug(
+                    f"Validation agent for {tool_name}: "
+                    f"valid={validation.is_valid}, confidence={validation.confidence}, "
+                    f"issues={validation.issues}"
+                )
+
+            return validation
+
+        except Exception as exc:
+            logger.warning(
+                f"Validation agent failed for {tool_name}: {exc}. "
+                "Passing original input through."
+            )
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_val_span, _val_token, error=exc)
+            except Exception:
+                pass
+            _val_span = None  # prevent double-end in finally
+            return None
+        finally:
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_val_span, _val_token)
+            except Exception:
+                pass
+
+    def _attach_validation_metadata(self, result, validation: "ValidationResult"):
+        """Append validation info to ToolResult.meta dict."""
+        from fastmcp.tools import ToolResult
+
+        if not isinstance(result, ToolResult):
+            return result
+
+        meta = dict(result.meta or {})
+        meta["validation"] = {
+            "is_valid": validation.is_valid,
+            "confidence": validation.confidence,
+            "issues": validation.issues,
+            "suggestions": validation.suggestions,
+        }
+        if validation.variations:
+            meta["validation"]["variations"] = validation.variations[:2]
+
+        # ToolResult is a Pydantic model — use model_copy to produce an updated instance
+        return result.model_copy(update={"meta": meta})
 
     def _build_dsl_recovery_system_prompt(self) -> str:
         """Build DSL error recovery system prompt from all registered DSLToolConfigs."""
@@ -1120,16 +1402,122 @@ class EnhancedSamplingMiddleware(Middleware):
         if self.enable_debug:
             logger.debug(f"🔧 Processing tool call for elicitation: {tool_name}")
 
+        # Reset Langfuse trace context — fresh trace ID + step=0 per tool execution
+        try:
+            from middleware.langfuse_integration import reset_sampling_trace_context
+
+            reset_sampling_trace_context(tool_name=tool_name)
+        except Exception:
+            pass
+
+        # Start OTEL parent span for this tool's sampling phases
+        _tool_span = None
+        _tool_span_token = None
+        _tool_output_summary = ""
+        try:
+            from middleware.langfuse_integration import start_tool_span
+
+            # Build input summary from tool arguments for Langfuse display.
+            # context.message is CallToolRequestParams with .name: str, .arguments: dict | None
+            _tool_input_summary = ""
+            try:
+                import json as _json
+
+                _tool_input_summary = _json.dumps(
+                    context.message.arguments or {}, default=str
+                )[:1000]
+            except Exception:
+                pass
+
+            # Extract user/session for Langfuse root span attributes
+            _tool_user_id = ""
+            _tool_session_id = ""
+            try:
+                from auth.context import (
+                    get_session_context_sync,
+                    get_user_email_context_sync,
+                )
+
+                _tool_user_id = get_user_email_context_sync() or ""
+                _tool_session_id = get_session_context_sync() or ""
+            except Exception:
+                pass
+
+            _tool_args = context.message.arguments or {}
+            _tool_span, _tool_span_token = start_tool_span(
+                tool_name,
+                input_summary=_tool_input_summary,
+                user_id=_tool_user_id,
+                session_id=_tool_session_id,
+                tags=["mcp", "sampling"],
+                tool_args=_tool_args,
+            )
+        except Exception:
+            pass
+
         # Check if we have FastMCP context
         if not context.fastmcp_context:
             if self.enable_debug:
                 logger.debug(f"⚠️ No FastMCP context available for tool: {tool_name}")
-            return await call_next(context)
+            try:
+                return await call_next(context)
+            finally:
+                try:
+                    from middleware.langfuse_integration import end_span
+
+                    end_span(_tool_span, _tool_span_token)
+                except Exception:
+                    pass
 
         try:
+            # ── Budget gate: skip all LLM-backed validation when budget exceeded ──
+            _budget_ok = True
+            try:
+                from middleware.payment.cost_tracker import is_budget_exceeded
+
+                if is_budget_exceeded():
+                    _budget_ok = False
+                    if self.enable_debug:
+                        logger.debug(
+                            "Sampling budget exceeded — skipping validation for %s",
+                            tool_name,
+                        )
+            except ImportError:
+                pass
+
             # Pre-call: DSL validation & recovery for registered DSL tools
-            if tool_name in self._dsl_configs:
+            if _budget_ok and tool_name in self._dsl_configs:
                 await self._pre_validate_dsl(context, tool_name)
+
+            # Semantic validation via sampling agent
+            validation_task = None
+            validation = None
+            if _budget_ok and tool_name in self._validation_configs:
+                v_config = self._validation_configs[tool_name]
+                if v_config.mode == "pre":
+                    # Synchronous — block, apply corrections
+                    validation = await self._run_validation_agent(
+                        context, tool_name, v_config
+                    )
+                    if (
+                        validation
+                        and not validation.is_valid
+                        and validation.validated_input
+                    ):
+                        # Reassign to avoid mutating the caller's dict in-place
+                        merged = dict(context.message.arguments)
+                        merged.update(validation.validated_input)
+                        context.message.arguments = merged
+                        if self.enable_debug:
+                            logger.debug(
+                                f"Validation agent applied corrections for {tool_name}: "
+                                f"{list(validation.validated_input.keys())}"
+                            )
+                elif v_config.mode == "parallel":
+                    # Asynchronous — fire task, await after tool execution
+                    validation_task = asyncio.create_task(
+                        self._run_validation_agent(context, tool_name, v_config)
+                    )
 
             # Get the tool object to check its tags
             tool = await context.fastmcp_context.fastmcp.get_tool(tool_name)
@@ -1152,12 +1540,47 @@ class EnhancedSamplingMiddleware(Middleware):
                         f"✅ Enhanced context stored for elicitation-enabled tool: {tool_name}"
                     )
 
-            # Execute tool and capture result
-            result = await call_next(context)
+            # Execute tool and capture result — with argument recovery on
+            # Pydantic ValidationError (e.g. wrong param names from the LLM)
+            try:
+                result = await call_next(context)
+            except (ValidationError, Exception) as call_exc:
+                if isinstance(call_exc, ValidationError):
+                    logger.info(
+                        "ValidationError for %s — attempting argument recovery: %s",
+                        tool_name,
+                        call_exc,
+                    )
+                    recovery = await self._attempt_argument_recovery(
+                        context, tool_name, call_exc, call_next
+                    )
+                    if recovery is not None:
+                        result = recovery
+                    else:
+                        raise
+                else:
+                    raise
 
             # Post-call: enrich DSL errors with diagnostics
             if self._is_dsl_tool(tool_name):
                 result = self._enrich_dsl_errors(result, tool_name)
+
+            # Await parallel validation result and attach metadata
+            if validation_task is not None:
+                try:
+                    validation = await asyncio.wait_for(validation_task, timeout=5.0)
+                except (asyncio.TimeoutError, Exception) as exc:
+                    logger.warning(
+                        f"Parallel validation for {tool_name} did not complete: {exc}"
+                    )
+            if validation is not None:
+                result = self._attach_validation_metadata(result, validation)
+
+            # Capture output summary for Langfuse span before returning
+            try:
+                _tool_output_summary = str(result)[:1000]
+            except Exception:
+                pass
 
             return result
 
@@ -1165,7 +1588,25 @@ class EnhancedSamplingMiddleware(Middleware):
             if self.enable_debug:
                 logger.debug(f"⚠️ Could not check tool tags for {tool_name}: {e}")
             # Continue without elicitation on error
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(_tool_span, _tool_span_token, error=e)
+            except Exception:
+                pass
+            _tool_span = None  # prevent double-end in finally
             return await call_next(context)
+        finally:
+            try:
+                from middleware.langfuse_integration import end_span
+
+                end_span(
+                    _tool_span,
+                    _tool_span_token,
+                    output_summary=_tool_output_summary,
+                )
+            except Exception:
+                pass
 
     def _is_dsl_tool(self, tool_name: str) -> bool:
         """Check if a tool uses DSL notation."""
@@ -1301,6 +1742,136 @@ class EnhancedSamplingMiddleware(Middleware):
             logger.debug(f"Enriched DSL error diagnostics for {tool_name}")
 
         return result
+
+    async def _attempt_argument_recovery(
+        self,
+        context: MiddlewareContext,
+        tool_name: str,
+        error: ValidationError,
+        call_next: Any,
+    ) -> Any:
+        """Attempt to fix tool arguments via LLM when Pydantic validation fails.
+
+        Builds a correction prompt with the tool's JSON schema, the original
+        arguments, and the validation error.  Uses a low-temperature sampling
+        call to produce corrected arguments, then retries once.
+
+        Returns the tool result on success, or None if recovery fails.
+        """
+        try:
+            from config.settings import settings as _settings
+
+            if not getattr(_settings, "sampling_argument_recovery_enabled", True):
+                return None
+        except Exception:
+            pass
+
+        try:
+            # Get the tool's parameter schema
+            tool = await context.fastmcp_context.fastmcp.get_tool(tool_name)
+            if tool is None:
+                return None
+            schema = tool.parameters  # JSON schema dict
+
+            original_args = dict(context.message.arguments or {})
+            error_details = str(error)
+
+            # Use the shared keepalive system prompt so the Anthropic
+            # prompt cache prefix matches the keepalive engine's calls.
+            try:
+                from middleware.cache_keepalive import _build_execute_system_prompt
+
+                system_prompt = _build_execute_system_prompt()
+            except Exception:
+                system_prompt = (
+                    "You are a tool argument correction agent. A tool call "
+                    "failed because the arguments did not match the expected "
+                    "schema. Fix the arguments by mapping incorrect parameter "
+                    "names to the correct ones, adding missing required "
+                    "parameters with sensible defaults, and removing unknown "
+                    "parameters.\n\n"
+                    "IMPORTANT: Return ONLY a valid JSON object with the "
+                    "corrected arguments. No explanation, no markdown, "
+                    "no code fences — just the JSON object."
+                )
+
+            user_message = (
+                f"Tool: {tool_name}\n"
+                f"Description: {tool.description or 'N/A'}\n\n"
+                f"Expected parameter schema:\n"
+                f"{json.dumps(schema, indent=2)}\n\n"
+                f"Original arguments provided:\n"
+                f"{json.dumps(original_args, indent=2, default=str)}\n\n"
+                f"Validation error:\n{error_details}\n\n"
+                "Return the corrected arguments as a JSON object."
+            )
+
+            # Set Langfuse trace phase
+            try:
+                from middleware.langfuse_integration import set_sampling_trace_context
+
+                set_sampling_trace_context(phase="arg_recovery")
+            except Exception:
+                pass
+
+            sctx = SamplingContext(
+                fastmcp_context=context.fastmcp_context,
+                tool_name=tool_name,
+                enable_debug=self.enable_debug,
+            )
+
+            sampling_result = await sctx.sample(
+                messages=user_message,
+                system_prompt=system_prompt,
+                temperature=0.0,
+                max_tokens=300,
+            )
+
+            if not sampling_result:
+                return None
+
+            corrected_text = str(
+                getattr(sampling_result, "text", sampling_result) or ""
+            ).strip()
+
+            # Strip markdown code fences if present
+            if corrected_text.startswith("```"):
+                lines = corrected_text.split("\n")
+                corrected_text = "\n".join(
+                    line for line in lines if not line.strip().startswith("```")
+                )
+
+            corrected_args = json.loads(corrected_text)
+            if not isinstance(corrected_args, dict):
+                return None
+
+            logger.info(
+                "Argument recovery for %s: original_keys=%s corrected_keys=%s",
+                tool_name,
+                list(original_args.keys()),
+                list(corrected_args.keys()),
+            )
+
+            # Apply corrected arguments and retry once.
+            # IMPORTANT: Reassign the dict instead of mutating in-place (.clear/.update)
+            # to avoid corrupting the original params dict that the sandbox caller holds.
+            context.message.arguments = dict(corrected_args)
+
+            try:
+                return await call_next(context)
+            except Exception as retry_exc:
+                logger.warning(
+                    "Argument recovery retry failed for %s: %s",
+                    tool_name,
+                    retry_exc,
+                )
+                # Restore original args so error message makes sense
+                context.message.arguments = dict(original_args)
+                return None
+
+        except Exception as exc:
+            logger.warning("Argument recovery failed for %s: %s", tool_name, exc)
+            return None
 
     async def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
         """Store enhanced sampling context for tools that support elicitation."""
@@ -1854,7 +2425,69 @@ async def _validate_and_recover_dsl(
     warnings: List[str] = []
     current_dsl = dsl_string
 
+    # Start OTEL phase span for DSL recovery
+    _dsl_span = None
+    _dsl_token = None
+    try:
+        from middleware.langfuse_integration import start_phase_span
+
+        _dsl_span, _dsl_token = start_phase_span(
+            "dsl_recovery", sctx.tool_name if hasattr(sctx, "tool_name") else ""
+        )
+    except Exception:
+        pass
+
+    try:
+        return await _validate_and_recover_dsl_inner(
+            sctx,
+            current_dsl,
+            config,
+            original_description,
+            max_retries,
+            parser,
+            dsl_type,
+            warnings,
+        )
+    except Exception as exc:
+        try:
+            from middleware.langfuse_integration import end_span
+
+            end_span(_dsl_span, _dsl_token, error=exc)
+        except Exception:
+            pass
+        _dsl_span = None
+        raise
+    finally:
+        try:
+            from middleware.langfuse_integration import end_span
+
+            end_span(_dsl_span, _dsl_token)
+        except Exception:
+            pass
+
+
+async def _validate_and_recover_dsl_inner(
+    sctx: "SamplingContext",
+    current_dsl: str,
+    config: "DSLToolConfig",
+    original_description: str,
+    max_retries: int,
+    parser,
+    dsl_type: str,
+    warnings: List[str],
+) -> Tuple[Any, List[str]]:
+    """Inner loop for DSL validation and recovery (extracted for span wrapping)."""
+
     for attempt in range(max_retries + 1):
+        # Each retry is a distinct LLM call — increment Langfuse step counter
+        if attempt > 0:
+            try:
+                from middleware.langfuse_integration import increment_sampling_step
+
+                increment_sampling_step()
+            except Exception:
+                pass
+
         try:
             parse_result = parser(current_dsl)
         except Exception as exc:
@@ -2134,6 +2767,12 @@ Provide actionable steps with specific tool recommendations.
             messages = [prompt]
             result_text = ""
             while True:
+                try:
+                    from middleware.langfuse_integration import increment_sampling_step
+
+                    increment_sampling_step()
+                except Exception:
+                    pass
                 step = await ctx.sample_step(
                     messages=messages,
                     system_prompt="You are a workflow optimization expert with access to the user's workspace and tools.",

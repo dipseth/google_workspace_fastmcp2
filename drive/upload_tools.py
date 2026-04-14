@@ -44,6 +44,7 @@ from pydantic import Field
 from typing_extensions import Annotated, Any, List, Literal, Optional, Union
 
 from auth.google_auth import GoogleAuthError, initiate_oauth_flow
+from auth.scope_registry import ScopeRegistry
 from auth.service_helpers import (
     get_service,
 )
@@ -62,6 +63,9 @@ from .upload_types import (
     UploadFileResponse,
 )
 from .utils import DriveUploadError, upload_file_to_drive_api
+
+# Default services — derived from the catalog (all non-required services).
+DEFAULT_SERVICES = ScopeRegistry.get_default_services()
 
 
 def setup_drive_tools(mcp: FastMCP) -> None:
@@ -193,47 +197,19 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             except Exception as e:
                 logger.debug(f"Could not stash cross-OAuth password: {e}")
 
-        # DEBUG: Log all received parameters
-        logger.info("🔧 TOOL DEBUG: start_google_auth called with parameters:")
-        logger.info(
-            f"🔧 TOOL DEBUG:   user_google_email = {user_google_email} (type: {type(user_google_email)})"
-        )
-        logger.info(
-            f"🔧 TOOL DEBUG:   service_name = {service_name} (type: {type(service_name)})"
-        )
-        logger.info(
-            f"🔧 TOOL DEBUG:   auto_open_browser = {auto_open_browser} (type: {type(auto_open_browser)})"
-        )
-
         # Try to get user email from context if not provided
         if not user_google_email:
-            logger.info(
-                "🔧 TOOL DEBUG: user_google_email is None/empty, checking context"
-            )
             from auth.context import get_user_email_context
 
             context_email = await get_user_email_context()
-            logger.info(
-                f"🔧 TOOL DEBUG: get_user_email_context() returned: {context_email}"
-            )
-
             if context_email:
                 user_google_email = context_email
-                logger.info(
-                    f"🔧 TOOL DEBUG: Using email from context: {user_google_email}"
-                )
-            else:
-                logger.info("🔧 TOOL DEBUG: No email found in context either")
 
-        logger.info(
-            f"Starting OAuth flow for {user_google_email} (auto_open_browser={auto_open_browser})"
-        )
+        logger.info(f"Starting OAuth flow (auto_open_browser={auto_open_browser})")
 
         # Validate that user_google_email is provided
         if not user_google_email:
-            logger.error(
-                "🔧 TOOL DEBUG: ❌ Still no user_google_email after context check"
-            )
+            logger.error("No user_google_email after context check")
             return StartAuthResponse(
                 status="error",
                 message="❌ Authentication Setup Failed",
@@ -242,6 +218,87 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             )
 
         try:
+            # --- Credential pre-check: skip OAuth if valid creds already cover requested scopes ---
+            from auth.google_auth import compare_scopes, get_valid_credentials
+
+            existing_creds = get_valid_credentials(user_google_email)
+            if existing_creds is not None:
+                # Resolve requested scopes from service_name parameter
+                if isinstance(service_name, list):
+                    requested_services = service_name
+                elif service_name is None or service_name == "":
+                    requested_services = DEFAULT_SERVICES
+                else:
+                    requested_services = []  # custom display string — can't resolve scopes
+
+                if requested_services:
+                    requested_scopes = ScopeRegistry.get_scopes_for_services(
+                        requested_services
+                    )
+                    sufficient, missing = compare_scopes(
+                        getattr(existing_creds, "scopes", None), requested_scopes
+                    )
+                    if sufficient:
+                        # If the per-user key was never revealed, fall through
+                        # to OAuth so the success page can display it.
+                        from auth.user_api_keys import was_key_revealed
+
+                        key_unrevealed = not was_key_revealed(user_google_email)
+                        if key_unrevealed:
+                            logger.info(
+                                f"Credentials for {user_google_email} are valid but "
+                                f"per-user API key was never revealed — proceeding "
+                                f"with OAuth so success page can display it"
+                            )
+                        else:
+                            import urllib.parse
+
+                            from auth.context import get_session_context
+                            from config.settings import settings as _settings
+
+                            current_session_id = await get_session_context()
+                            logger.info(
+                                f"Credentials for {user_google_email} already cover requested scopes "
+                                f"— skipping OAuth flow"
+                            )
+
+                            status_url = (
+                                f"{_settings.base_url}/auth/status-check"
+                                f"?email={urllib.parse.quote(user_google_email)}"
+                            )
+                            browser_opened = False
+                            if auto_open_browser:
+                                try:
+                                    import webbrowser
+
+                                    browser_opened = webbrowser.open(status_url)
+                                except Exception:
+                                    pass
+
+                            return StartAuthResponse(
+                                status="already_authenticated",
+                                message=(
+                                    f"Valid credentials already exist for {user_google_email}. "
+                                    f"Status page opened in browser."
+                                ),
+                                authUrl=status_url,
+                                clickableLink=f"[View credential status]({status_url})",
+                                userEmail=user_google_email,
+                                sessionId=current_session_id,
+                                serviceName=requested_services,
+                                scopesIncluded=list(existing_creds.scopes or []),
+                                instructions=[
+                                    "Browser opened with credential status page"
+                                    if browser_opened
+                                    else f"Open this URL to view credential status: {status_url}"
+                                ],
+                            )
+                    else:
+                        logger.info(
+                            f"Credentials for {user_google_email} missing scopes "
+                            f"{missing} — proceeding with scope-upgrade OAuth"
+                        )
+
             # Handle service_name parameter for pre-selection and display
             if isinstance(service_name, list):
                 # List of specific services provided - these will be PRE-SELECTED in the UI
@@ -252,14 +309,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 )
             elif service_name is None or service_name == "":
                 # No pre-selection - let user choose from common defaults
-                pre_selected_services = [
-                    "drive",
-                    "gmail",
-                    "calendar",
-                    "docs",
-                    "sheets",
-                    "people",
-                ]  # Common defaults
+                pre_selected_services = list(DEFAULT_SERVICES)
                 display_service_name = "Google Services (Common Pre-selected)"
                 logger.info(
                     f"🎯 Will pre-select common services in UI: {pre_selected_services}"
@@ -458,7 +508,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             except Exception as e:
                 logger.debug(f"Could not stash cross-OAuth password: {e}")
 
-        logger.info(f"Checking authentication for {user_google_email}")
+        logger.info("Checking authentication for user")
 
         # Get current session ID for reconnection support
         from auth.context import get_session_context

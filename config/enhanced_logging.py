@@ -243,6 +243,16 @@ def get_logger(name=None):
     return logging.getLogger(name)
 
 
+def redact_email(email: str) -> str:
+    """Redact email for safe logging: 'set***@gmail.com'"""
+    if not email or not isinstance(email, str) or "@" not in email:
+        return "***"
+    local, domain = email.rsplit("@", 1)
+    if len(local) > 3:
+        return f"{local[:3]}***@{domain}"
+    return f"{local[0]}***@{domain}"
+
+
 def log_execution_time(func):
     """
     Decorator that logs function execution time.

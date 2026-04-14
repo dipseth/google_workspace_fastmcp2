@@ -23,14 +23,7 @@ except PackageNotFoundError:
 # Now import the rest of the modules
 from fastmcp import FastMCP
 
-from auth.fastmcp_oauth_endpoints import (
-    setup_legacy_callback_route,
-    setup_oauth_endpoints_fastmcp,
-    setup_service_selection_routes,
-)
-
 # MCPAuthMiddleware removed - deprecated due to architectural mismatch (see auth/mcp_auth_middleware.py)
-from auth.jwt_auth import setup_jwt_auth  # Keep for fallback
 from auth.middleware import CredentialStorageMode
 from config.settings import settings
 
@@ -61,21 +54,8 @@ from gchat.card_tools import setup_card_tools
 from gchat.chat_tools import setup_chat_tools
 from gmail.gmail_tools import setup_gmail_tools
 from middleware.qdrant_middleware import (
-    QdrantUnifiedMiddleware,
     setup_enhanced_qdrant_tools,
     setup_qdrant_resources,
-)
-from middleware.sampling_middleware import (
-    DSLToolConfig,
-    EnhancementLevel,
-    setup_enhanced_sampling_demo_tools,
-    setup_enhanced_sampling_middleware,
-)
-from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
-
-# from middleware.template_middleware import setup_template_middleware
-from middleware.template_middleware import (
-    setup_enhanced_template_middleware as setup_template_middleware,
 )
 from people.people_tools import setup_people_tools
 from photos.advanced_tools import setup_advanced_photos_tools
@@ -149,25 +129,14 @@ except KeyError:
     credential_storage_mode = CredentialStorageMode.FILE_ENCRYPTED
 
 # Import composable lifespans for server lifecycle management
-from lifespans import (
-    combined_server_lifespan,
-    register_profile_middleware,
-    register_qdrant_middleware,
-    register_template_middleware,
-)
+from lifespans import combined_server_lifespan
 
 # ─── GoogleProvider Setup (OAuth 2.1 for Claude.ai / Desktop / MCP Inspector) ───
 # When FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and SECRET are set, we use FastMCP's
-# built-in GoogleProvider which auto-registers RFC 9728/8414 compliant discovery
-# endpoints. This makes the server work seamlessly with Claude.ai, Claude Desktop,
-# and any MCP client that follows the OAuth 2.1 + DCR specification.
-#
-# When those env vars are NOT set, we fall back to the legacy custom OAuth proxy
-# system (which requires manual endpoint registration and doesn't work with
-# Claude.ai's expected discovery flow).
+# built-in GoogleProvider with SSO credential interception (see auth/sso_google_provider.py).
+# When those env vars are NOT set, we fall back to the legacy custom OAuth proxy system.
 google_auth_provider = None
 
-# Check if FastMCP GoogleProvider credentials are configured
 _fastmcp_google_client_id = settings.fastmcp_server_auth_google_client_id or os.getenv(
     "FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID", ""
 )
@@ -178,348 +147,24 @@ _fastmcp_google_client_secret = (
 
 if _fastmcp_google_client_id and _fastmcp_google_client_secret:
     try:
-        from fastmcp.server.auth.providers.google import (
-            GoogleProvider,
-            GoogleTokenVerifier,
-        )
-
-        # ─── SSO GoogleProvider ───────────────────────────────────────────
-        # Subclasses GoogleProvider to intercept Google tokens during
-        # the OAuth code exchange and store them as Google API credentials.
-        # This eliminates the need for a separate start_google_auth call —
-        # when Claude connects via OAuth, the user grants full API scopes
-        # in a single consent screen and credentials are saved automatically.
         from auth.scope_registry import ScopeRegistry
+        from auth.sso_google_provider import create_sso_google_provider
 
         _oauth_comprehensive_scopes = ScopeRegistry.resolve_scope_group(
             "oauth_comprehensive"
         )
-
-        class SSOGoogleProvider(GoogleProvider):
-            """GoogleProvider that saves Google API credentials on first auth."""
-
-            def __init__(self, **kwargs):
-                # Separate the scopes: advertise full API scopes to clients so
-                # Google's consent screen asks for everything, but keep the
-                # token verifier checking only "openid" to avoid false negatives
-                # (Google tokeninfo returns full URLs, matching is fragile for
-                # 30+ scopes).
-                super().__init__(**kwargs)
-
-                # After parent init, override the token verifier's required_scopes
-                # so load_access_token doesn't reject tokens missing any of the
-                # 30+ API scopes.  We only need "openid" for identity verification.
-                if hasattr(self, "_token_validator") and hasattr(
-                    self._token_validator, "required_scopes"
-                ):
-                    self._token_validator.required_scopes = ["openid"]
-
-            async def exchange_authorization_code(self, client, authorization_code):
-                """Intercept token exchange to save Google API credentials."""
-                # Read the idp_tokens BEFORE the parent deletes the code
-                code_model = await self._code_store.get(key=authorization_code.code)
-                idp_tokens = code_model.idp_tokens if code_model else None
-
-                # Call parent to do the real exchange (issues FastMCP JWT)
-                result = await super().exchange_authorization_code(
-                    client, authorization_code
-                )
-
-                # Now save the Google tokens as API credentials
-                if idp_tokens:
-                    try:
-                        await self._save_google_credentials(idp_tokens)
-                    except Exception as e:
-                        logger.warning(
-                            f"⚠️ SSO credential save failed (auth still works): {e}"
-                        )
-
-                return result
-
-            async def _save_google_credentials(self, idp_tokens: dict):
-                """Convert raw Google tokens to Credentials and save them."""
-                from google.oauth2.credentials import Credentials
-
-                from auth.google_auth import _save_credentials
-
-                access_token = idp_tokens.get("access_token")
-                refresh_token = idp_tokens.get("refresh_token")
-                id_token_str = idp_tokens.get("id_token")
-
-                if not access_token:
-                    logger.warning("SSO: No access_token in idp_tokens, skipping save")
-                    return
-
-                # Determine user email from the id_token or userinfo
-                user_email = None
-                if id_token_str:
-                    try:
-                        import base64
-                        import json
-
-                        # Decode JWT payload (no verification needed, we trust Google)
-                        parts = id_token_str.split(".")
-                        if len(parts) >= 2:
-                            # Add padding
-                            payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
-                            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
-                            user_email = payload.get("email")
-                            self._google_sub = payload.get("sub")
-                    except Exception as e:
-                        logger.debug(f"SSO: Could not decode id_token: {e}")
-
-                if not user_email:
-                    # Fallback: call Google userinfo API
-                    try:
-                        import httpx
-
-                        async with httpx.AsyncClient(timeout=10) as http_client:
-                            resp = await http_client.get(
-                                "https://www.googleapis.com/oauth2/v2/userinfo",
-                                headers={"Authorization": f"Bearer {access_token}"},
-                            )
-                            if resp.status_code == 200:
-                                userinfo = resp.json()
-                                user_email = userinfo.get("email")
-                                self._google_sub = userinfo.get("id")
-                    except Exception as e:
-                        logger.warning(f"SSO: Could not fetch userinfo: {e}")
-
-                if not user_email:
-                    logger.warning("SSO: Could not determine user email, skipping save")
-                    return
-
-                # Build google.oauth2.credentials.Credentials
-                credentials = Credentials(
-                    token=access_token,
-                    refresh_token=refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=_fastmcp_google_client_id,
-                    client_secret=_fastmcp_google_client_secret,
-                    scopes=_oauth_comprehensive_scopes,
-                )
-                # Attach Google's immutable account ID for OAuth recipient encryption
-                credentials._google_sub = getattr(self, "_google_sub", None)
-
-                _save_credentials(user_email, credentials)
-                # Log the per-user API key if one was generated
-                user_api_key = getattr(credentials, "_user_api_key", None)
-                if user_api_key:
-                    logger.info(
-                        f"🔑 SSO: Per-user API key generated for {user_email} "
-                        f"(key will be available via check_drive_auth)"
-                    )
-                logger.info(
-                    f"✅ SSO: Google API credentials saved for {user_email} "
-                    f"(refresh_token: {'yes' if refresh_token else 'no'}, "
-                    f"scopes: {len(_oauth_comprehensive_scopes)})"
-                )
-
-        google_auth_provider = SSOGoogleProvider(
-            client_id=_fastmcp_google_client_id,
-            client_secret=_fastmcp_google_client_secret,
-            base_url=settings.base_url,
-            required_scopes=_oauth_comprehensive_scopes,  # Full API scopes for Google consent
-            redirect_path="/auth/callback",
-            require_authorization_consent=False,  # Google already has its own consent screen
-        )
-
-        # ─── API Key + Per-User Key Authentication ───
-        # Intercepts load_access_token to check two key types before OAuth:
-        #   1. MCP_API_KEY — shared admin/master key (optional, from .env)
-        #   2. Per-user keys — individual keys generated on OAuth completion
-        # Both are checked before falling back to standard FastMCP JWT validation.
         _mcp_api_key = os.getenv("MCP_API_KEY", "") or getattr(
             settings, "mcp_api_key", ""
         )
 
-        from fastmcp.server.auth.auth import AccessToken as _FastMCPAccessToken
-
-        _original_load_access_token = google_auth_provider.load_access_token
-
-        # Simple in-memory rate limiter for failed auth attempts
-        _failed_auth_attempts: dict[str, list[float]] = {}
-        _RATE_LIMIT_WINDOW = 60.0  # seconds
-        _RATE_LIMIT_MAX = 10  # max failures per window
-        _MAX_TRACKED_PREFIXES = 1000  # cap to prevent memory growth from brute-force
-
-        async def _load_access_token_with_api_key(token: str):
-            """Check for admin key / per-user key before delegating to OAuth."""
-            import hmac
-            import time as _time
-
-            # Rate-limit check: reject tokens from sources with too many failures
-            token_prefix = token[:8]
-            now = _time.time()
-            attempts = _failed_auth_attempts.get(token_prefix, [])
-            attempts = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
-            # Write back filtered list (self-cleaning: removes expired timestamps)
-            if attempts:
-                _failed_auth_attempts[token_prefix] = attempts
-            elif token_prefix in _failed_auth_attempts:
-                del _failed_auth_attempts[token_prefix]
-            if len(attempts) >= _RATE_LIMIT_MAX:
-                logger.warning("🚫 Rate limit exceeded for auth attempts")
-                return None
-
-            from auth.types import AuthProvenance
-
-            # 1. Shared admin API key (only checked when MCP_API_KEY is set)
-            if _mcp_api_key and hmac.compare_digest(token, _mcp_api_key):
-                logger.debug("🔑 Admin API key authentication — bypassing OAuth")
-                return _FastMCPAccessToken(
-                    token=token,
-                    client_id="api-key-client",
-                    scopes=_oauth_comprehensive_scopes,
-                    expires_at=int(_time.time()) + 86400,
-                    claims={
-                        "sub": "api-key-user",
-                        "auth_method": AuthProvenance.API_KEY,
-                    },
-                )
-
-            # 2. Per-user API key (generated on OAuth completion)
-            from auth.user_api_keys import lookup_key
-
-            user_email = lookup_key(token)
-            if user_email:
-                logger.debug(f"🔑 Per-user API key matched: {user_email}")
-                return _FastMCPAccessToken(
-                    token=token,
-                    client_id=f"user-key-{user_email}",
-                    scopes=_oauth_comprehensive_scopes,
-                    expires_at=int(_time.time()) + 86400,
-                    claims={
-                        "sub": user_email,
-                        "email": user_email,
-                        "auth_method": AuthProvenance.USER_API_KEY,
-                    },
-                )
-
-            # 3. Normal OAuth token validation (FastMCP JWT)
-            logger.info(f"🔍 load_access_token called, token prefix: {token[:20]}...")
-            result = await _original_load_access_token(token)
-            if result is None:
-                logger.warning(
-                    f"⚠️ load_access_token returned None for token: {token[:30]}..."
-                )
-                # Record failed attempt for rate limiting
-                _failed_auth_attempts.setdefault(token_prefix, []).append(now)
-                # Evict oldest prefix if over cap (defense against unique-token flooding)
-                if len(_failed_auth_attempts) > _MAX_TRACKED_PREFIXES:
-                    oldest_key = next(iter(_failed_auth_attempts))
-                    del _failed_auth_attempts[oldest_key]
-            else:
-                logger.info(
-                    f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
-                )
-            return result
-
-        google_auth_provider.load_access_token = _load_access_token_with_api_key
-        if _mcp_api_key:
-            logger.info("  🔑 Token auth: admin key + per-user keys + OAuth")
-        else:
-            logger.info("  🔑 Token auth: per-user keys + OAuth (no admin key)")
-
-        # ─── Auto-register unknown clients (e.g., Claude providing its own client ID) ───
-        # When a client like Claude connects with its own OAuth client ID (not obtained
-        # via DCR), FastMCP's get_client() returns None → "Client Not Registered" error.
-        # This patch auto-registers unknown clients as proxy DCR clients so they go
-        # through the server's OAuth proxy (using the server's Google credentials).
-        _original_get_client = google_auth_provider.get_client
-
-        async def _get_client_with_auto_register(client_id: str):
-            """Auto-register unknown clients instead of rejecting them."""
-            client = await _original_get_client(client_id)
-            if client is not None:
-                return client
-
-            # Unknown client — auto-register it as a proxy DCR client
-            logger.info(f"🔧 Auto-registering unknown client: {client_id[:30]}...")
-            try:
-                from mcp.shared.auth import OAuthClientInformationFull
-
-                # Create a minimal client registration that the proxy will accept
-                auto_client = OAuthClientInformationFull(
-                    client_id=client_id,
-                    client_secret=None,  # Proxy handles upstream auth
-                    redirect_uris=[
-                        "http://localhost"
-                    ],  # Placeholder; proxy validates via patterns
-                    grant_types=["authorization_code", "refresh_token"],
-                    response_types=["code"],
-                    token_endpoint_auth_method="none",
-                    scope="openid email profile",
-                    client_name=f"Auto-registered ({client_id[:20]}...)",
-                )
-
-                # register_client wraps it in a ProxyDCRClient with redirect URI pattern support
-                await google_auth_provider.register_client(auto_client)
-                logger.info(f"✅ Auto-registered client: {client_id[:30]}...")
-
-                # Return the newly registered client
-                return await _original_get_client(client_id)
-            except Exception as e:
-                logger.warning(
-                    f"⚠️ Auto-registration failed for {client_id[:30]}...: {e}"
-                )
-                return None
-
-        google_auth_provider.get_client = _get_client_with_auto_register
-
-        # ─── Fix metadata: advertise token_endpoint_auth_method="none" ───
-        # Clients like Claude use their own client_id without DCR, so they have
-        # no client_secret for this server. The default metadata only advertises
-        # ["client_secret_post", "client_secret_basic"], causing Claude to skip
-        # the POST /token exchange entirely (it thinks it can't authenticate).
-        # Adding "none" tells clients they can exchange codes without a secret.
-        import mcp.server.auth.routes as _auth_routes
-
-        _original_build_metadata = _auth_routes.build_metadata
-
-        def _patched_build_metadata(*args, **kwargs):
-            metadata = _original_build_metadata(*args, **kwargs)
-            if metadata.token_endpoint_auth_methods_supported:
-                if "none" not in metadata.token_endpoint_auth_methods_supported:
-                    metadata.token_endpoint_auth_methods_supported.append("none")
-            else:
-                metadata.token_endpoint_auth_methods_supported = ["none"]
-            return metadata
-
-        _auth_routes.build_metadata = _patched_build_metadata
-        # Also patch the proxy module's direct import of build_metadata
-        try:
-            import fastmcp.server.auth.oauth_proxy.proxy as _proxy_module
-
-            _proxy_module.build_metadata = _patched_build_metadata
-        except (ImportError, AttributeError):
-            pass  # Proxy may not use direct import in all versions
-        logger.info(
-            '  🔓 Metadata patched: token_endpoint_auth_methods includes "none"'
+        google_auth_provider = create_sso_google_provider(
+            client_id=_fastmcp_google_client_id,
+            client_secret=_fastmcp_google_client_secret,
+            base_url=settings.base_url,
+            comprehensive_scopes=_oauth_comprehensive_scopes,
+            mcp_api_key=_mcp_api_key,
+            settings=settings,
         )
-
-        # Enable DEBUG logging for FastMCP's OAuth proxy to trace auth flow
-        import logging as _logging
-
-        for _oauth_logger_name in [
-            "fastmcp.server.auth.oauth_proxy.proxy",
-            "fastmcp.server.auth.providers.google",
-            "mcp.server.auth.handlers.token",
-            "mcp.server.auth.handlers.authorize",
-        ]:
-            _logging.getLogger(_oauth_logger_name).setLevel(_logging.DEBUG)
-
-        logger.info("✅ GoogleProvider configured for OAuth 2.1 (MCP protocol auth)")
-        logger.info(f"  🌐 Base URL: {settings.base_url}")
-        logger.info("  🔐 PKCE: Automatic (S256)")
-        logger.info("  📋 DCR: Built-in (RFC 7591)")
-        logger.info("  🔍 Discovery: Auto-registered (RFC 9728 + RFC 8414)")
-        logger.info("  🎯 Callback: /auth/callback")
-        logger.info("  🔓 Auto-register: Unknown clients proxied automatically")
-        logger.info("  ⚡ Consent page: DISABLED (Google provides its own)")
-        logger.info("  🐛 OAuth DEBUG logging: ENABLED")
-        logger.info("  ✅ Compatible with: Claude.ai, Claude Desktop, MCP Inspector")
-
     except ImportError as e:
         logger.warning(f"⚠️ GoogleProvider not available (FastMCP version issue): {e}")
         logger.info("  Falling back to legacy OAuth system")
@@ -535,24 +180,81 @@ else:
     logger.info("  💡 To enable: set FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID and")
     logger.info("     FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_SECRET in .env")
 
-# Configure sampling fallback handler (uses Anthropic when client doesn't support sampling)
-_sampling_handler = None
-if settings.anthropic_api_key:
-    try:
-        from anthropic import AsyncAnthropic
-        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
+# ─── GitHub OAuth Provider Setup (Alpha Access via Repo Star Gating) ─────────
+# When GITHUB_OAUTH_CLIENT_ID and SECRET are set, GitHub OAuth is used solely
+# for star-gating (alpha access check). All bearer tokens on /mcp are still
+# FastMCP JWTs issued via Google OAuth. GitHub never issues bearer tokens.
+github_auth_provider = None
+_dual_oauth_router = None
 
-        _sampling_handler = AnthropicSamplingHandler(
-            default_model="claude-sonnet-4-6",
-            client=AsyncAnthropic(api_key=settings.anthropic_api_key),
+_github_client_id = settings.github_oauth_client_id or os.getenv(
+    "GITHUB_OAUTH_CLIENT_ID", ""
+)
+_github_client_secret = settings.github_oauth_client_secret or os.getenv(
+    "GITHUB_OAUTH_CLIENT_SECRET", ""
+)
+
+if _github_client_id and _github_client_secret:
+    try:
+        from auth.github_provider import SSOGitHubProvider
+
+        _github_scopes = [
+            s.strip()
+            for s in settings.github_oauth_required_scopes.split(",")
+            if s.strip()
+        ]
+
+        github_auth_provider = SSOGitHubProvider(
+            client_id=_github_client_id,
+            client_secret=_github_client_secret,
+            base_url=settings.base_url,
+            required_scopes=_github_scopes,
+            gating_repo=settings.github_oauth_gating_repo,
+            alpha_mode=settings.alpha_mode,
+            require_authorization_consent=False,  # We use our own provider select page
         )
-        logger.info("🤖 Anthropic sampling handler configured (fallback mode)")
+
+        logger.info("✅ GitHubProvider configured for alpha OAuth")
+        logger.info(f"  🔒 Required scopes: {_github_scopes}")
+        if settings.alpha_mode and settings.github_oauth_gating_repo:
+            logger.info(f"  ⭐ Repo star gating: {settings.github_oauth_gating_repo}")
+
+        # If both Google and GitHub are configured, set up dual OAuth routing.
+        # GitHub is ONLY used for star-gating (alpha access check) — all actual
+        # bearer tokens on /mcp must be FastMCP JWTs issued via Google OAuth.
+        # We do NOT add GitHubTokenVerifier to MultiAuth because GitHub tokens
+        # should never be used as bearer tokens for API requests.
+        if google_auth_provider:
+            logger.info(
+                "✅ GitHub configured for star-gating (Google handles all tokens)"
+            )
+
+            # Set up dual OAuth router for provider selection
+            from auth.dual_oauth_provider import DualOAuthRouter
+
+            _dual_oauth_router = DualOAuthRouter(
+                google_provider=google_auth_provider,
+                github_provider=github_auth_provider,
+                settings=settings,
+            )
+            # Patch authorize to redirect to /auth/select instead of Google
+            _dual_oauth_router.patch_authorize()
+            logger.info("  🔀 Provider selection page: /auth/select")
+        else:
+            # GitHub-only mode: use GitHubProvider directly
+            google_auth_provider = github_auth_provider
+            logger.info("✅ GitHub-only OAuth mode (no Google provider)")
+
+    except ImportError as e:
+        logger.warning(f"⚠️ GitHubProvider not available: {e}")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to configure Anthropic sampling handler: {e}")
-else:
-    logger.warning(
-        "⚠️ ANTHROPIC_API_KEY not set — sampling will fail if client doesn't support it"
-    )
+        logger.error(f"❌ Failed to create GitHubProvider: {e}", exc_info=True)
+
+# Configure sampling fallback handler (routes through LiteLLM or Anthropic)
+# Factory handles provider selection, lifespan registration, and session-aware wrapping
+from middleware.session_sampling_handler import create_sampling_handler
+
+_sampling_handler = create_sampling_handler(settings)
 
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
@@ -601,285 +303,29 @@ if google_auth_provider:
 
     # Enable uvicorn access logging at DEBUG level to trace all HTTP requests
     # This captures whether clients call POST /token after /authorize callback
+    import logging as _logging
+
     _logging.getLogger("uvicorn.access").setLevel(_logging.DEBUG)
     logger.info("  📝 Uvicorn access logging: DEBUG (traces all HTTP requests)")
 else:
     logger.info("🔐 FastMCP running with legacy OAuth system (no GoogleProvider)")
     logger.info("  Custom OAuth endpoints will be registered below")
 
-# --- Code Mode Transform (opt-in) ---
-if settings.enable_code_mode:
-    from tools.code_mode import setup_code_mode
+# ─── Register All Middleware ───
+# Middleware ordering is critical — see middleware/server_middleware_setup.py for details.
+from middleware.server_middleware_setup import setup_all_middleware
 
-    setup_code_mode(mcp)
-else:
-    logger.info("Code Mode disabled — set ENABLE_CODE_MODE=true in .env to enable")
-
-# PHASE 1 & 2 FIXES APPLIED: AuthMiddleware re-enabled with improved session management
-from auth.middleware import create_enhanced_auth_middleware
-
-auth_middleware = create_enhanced_auth_middleware(
-    storage_mode=credential_storage_mode,
-    google_provider=google_auth_provider,  # Pass GoogleProvider for unified auth when available
+_mw = setup_all_middleware(
+    mcp=mcp,
+    settings=settings,
+    google_auth_provider=google_auth_provider,
+    github_auth_provider=github_auth_provider,
+    dual_oauth_router=_dual_oauth_router,
+    credential_storage_mode=credential_storage_mode,
+    minimal_tools_startup=MINIMAL_TOOLS_STARTUP,
 )
-# Enable service selection for existing OAuth system
-logger.info("🔧 Configuring service selection for OAuth system")
-auth_middleware.enable_service_selection(enabled=True)
-logger.info("✅ Service selection interface enabled for OAuth flows")
-
-mcp.add_middleware(auth_middleware)
-
-
-# Register the AuthMiddleware instance in context for tool access
-from auth.context import set_auth_middleware
-
-set_auth_middleware(auth_middleware)
-logger.info("✅ AuthMiddleware RE-ENABLED with Phase 1 & 2 fixes:")
-logger.info("  ✅ Instance-level session tracking (no FastMCP context dependency)")
-logger.info("  ✅ Simplified auto-injection (90 lines → 20 lines)")
-logger.info("  ✅ All 18 unit tests passing")
-logger.info("  🔍 Monitoring for context lifecycle issues...")
-
-# Setup Session Tool Filtering Middleware for per-session tool enable/disable
-from middleware.session_tool_filtering_middleware import (
-    setup_session_tool_filtering_middleware,
-)
-
-session_tool_filter_middleware = setup_session_tool_filtering_middleware(
-    mcp,
-    enable_debug=True,  # Enable verbose logging for testing
-    minimal_startup=MINIMAL_TOOLS_STARTUP,  # Use setting from config
-)
-if MINIMAL_TOOLS_STARTUP:
-    logger.info(
-        "  ✅ Minimal startup mode active - new sessions get only essential tools"
-    )
-else:
-    logger.info("  ✅ Per-session tool enable/disable supported via scope='session'")
-
-# Profile Enrichment Middleware will be initialized after Qdrant middleware
-# to enable optional Qdrant-backed persistent caching
-profile_middleware = None
-
-# Setup Enhanced Template Parameter Middleware with full Jinja2 support (MUST be before tools are registered)
-logger.info(
-    "🎭 Setting up Enhanced Template Parameter Middleware with full modular architecture..."
-)
-template_middleware = setup_template_middleware(
-    mcp,
-    enable_debug=True,  # Force enable for testing
-    enable_caching=True,
-    cache_ttl_seconds=300,
-)
-# Register with lifespan for cache cleanup on shutdown
-register_template_middleware(template_middleware)
-
-# Register email_symbols as a Jinja2 global so macros can access them
-try:
-    from gmail.email_wrapper_api import get_email_symbols
-
-    jinja_env = template_middleware.jinja_env_manager.jinja2_env
-    if jinja_env:
-        jinja_env.globals["email_symbols"] = get_email_symbols()
-        logger.info("📧 Registered email_symbols as Jinja2 global")
-except Exception as e:
-    logger.warning(f"⚠️ Could not register email_symbols global: {e}")
-
-logger.info(
-    "✅ Enhanced Template Parameter Middleware enabled - modular architecture with 12 focused components active"
-)
-
-# Setup Enhanced Sampling Middleware with tag-based elicitation (conditional based on SAMPLING_TOOLS setting)
-sampling_middleware = None  # Initialize to None for later checks
-if settings.sampling_tools:
-    logger.info("🎯 Setting up Enhanced Sampling Middleware...")
-
-    # Build DSLToolConfig instances from available domain modules
-    dsl_configs: dict[str, DSLToolConfig] = {}
-    try:
-        from gchat.wrapper_api import (
-            CardDSLResult,
-            extract_dsl_from_description,
-            get_dsl_documentation,
-            parse_dsl,
-        )
-
-        dsl_configs["send_dynamic_card"] = DSLToolConfig(
-            arg_key="card_description",
-            parse_fn=parse_dsl,
-            extract_fn=extract_dsl_from_description,
-            result_type=CardDSLResult,
-            description_attr="card_description",
-            params_attr="card_params",
-            params_arg_key="card_params",
-            get_docs_fn=lambda: get_dsl_documentation(
-                include_examples=True, include_hierarchy=True
-            ),
-            dsl_type_label="card",
-            error_keywords=["card_description"],
-        )
-    except ImportError:
-        logger.warning("Card DSL validation disabled — gchat module unavailable")
-
-    try:
-        from gmail.email_wrapper_api import (
-            EmailDSLResult,
-            extract_email_dsl_from_description,
-            get_email_dsl_documentation,
-            parse_email_dsl,
-        )
-
-        dsl_configs["compose_dynamic_email"] = DSLToolConfig(
-            arg_key="email_description",
-            parse_fn=parse_email_dsl,
-            extract_fn=extract_email_dsl_from_description,
-            result_type=EmailDSLResult,
-            description_attr="email_description",
-            params_attr="email_params",
-            params_arg_key="email_params",
-            get_docs_fn=lambda: get_email_dsl_documentation(include_examples=True),
-            dsl_type_label="email",
-            error_keywords=["email_description"],
-        )
-    except ImportError:
-        logger.warning("Email DSL validation disabled — gmail module unavailable")
-
-    sampling_middleware = setup_enhanced_sampling_middleware(
-        mcp,
-        enable_debug=True,  # Enable for testing and development
-        target_tags=[
-            "gmail",
-            "compose",
-            "elicitation",
-        ],  # Tools with these tags get enhanced sampling
-        qdrant_middleware=None,  # Will be set after Qdrant middleware is initialized
-        template_middleware=template_middleware,
-        default_enhancement_level=EnhancementLevel.CONTEXTUAL,
-        dsl_tool_configs=dsl_configs,
-    )
-    logger.info(
-        "✅ Enhanced Sampling Middleware enabled - tools with target tags get enhanced context"
-    )
-else:
-    logger.info(
-        "⏭️  Enhanced Sampling Middleware disabled - set SAMPLING_TOOLS=true in .env to enable"
-    )
-
-# 5. Initialize Qdrant unified middleware (sync creation, async init via lifespan)
-# Note: Full async initialization (embedding model, background reindexing) is handled
-# by qdrant_lifespan on server startup. This sync init just creates the middleware.
-logger.info("🔄 Initializing Qdrant unified middleware...")
-qdrant_middleware = QdrantUnifiedMiddleware(
-    qdrant_host=settings.qdrant_host,
-    qdrant_port=settings.qdrant_port,
-    qdrant_api_key=settings.qdrant_api_key,
-    qdrant_url=settings.qdrant_url,
-    collection_name="mcp_tool_responses",
-    auto_discovery=True,  # Enable auto-discovery to find available Qdrant instances
-    ports=[
-        settings.qdrant_port,
-        6333,
-        6335,
-        6334,
-    ],  # Try configured port first, then fallback
-)
-mcp.add_middleware(qdrant_middleware)
-# Register with lifespan for async initialization and graceful shutdown
-register_qdrant_middleware(qdrant_middleware)
-logger.info("✅ Qdrant unified middleware created (async init via lifespan)")
-logger.info(f"🔧 Qdrant URL: {settings.qdrant_url}")
-logger.info(f"🔧 API Key configured: {bool(settings.qdrant_api_key)}")
-
-# Update sampling middleware with Qdrant integration now that it's initialized
-if sampling_middleware:
-    sampling_middleware.qdrant_middleware = qdrant_middleware
-    logger.info(
-        "🔗 Enhanced Sampling Middleware connected to Qdrant for historical context"
-    )
-
-    # Register sampling demo tools
-    logger.info("🎯 Registering enhanced sampling demo tools...")
-    setup_enhanced_sampling_demo_tools(mcp)
-    logger.info(
-        "✅ Enhanced sampling demo tools registered (intelligent_email_composer, smart_workflow_assistant, template_rendering_demo, resource_discovery_assistant)"
-    )
-
-# 6. Setup Profile Enrichment Middleware with optional Qdrant integration
-logger.info("👤 Setting up Profile Enrichment Middleware for People API integration...")
-from middleware.profile_enrichment_middleware import ProfileEnrichmentMiddleware
-
-# Enable Qdrant caching if middleware is available
-enable_qdrant_profile_cache = (
-    qdrant_middleware is not None and qdrant_middleware.client_manager.is_available
-)
-
-profile_middleware = ProfileEnrichmentMiddleware(
-    enable_caching=True,
-    cache_ttl_seconds=300,
-    qdrant_middleware=qdrant_middleware if enable_qdrant_profile_cache else None,
-    enable_qdrant_cache=enable_qdrant_profile_cache,
-)
-mcp.add_middleware(profile_middleware)
-# Register with lifespan for cache cleanup on shutdown
-register_profile_middleware(profile_middleware)
-
-if enable_qdrant_profile_cache:
-    logger.info("✅ Profile Enrichment Middleware enabled with TWO-TIER CACHING:")
-    logger.info("  📦 Tier 1: In-memory cache (5-minute TTL, ultra-fast)")
-    logger.info("  🗄️ Tier 2: Qdrant persistent cache (survives restarts)")
-else:
-    logger.info("✅ Profile Enrichment Middleware enabled with in-memory caching only")
-    logger.info("  📦 In-memory cache (5-minute TTL)")
-    logger.info("  ℹ️ Qdrant persistent cache: disabled (Qdrant not available)")
-
-# 7. Add TagBasedResourceMiddleware for service list resource handling (LAST)
-logger.info(
-    "🏷️ Setting up TagBasedResourceMiddleware for service:// resource handling..."
-)
-tag_based_middleware = TagBasedResourceMiddleware(enable_debug_logging=True)
-mcp.add_middleware(tag_based_middleware)
-logger.info(
-    "✅ TagBasedResourceMiddleware enabled - service:// URIs will be handled via tag-based tool discovery"
-)
-
-# 8. Add PrivacyMiddleware for PII encryption (after all data-producing middleware)
-from middleware.privacy.middleware import PrivacyMiddleware
-
-privacy_middleware = PrivacyMiddleware(
-    mode=settings.privacy_mode,  # server default ("disabled" is valid)
-    additional_fields=settings.privacy_field_patterns,
-    exclude_tools=settings.privacy_exclude_tools,
-)
-mcp.add_middleware(privacy_middleware)
-logger.info(
-    f"Privacy middleware registered (default={settings.privacy_mode}, per-session toggle available)"
-)
-
-# 9. Add ResponseLimitingMiddleware for tool response size control
-if settings.response_limit_max_size > 0:
-    from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
-
-    _rl_tools = [
-        t.strip() for t in settings.response_limit_tools.split(",") if t.strip()
-    ] or None
-    response_limiting_middleware = ResponseLimitingMiddleware(
-        max_size=settings.response_limit_max_size,
-        tools=_rl_tools,
-    )
-    mcp.add_middleware(response_limiting_middleware)
-    logger.info(
-        f"✅ ResponseLimitingMiddleware enabled — max {settings.response_limit_max_size:,} bytes"
-        + (f" for tools: {_rl_tools}" if _rl_tools else " (all tools)")
-    )
-
-# 9. Dashboard cache middleware — caches list-tool results for ui://data-dashboard.
-# Registered LAST (outermost) so it wraps all other middleware and always sees tool calls,
-# even if an inner middleware (e.g., session tool filter) handles the call directly.
-from middleware.dashboard_cache_middleware import DashboardCacheMiddleware
-
-dashboard_cache_middleware = DashboardCacheMiddleware()
-mcp.add_middleware(dashboard_cache_middleware)
-logger.info("✅ Dashboard cache middleware registered (outermost)")
+qdrant_middleware = _mw.qdrant_middleware
+sampling_middleware = _mw.sampling_middleware
 
 # Register drive upload tools
 setup_drive_tools(mcp)
@@ -934,10 +380,28 @@ if settings.enable_skills_provider:
 
         card_wrapper = get_card_framework_wrapper()
         email_wrapper = get_email_wrapper()
+
+        # Qdrant wrapper is optional — only include if available
+        qdrant_wrapper = None
+        try:
+            from middleware.qdrant_core.qdrant_models_wrapper import (
+                get_qdrant_models_wrapper,
+            )
+
+            qdrant_wrapper = get_qdrant_models_wrapper()
+        except Exception as e:
+            logger.debug(f"Qdrant models wrapper not available for skills: {e}")
+
+        skill_wrappers = [card_wrapper, email_wrapper]
+        skill_modules = ["card_framework", "gmail.mjml_types"]
+        if qdrant_wrapper:
+            skill_wrappers.append(qdrant_wrapper)
+            skill_modules.append("qdrant_client.models")
+
         skills_path = setup_skills_provider(
             mcp=mcp,
-            wrappers=[card_wrapper, email_wrapper],
-            enabled_modules=["card_framework", "gmail.mjml_types"],
+            wrappers=skill_wrappers,
+            enabled_modules=skill_modules,
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
         )
@@ -1032,6 +496,34 @@ logger.info(
 patched = wire_dashboard_to_list_tools(mcp)
 logger.info(f"✅ Data dashboard wired to {patched} list tools")
 
+# ─── MCP App Providers (FastMCP 3.2+) ───
+if settings.enable_app_providers:
+    from fastmcp.apps.approval import Approval
+    from fastmcp.apps.choice import Choice
+
+    from tools.ui_apps import create_tool_management_app
+
+    mcp.add_provider(
+        Approval(
+            title="Google Workspace Action",
+            approve_text="Approve",
+            reject_text="Cancel",
+        )
+    )
+    mcp.add_provider(Choice(title="Select Option"))
+
+    # Interactive tool management app (Prefab UI)
+    tool_mgmt_app = create_tool_management_app(mcp)
+    if tool_mgmt_app is not None:
+        mcp.add_provider(tool_mgmt_app)
+        logger.info("✅ Interactive tool management app registered")
+
+    logger.info("✅ App providers registered (Approval, Choice)")
+else:
+    logger.info(
+        "⏭️ App providers disabled - set ENABLE_APP_PROVIDERS=true in .env to enable"
+    )
+
 # Setup service recent resources (recent files from Drive-based services)
 setup_service_recent_resources(mcp)
 
@@ -1058,6 +550,24 @@ setup_health_endpoints(
 from tools.feedback_endpoints import setup_feedback_endpoints
 
 setup_feedback_endpoints(mcp)
+
+# Setup payment flow endpoints (browser paywall page + completion callback)
+if settings.payment_enabled:
+    from tools.payment_endpoints import setup_payment_endpoints
+
+    setup_payment_endpoints(mcp)
+    logger.info(
+        "Payment flow endpoints registered (/pay, /api/payment-complete, /payment-status)"
+    )
+
+# Setup attachment download endpoint (signed URL serving)
+from tools.attachment_endpoints import setup_attachment_endpoints
+
+setup_attachment_endpoints(mcp)
+logger.info("Attachment download endpoint registered (/attachment-download)")
+
+# Attachment cleanup task is started lazily on first download or via lifespan
+# (asyncio.create_task requires a running event loop, so defer to runtime)
 
 # Register template macro management tools
 logger.info("🎨 Registering template macro management tools...")
@@ -1089,142 +599,16 @@ logger.info("📋 Dynamic MCP instructions will be updated via lifespan on serve
 
 
 # ─── OAuth Endpoint Setup ───
-# When GoogleProvider is active, FastMCP auto-registers all RFC-compliant OAuth
-# discovery and operational endpoints. Custom endpoints are ONLY needed when
-# GoogleProvider is not available (legacy mode).
-if google_auth_provider:
-    # GoogleProvider is active — it already registered all discovery endpoints.
-    # Only register supplemental endpoints that don't conflict (status, service selection).
-    logger.info(
-        "🔍 GoogleProvider active — RFC-compliant OAuth endpoints auto-registered"
-    )
-    logger.info(
-        f"  ✅ Protected Resource:  {settings.base_url}/.well-known/oauth-protected-resource"
-    )
-    logger.info(
-        f"  ✅ Auth Server Metadata: {settings.base_url}/.well-known/oauth-authorization-server"
-    )
-    logger.info(f"  ✅ Authorization:        {settings.base_url}/authorize")
-    logger.info(f"  ✅ Token Exchange:       {settings.base_url}/token")
-    logger.info(f"  ✅ Callback:             {settings.base_url}/auth/callback")
-    logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
+# Registers supplemental endpoints (GoogleProvider mode) or full legacy endpoints.
+from auth.fastmcp_oauth_endpoints import setup_complete_oauth_endpoints
 
-    # Register supplemental status/service-selection endpoints that don't conflict
-    # with GoogleProvider's built-in routes
-    try:
-        # Only register non-conflicting custom routes (status check, service selection page)
-        @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
-        async def oauth_status_check_gp(request):
-            """OAuth authentication status polling endpoint (supplemental)."""
-            from starlette.responses import JSONResponse, Response
-
-            if request.method == "OPTIONS":
-                return Response(
-                    status_code=200, headers={"Access-Control-Allow-Origin": "*"}
-                )
-            import json
-            from datetime import datetime
-            from pathlib import Path as _Path
-
-            oauth_data_path = (
-                _Path(settings.credentials_dir) / ".oauth_authentication.json"
-            )
-            if oauth_data_path.exists():
-                try:
-                    with open(oauth_data_path, "r") as f:
-                        oauth_data = json.load(f)
-                except (json.JSONDecodeError, OSError):
-                    oauth_data = {}
-                authenticated_email = oauth_data.get("authenticated_email")
-                if authenticated_email:
-                    return JSONResponse(
-                        content={
-                            "authenticated": True,
-                            "user_email": authenticated_email,
-                        },
-                        headers={
-                            "Access-Control-Allow-Origin": "*",
-                            "Cache-Control": "no-store",
-                        },
-                    )
-            return JSONResponse(
-                content={
-                    "authenticated": False,
-                    "message": "No authentication data found",
-                },
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": "no-store",
-                },
-            )
-
-        logger.info("  ✅ Supplemental /oauth/status endpoint registered")
-
-        # Service selection routes are needed by start_google_auth scope-upgrade flow
-        setup_service_selection_routes(mcp)
-        logger.info("  ✅ Service selection routes registered (/auth/services/select)")
-
-        # Register the legacy /oauth2callback so start_google_auth can complete
-        setup_legacy_callback_route(mcp)
-        logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
-
-    # Do NOT set mcp._auth — GoogleProvider already handles Bearer token validation
-    logger.info(
-        "🔐 Authentication: Handled by GoogleProvider (no manual _auth override)"
-    )
-
-else:
-    # Legacy mode: register all custom OAuth discovery + operational endpoints
-    logger.info("🔍 Setting up legacy OAuth discovery endpoints...")
-    try:
-        setup_oauth_endpoints_fastmcp(mcp)
-        logger.info("✅ Legacy OAuth discovery endpoints configured")
-        logger.info(
-            f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
-        )
-        logger.info(
-            f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
-        )
-        logger.info(f"  Registration: {settings.base_url}/oauth/register")
-        logger.info(f"  Callback: {settings.base_url}/oauth2callback")
-    except Exception as e:
-        logger.error(f"❌ Failed to setup legacy OAuth endpoints: {e}", exc_info=True)
-
-    # Legacy Authentication System Setup with Access Control
-    if use_google_oauth:
-        # Setup Google OAuth with ACCESS CONTROL enforcement
-        from auth.token_validator import create_access_controlled_auth_provider
-
-        jwt_auth_provider = create_access_controlled_auth_provider(
-            jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
-            issuer="https://accounts.google.com",
-            required_scopes=["openid", "email"],
-        )
-        mcp._auth = jwt_auth_provider
-        logger.info(
-            "🔐 Legacy Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
-        )
-        logger.info(
-            "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
-        )
-        logger.info("🎯 OAuth issuer: https://accounts.google.com")
-        logger.info(
-            "🔒 Access enforcement: Only users with stored credentials can connect"
-        )
-
-    elif enable_jwt_auth:
-        # Fallback to custom JWT for development/testing
-        jwt_auth_provider = setup_jwt_auth()
-        mcp._auth = jwt_auth_provider
-        logger.info(
-            "🔐 Custom JWT Bearer Token authentication enabled (development mode)"
-        )
-        logger.info("⚠️  No access control on JWT tokens - for testing only")
-
-    else:
-        logger.info("⚠️ Authentication DISABLED (for testing)")
+setup_complete_oauth_endpoints(
+    mcp=mcp,
+    google_auth_provider=google_auth_provider,
+    settings=settings,
+    use_google_oauth=use_google_oauth,
+    enable_jwt_auth=enable_jwt_auth,
+)
 
 
 def main():

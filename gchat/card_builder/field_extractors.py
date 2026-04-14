@@ -91,19 +91,19 @@ def extract_grid_item_fields(resource: dict, index: int) -> dict:
 
 
 def _overflow_button(component_name: str, index: int) -> dict:
-    return {"text": f"Button {index + 1}"}
+    return {"text": f"Button {index + 1}", "_placeholder": True}
 
 
 def _overflow_chip(component_name: str, index: int) -> dict:
-    return {"label": f"Chip {index + 1}"}
+    return {"label": f"Chip {index + 1}", "_placeholder": True}
 
 
 def _overflow_carousel_card(component_name: str, index: int) -> dict:
-    return {"title": f"Card {index + 1}"}
+    return {"title": f"Card {index + 1}", "_placeholder": True}
 
 
 def _overflow_grid_item(component_name: str, index: int) -> dict:
-    return {"title": f"Item {index + 1}"}
+    return {"title": f"Item {index + 1}", "_placeholder": True}
 
 
 # =============================================================================

@@ -2286,7 +2286,6 @@ DELETE_ICONS = get_icons_by_prefix("delete")
 STAR_ICONS = get_icons_by_prefix("star")
 SETTINGS_ICONS = get_icons_by_prefix("settings")
 
-
 # =============================================================================
 # SEMANTIC ICON MAPPINGS
 # =============================================================================
@@ -2459,9 +2458,9 @@ def resolve_icon_name(icon_name: str, strict: bool = False) -> str:
         >>> resolve_icon_name("check_circle")
         "check_circle"
     """
-    import logging
+    from config.enhanced_logging import setup_logger
 
-    logger = logging.getLogger(__name__)
+    logger = setup_logger()
 
     normalized = icon_name.strip().lower()
 

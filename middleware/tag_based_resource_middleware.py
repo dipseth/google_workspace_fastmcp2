@@ -46,7 +46,7 @@ class CacheEntry:
         return datetime.now() - self.timestamp > timedelta(seconds=self.ttl_seconds)
 
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -203,7 +203,7 @@ class TagBasedResourceMiddleware(Middleware):
                     "form_responses": {
                         "display_name": "Form Responses",
                         "description": "Responses to Google Forms",
-                        "list_tool": "list_form_responses",
+                        "list_tool": None,  # Requires form_id — use get_form_response with specific IDs
                         "get_tool": "get_form_response",
                         "id_field": "response_id",
                     }
@@ -632,7 +632,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Log authentication source for debugging
-        logger.debug(f"🔐 Using authentication for user: {user_email}")
+        logger.debug(f"🔐 Using authentication for user: {redact_email(user_email)}")
 
         # Generate cache key (matches resource handler expectations)
         cache_key = f"service_list_response_{service}_{list_type}_{user_email}"
@@ -752,7 +752,7 @@ class TagBasedResourceMiddleware(Middleware):
             return
 
         # Log authentication source for debugging
-        logger.debug(f"🔐 Using authentication for user: {user_email}")
+        logger.debug(f"🔐 Using authentication for user: {redact_email(user_email)}")
 
         get_tool_name = list_type_info.get("get_tool")
 
@@ -1036,7 +1036,7 @@ class TagBasedResourceMiddleware(Middleware):
         try:
             if context.fastmcp_context:
                 mcp_server = context.fastmcp_context.fastmcp
-                from fastmcp.tools.tool import Tool
+                from fastmcp.tools import Tool
 
                 components = mcp_server.local_provider._components
                 tools_dict = {
@@ -1097,7 +1097,7 @@ class TagBasedResourceMiddleware(Middleware):
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")
 
         mcp_server = context.fastmcp_context.fastmcp
-        from fastmcp.tools.tool import Tool
+        from fastmcp.tools import Tool
 
         components = mcp_server.local_provider._components
         tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
@@ -1115,9 +1115,9 @@ class TagBasedResourceMiddleware(Middleware):
         # Call the tool's function with parameters
         try:
             # Check if the function is async
-            import asyncio
+            import inspect
 
-            if asyncio.iscoroutinefunction(tool_func):
+            if inspect.iscoroutinefunction(tool_func):
                 result = await tool_func(**parameters)
             else:
                 # Some tools might be sync functions

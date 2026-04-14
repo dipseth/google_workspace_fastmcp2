@@ -45,10 +45,30 @@ if _CA_BUNDLE:
 # Load environment variables from .env file
 load_dotenv()
 
-# Sampling handler for tests — uses Anthropic when tools call ctx.sample()
+# Sampling handler for tests — uses LiteLLM (Venice) or Anthropic when tools call ctx.sample()
 _test_sampling_handler = None
+_venice_key = os.getenv("VENICE_INFERENCE_KEY")
+_litellm_key = os.getenv("LITELLM_API_KEY")
 _anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-if _anthropic_key:
+_pref = os.getenv("SAMPLING_PROVIDER", "auto").lower().strip()
+
+if _pref in ("auto", "litellm") and (_litellm_key or _venice_key):
+    try:
+        from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
+
+        api_key = _litellm_key or _venice_key
+        api_base = os.getenv("LITELLM_API_BASE")
+        if not api_base and _venice_key and not _litellm_key:
+            api_base = "https://api.venice.ai/api/v1"
+        _test_sampling_handler = LiteLLMSamplingHandler(
+            default_model=os.getenv("LITELLM_MODEL", "openai/zai-org-glm-4.6"),
+            api_key=api_key,
+            api_base=api_base,
+        )
+    except ImportError:
+        pass  # litellm not installed
+
+if _test_sampling_handler is None and _pref in ("auto", "anthropic") and _anthropic_key:
     try:
         from anthropic import AsyncAnthropic
         from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
@@ -140,9 +160,11 @@ def print_test_configuration():
     )
     print(f"   SSL_CERT_FILE: {os.getenv('SSL_CERT_FILE', 'Not set')}")
     print(f"   SSL_KEY_FILE: {os.getenv('SSL_KEY_FILE', 'Not set')}")
-    print(
-        f"   SAMPLING: {'Anthropic handler' if _test_sampling_handler else 'None (ANTHROPIC_API_KEY not set)'}"
-    )
+    sampling_desc = "None (no API key set)"
+    if _test_sampling_handler:
+        handler_name = type(_test_sampling_handler).__name__
+        sampling_desc = f"{handler_name}"
+    print(f"   SAMPLING: {sampling_desc}")
 
 
 async def create_test_client(test_email: str = TEST_EMAIL):

@@ -25,7 +25,6 @@ Usage:
 """
 
 import json
-import logging
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -43,8 +42,9 @@ from adapters.module_wrapper.types import (
     RelationshipDict,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 class SkillsMixin:
@@ -72,6 +72,7 @@ class SkillsMixin:
             "generate_main_skill",
             "export_skills_to_directory",
             "get_skill_manifest",
+            "get_skill_resources_annotation",
             "register_skill_template",
             "register_skill_examples",
         }
@@ -174,6 +175,77 @@ class SkillsMixin:
     def get_registered_templates(self) -> List[str]:
         """Get list of all registered template names."""
         return list(self._skill_templates.keys())
+
+    # =========================================================================
+    # TOOL ANNOTATION HELPERS
+    # =========================================================================
+
+    def get_skill_resources_annotation(
+        self,
+        skill_name: Optional[str] = None,
+        resource_hints: Optional[Dict[str, Dict[str, str]]] = None,
+    ) -> List[Dict[str, str]]:
+        """
+        Generate a structured `skill_resources` annotation for tool definitions.
+
+        This produces a list of skill resource references that can be included
+        in a tool's `annotations` dict to guide LLMs to read relevant skill
+        docs before calling the tool.
+
+        Args:
+            skill_name: Skill directory name (e.g., "gchat-cards"). Defaults
+                to module_name with underscores replaced by hyphens.
+            resource_hints: Optional per-resource overrides. Maps resource
+                filename (e.g., "card-params.md") to a dict with optional
+                "purpose" and "when_to_read" keys.
+
+        Returns:
+            List of dicts with "uri", "purpose", and "when_to_read" keys,
+            suitable for embedding in tool annotations.
+        """
+        module_name = getattr(self, "module_name", "module")
+        skill_name = skill_name or module_name.replace("_", "-")
+        resource_hints = resource_hints or {}
+
+        resources: List[Dict[str, str]] = []
+
+        # Core generated resources
+        resources.append(
+            {
+                "uri": f"skill://{skill_name}/symbols.md",
+                "purpose": "Complete symbol reference table",
+                "when_to_read": "When looking up component symbols",
+            }
+        )
+        resources.append(
+            {
+                "uri": f"skill://{skill_name}/containment-rules.md",
+                "purpose": "Parent-child component hierarchy",
+                "when_to_read": "When nesting components in complex layouts",
+            }
+        )
+
+        # Custom templates (e.g., dsl-syntax, card-params, jinja-filters)
+        for template_name in self._skill_templates.keys():
+            filename = f"{template_name}.md"
+            hints = resource_hints.get(filename, {})
+            resources.append(
+                {
+                    "uri": f"skill://{skill_name}/{filename}",
+                    "purpose": hints.get("purpose", f"Guide: {template_name}"),
+                    "when_to_read": hints.get(
+                        "when_to_read", f"When using {template_name} features"
+                    ),
+                }
+            )
+
+        # Apply any overrides from resource_hints for core resources too
+        for res in resources:
+            filename = res["uri"].rsplit("/", 1)[-1]
+            if filename in resource_hints:
+                res.update(resource_hints[filename])
+
+        return resources
 
     # =========================================================================
     # GENERIC SKILL GENERATORS (Use introspected module data)
@@ -297,14 +369,24 @@ class SkillsMixin:
 
             # Add field information if available
             if hasattr(comp, "fields") and comp.fields:
-                lines.append("## Fields\n")
-                lines.append("| Field | Type | Required |")
-                lines.append("|-------|------|----------|")
-                for field_name, field_info in comp.fields.items():
-                    required = "Yes" if field_info.get("required") else "No"
-                    field_type = field_info.get("type", "unknown")
-                    lines.append(f"| `{field_name}` | {field_type} | {required} |")
-                lines.append("")
+                # Filter out internal/discriminator fields LLMs shouldn't supply
+                _skip = {"block_type", "component_type", "model_config"}
+                visible = {k: v for k, v in comp.fields.items() if k not in _skip}
+                if visible:
+                    lines.append("## Fields\n")
+                    lines.append("| Field | Type | Required | Default | Description |")
+                    lines.append("|-------|------|----------|---------|-------------|")
+                    for field_name, field_info in visible.items():
+                        required = "Yes" if field_info.get("required") else "No"
+                        field_type = field_info.get("type", "unknown")
+                        default = field_info.get("default")
+                        default_str = f"`{default}`" if default is not None else "—"
+                        desc = field_info.get("description", "")
+                        lines.append(
+                            f"| `{field_name}` | {field_type} | {required} "
+                            f"| {default_str} | {desc} |"
+                        )
+                    lines.append("")
 
             content = "\n".join(lines)
 

@@ -5,7 +5,6 @@ This module provides logic for categorizing tools and discovering services
 based on MCP tool tags and metadata.
 """
 
-import logging
 from typing import Any, Dict, List
 
 from fastmcp import FastMCP
@@ -29,7 +28,7 @@ class ServiceCategorizer:
         """
         self.mcp_server = mcp_server
         self.metadata_handler = MCPMetadataHandler(mcp_server)
-        self.logger = logging.getLogger(f"{__name__}.ServiceCategorizer")
+        self.logger = setup_logger()
 
     def discover_services_from_tools(self) -> Dict[str, Any]:
         """
@@ -247,7 +246,9 @@ class ServiceCategorizer:
         return service_map
 
 
-def get_dynamic_service_list(mcp_server: FastMCP) -> List[Dict[str, Any]]:
+def get_dynamic_service_list(
+    mcp_server: FastMCP,
+) -> List[Dict[str, Any]]:
     """
     Get dynamic list of available services based on registered tools.
 
@@ -319,7 +320,9 @@ def categorize_tool_by_tags(tags: List[str]) -> Dict[str, Any]:
     }
 
 
-def validate_service_tool_coverage(mcp_server: FastMCP) -> Dict[str, Any]:
+def validate_service_tool_coverage(
+    mcp_server: FastMCP,
+) -> Dict[str, Any]:
     """
     Validate that all known services have tool coverage.
 

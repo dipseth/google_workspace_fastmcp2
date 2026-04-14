@@ -14,12 +14,11 @@ Per-session toggle: sessions can override the server default via
 
 from __future__ import annotations
 
-import logging
 import secrets
 from typing import Optional
 
 from fastmcp.server.middleware import Middleware
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 
 from config.enhanced_logging import setup_logger
 from middleware.privacy.constants import PRIVACY_FIELD_PATTERNS

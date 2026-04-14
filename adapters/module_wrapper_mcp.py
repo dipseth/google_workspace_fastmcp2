@@ -8,9 +8,6 @@ This middleware follows the FastMCP pattern with proper hooks for request handli
 tool execution, and resource access, similar to the auth middleware.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import asyncio
 import importlib
 import inspect

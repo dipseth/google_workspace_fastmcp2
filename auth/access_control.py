@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import List, Optional, Set
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -77,25 +77,31 @@ class AccessControl:
 
         # Check 1: Explicit allowlist (if configured)
         if self._allowed_emails and email_lower in self._allowed_emails:
-            logger.info(f"✅ Email allowed (in allowlist): {email}")
+            logger.info(f"✅ Email allowed (in allowlist): {redact_email(email)}")
             return True
 
         # Check 2: Existing credentials (if required)
         if self.require_existing_credentials:
             if self._has_existing_credentials(email_lower):
-                logger.info(f"✅ Email allowed (has credentials): {email}")
+                logger.info(
+                    f"✅ Email allowed (has credentials): {redact_email(email)}"
+                )
                 return True
             else:
-                logger.warning(f"❌ Email denied (no credentials): {email}")
+                logger.warning(
+                    f"❌ Email denied (no credentials): {redact_email(email)}"
+                )
                 return False
 
         # Check 3: If allowlist is configured but email not in it
         if self._allowed_emails:
-            logger.warning(f"❌ Email denied (not in allowlist): {email}")
+            logger.warning(f"❌ Email denied (not in allowlist): {redact_email(email)}")
             return False
 
         # Default: Allow if no restrictions configured
-        logger.warning(f"⚠️ No access restrictions configured - allowing {email}")
+        logger.warning(
+            f"⚠️ No access restrictions configured - allowing {redact_email(email)}"
+        )
         return True
 
     def _has_existing_credentials(self, email: str) -> bool:
@@ -129,7 +135,7 @@ class AccessControl:
                     previous_email = oauth_data.get("authenticated_email", "").lower()
                     if previous_email == email.lower():
                         logger.info(
-                            f"✅ Allowing re-authentication for previously authenticated user: {email}"
+                            f"✅ Allowing re-authentication for previously authenticated user: {redact_email(email)}"
                         )
                         return True
                 except Exception as e:
@@ -153,7 +159,7 @@ class AccessControl:
         """
         email_lower = email.lower()
         self._allowed_emails.add(email_lower)
-        logger.info(f"➕ Added to allowlist: {email}")
+        logger.info(f"➕ Added to allowlist: {redact_email(email)}")
 
         # Persist to file if configured
         if self.allowlist_file:
@@ -173,7 +179,7 @@ class AccessControl:
         email_lower = email.lower()
         if email_lower in self._allowed_emails:
             self._allowed_emails.remove(email_lower)
-            logger.info(f"➖ Removed from allowlist: {email}")
+            logger.info(f"➖ Removed from allowlist: {redact_email(email)}")
 
             # Persist to file if configured
             if self.allowlist_file:

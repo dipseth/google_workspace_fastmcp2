@@ -3,8 +3,8 @@ Singleton ModuleWrapper for card_framework — setup, constants, and initializat
 
 This module owns:
     - All card-specific constants and metadata
-    - Singleton state (_wrapper, _wrapper_lock, _symbols, _symbols_lock)
-    - Wrapper creation and initialization
+    - Cached symbol state (_symbols, _symbols_lock)
+    - Wrapper creation and initialization (singleton via WrapperRegistry)
     - Skill template registration
 
 Usage:
@@ -13,19 +13,14 @@ Usage:
     wrapper = get_card_framework_wrapper()
 """
 
-import logging
 import threading
 from typing import Any, Dict, List, Optional
 
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger()
 
-# Thread-safe singleton
-_wrapper: Optional["ModuleWrapper"] = None
-_wrapper_lock = threading.Lock()
-
-# Cached symbols
+# Cached symbols (wrapper singleton is now managed by WrapperRegistry)
 _symbols: Optional[Dict[str, str]] = None
 _symbols_lock = threading.Lock()
 
@@ -61,6 +56,7 @@ GCHAT_STOPWORDS = [
 CARD_CONTEXT_RESOURCES = {
     "Button": ("buttons", "_button_index"),
     "Chip": ("chips", "_chip_index"),
+    "Column": ("columns", "_column_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
     "GridItem": ("grid_items", "_grid_item_index"),
@@ -331,7 +327,6 @@ CUSTOM_CHAT_API_METADATA = {
     },
 }
 
-
 # =============================================================================
 # SINGLETON ACCESS
 # =============================================================================
@@ -359,13 +354,15 @@ def get_card_framework_wrapper(
     Returns:
         Shared ModuleWrapper instance configured for card_framework
     """
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is None or force_reinitialize:
-            _wrapper = _create_wrapper(ensure_text_indices=ensure_text_indices)
+    if not WrapperRegistry.is_registered("card_framework"):
+        WrapperRegistry.register(
+            "card_framework",
+            lambda: _create_wrapper(ensure_text_indices=ensure_text_indices),
+        )
 
-    return _wrapper
+    return WrapperRegistry.get("card_framework", force_reinitialize=force_reinitialize)
 
 
 def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
@@ -492,6 +489,35 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             _hook_post_pipeline_qdrant_writes,
         ],
         domain_label="Google Chat Cards",
+        cache_priority_components=[
+            "Section",
+            "DecoratedText",
+            "TextParagraph",
+            "ButtonList",
+            "Button",
+            "Image",
+            "Icon",
+            "Card",
+            "CardHeader",
+            "OnClick",
+            "OpenLink",
+            "Color",
+            "Divider",
+            "Grid",
+            "GridItem",
+            "Columns",
+            "Column",
+            "Carousel",
+            "CarouselCard",
+        ],
+        dsl_categories={
+            "card_structure": ["Card", "CardHeader", "Section"],
+            "carousel": ["Carousel", "CarouselCard", "NestedWidget"],
+            "containers": ["ButtonList", "ChipList", "Grid", "Columns"],
+            "widgets": ["DecoratedText", "TextParagraph", "Image", "Divider"],
+            "items": ["Button", "Chip", "GridItem", "Column"],
+            "message": ["AccessoryWidget"],
+        },
     )
 
     wrapper = ModuleWrapper(
@@ -512,7 +538,13 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     wrapper.initialize()
 
     component_count = len(wrapper.components) if wrapper.components else 0
-    logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
+    if wrapper.is_degraded:
+        logger.warning(
+            f"⚠️ Card framework wrapper DEGRADED: {component_count} components "
+            f"(in-memory only — vector search unavailable until Qdrant/embeddings recover)"
+        )
+    else:
+        logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
 
     # Run post-init hooks (in-memory operations)
     wrapper.run_domain_hooks("post_init")
@@ -560,6 +592,14 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             except Exception as e:
                 logger.debug(f"Could not check instance patterns: {e}")
 
+    # Register this wrapper as the default for backwards-compatible code
+    # (e.g. VariationGenerator._ensure_wrapper fallback)
+    from adapters.module_wrapper.variation_generator import (
+        register_default_wrapper_getter,
+    )
+
+    register_default_wrapper_getter(get_card_framework_wrapper)
+
     return wrapper
 
 
@@ -572,12 +612,11 @@ def reset_wrapper():
         - During testing
         - After configuration changes
     """
-    global _wrapper, _symbols
+    global _symbols
 
-    with _wrapper_lock:
-        if _wrapper is not None:
-            logger.info("🔄 Resetting singleton ModuleWrapper")
-            _wrapper = None
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
+
+    WrapperRegistry.reset("card_framework")
 
     with _symbols_lock:
         _symbols = None
@@ -587,15 +626,15 @@ def reset_wrapper():
 # GCHAT-SPECIFIC SKILL TEMPLATES
 # =============================================================================
 
-# DSL Guide template content
-GCHAT_DSL_GUIDE = """# Structure DSL
+# DSL Guide template — symbols are injected by _generate_gchat_dsl_template()
+_GCHAT_DSL_GUIDE_TEMPLATE = """# Structure DSL
 
 Google Chat cards use a compact DSL notation for defining structure.
 
 ## Basic Syntax
 
 ```
-§[δ×3, Ƀ[ᵬ×2]]
+{basic_example}
 ```
 
 Means: Section with 3 DecoratedText items and a ButtonList with 2 Buttons.
@@ -661,34 +700,39 @@ Filters can be chained:
 {examples}
 """
 
-# Skill examples for different skill types
-GCHAT_SKILL_EXAMPLES = {
-    "dsl-syntax": [
-        "§[δ] - Simple section with one DecoratedText",
-        "§[δ×3, Ƀ[ᵬ×2]] - Section with 3 texts and 2 buttons",
-        "§[ℊ[ǵ×4]] - Section with a 4-item Grid",
-        "§[δ, Ɨ, Ƀ[ᵬ]] - Section with text, image, and button",
-    ],
-    "jinja-filters": [
-        "{{ 'Online' | success_text }} - Green text",
-        "{{ 'Error' | error_text }} - Red text",
-        "{{ 'Warning' | warning_text }} - Yellow text",
-        "{{ text | color('#FF5733') }} - Custom orange text",
-        "{{ 'Important' | bold }} - Bold text",
-    ],
-}
+
+def _get_gchat_skill_examples(symbols: dict) -> dict:
+    """Generate skill examples dynamically from wrapper symbols."""
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+    section = s("Section")
+    dtext = s("DecoratedText")
+    btnlist = s("ButtonList")
+    btn = s("Button")
+    grid = s("Grid")
+    gitem = s("GridItem")
+    img = s("Image")
+    return {
+        "dsl-syntax": [
+            f"{section}[{dtext}] - Simple section with one DecoratedText",
+            f"{section}[{dtext}\u00d73, {btnlist}[{btn}\u00d72]] - Section with 3 texts and 2 buttons",
+            f"{section}[{grid}[{gitem}\u00d74]] - Section with a 4-item Grid",
+            f"{section}[{dtext}, {img}, {btnlist}[{btn}]] - Section with text, image, and button",
+        ],
+        "jinja-filters": [
+            "{{ 'Online' | success_text }} - Green text",
+            "{{ 'Error' | error_text }} - Red text",
+            "{{ 'Warning' | warning_text }} - Yellow text",
+            "{{ text | color('#FF5733') }} - Custom orange text",
+            "{{ 'Important' | bold }} - Bold text",
+        ],
+    }
 
 
 def _generate_gchat_dsl_template(wrapper) -> str:
-    """
-    Generate the DSL syntax skill document.
+    """Generate the DSL syntax skill document with dynamic symbols."""
+    symbols = getattr(wrapper, "symbol_mapping", {})
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
 
-    Args:
-        wrapper: ModuleWrapper instance
-
-    Returns:
-        Markdown content for DSL syntax guide
-    """
     # Get symbol table from wrapper
     symbol_table = (
         wrapper.get_symbol_table_text()
@@ -696,14 +740,192 @@ def _generate_gchat_dsl_template(wrapper) -> str:
         else "No symbols available."
     )
 
-    # Format examples
-    examples = GCHAT_SKILL_EXAMPLES.get("dsl-syntax", [])
+    # Build examples from dynamic symbols
+    examples = _get_gchat_skill_examples(symbols).get("dsl-syntax", [])
     examples_text = "\n".join(f"- `{e}`" for e in examples)
 
-    return GCHAT_DSL_GUIDE.format(
+    section = s("Section")
+    dtext = s("DecoratedText")
+    btnlist = s("ButtonList")
+    btn = s("Button")
+
+    return _GCHAT_DSL_GUIDE_TEMPLATE.format(
+        basic_example=f"{section}[{dtext}\u00d73, {btnlist}[{btn}\u00d72]]",
         symbol_table=symbol_table,
         examples=examples_text,
     )
+
+
+def _generate_gchat_card_params_template(wrapper) -> str:
+    """
+    Generate the card_params skill document dynamically from wrapper symbols.
+
+    All symbols are pulled from wrapper.symbol_mapping — no hardcoded Unicode.
+
+    Args:
+        wrapper: ModuleWrapper instance
+
+    Returns:
+        Markdown content for card_params guide
+    """
+    symbols = getattr(wrapper, "symbol_mapping", {})
+
+    # Get symbols dynamically
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+
+    # Symbol-to-flat-key mapping table (from symbol_params.py resolution rules)
+    # These are the components that have context_resources and resolve to flat keys
+    param_rows = [
+        (
+            s("DecoratedText"),
+            "DecoratedText",
+            "items",
+            "List of decorated text widgets",
+        ),
+        (
+            s("TextParagraph"),
+            "TextParagraph",
+            "items",
+            "List of text paragraph widgets",
+        ),
+        (s("Button"), "Button", "buttons", "List of button widgets"),
+        (s("GridItem"), "GridItem", "grid_items", "List of grid cells"),
+        (s("CarouselCard"), "CarouselCard", "cards", "List of carousel card widgets"),
+        (s("Chip"), "Chip", "chips", "List of chip widgets"),
+    ]
+
+    # Container symbols (no param key — use children's symbols)
+    container_syms = ", ".join(
+        f"`{s(c)}`"
+        for c in ["Section", "ButtonList", "Grid", "Carousel", "Columns", "ChipList"]
+        if s(c, None) is not None
+    )
+
+    # Build the mapping table
+    table_rows = "\n".join(
+        f"| `{sym}` | {comp} | `{key}` | {purpose} |"
+        for sym, comp, key, purpose in param_rows
+    )
+
+    # Build dynamic examples using actual symbols
+    dtext = s("DecoratedText")
+    btn = s("Button")
+    gitem = s("GridItem")
+    ccard = s("CarouselCard")
+    section = s("Section")
+    divider = s("Divider")
+    btnlist = s("ButtonList")
+
+    lines = [
+        "# Card Params Reference",
+        "",
+        "How to structure `card_params` when using DSL notation with `send_dynamic_card`.",
+        "",
+        "## Structure DSL vs Content DSL",
+        "",
+        f"- `card_description`: Accepts **both** Structure DSL (`{section}[{dtext}x2]`) "
+        f"and Content DSL (`{dtext} 'text' success bold`)",
+        f"- `card_params`: Explicit content overrides keyed by symbol — "
+        f"always takes priority over Content DSL",
+        "",
+        "## Symbol-Keyed Params",
+        "",
+        "Use DSL symbols as keys in `card_params` for direct correspondence with the DSL structure.",
+        "",
+        "### Symbol to Flat Key Mapping",
+        "",
+        "| Symbol | Component | Flat Key | Purpose |",
+        "|--------|-----------|----------|---------|",
+        table_rows,
+        "",
+        f"Container symbols ({container_syms}) have no param key — use their children's symbols.",
+        "",
+        "## Three Formats",
+        "",
+        "### Format A: Direct List",
+        "```json",
+        f'{{"{dtext}": [{{"text": "Item 1", "top_label": "Status"}}, {{"text": "Item 2"}}]}}',
+        "```",
+        "",
+        "### Format B: _shared/_items (DRY — recommended)",
+        "```json",
+        "{",
+        f'  "{dtext}": {{',
+        '    "_shared": {"top_label": "Status", "icon": "check_circle"},',
+        '    "_items": [',
+        '      {"text": "Drive: Online"},',
+        '      {"text": "Gmail: Online"}',
+        "    ]",
+        "  }",
+        "}",
+        "```",
+        "Each `_items` entry is merged with `_shared` (item fields override shared).",
+        "",
+        "### Format C: Single Dict (auto-wrapped in list)",
+        "```json",
+        f'{{"{btn}": {{"text": "Click Me", "url": "https://example.com"}}}}',
+        "```",
+        "",
+        "## Component Field Reference",
+        "",
+        f"### DecoratedText (`{dtext}`)",
+        '- `text` (**required**) — Main content (supports HTML: `<b>`, `<font color="...">`)',
+        "- `top_label` — Small label above text",
+        "- `bottom_label` — Small label below text",
+        "- `icon` — Google Material icon name (e.g., `star`, `check_circle`, `error`)",
+        "",
+        f"### Button (`{btn}`)",
+        "- `text` (**required**) — Button label",
+        "- `url` — Click target URL",
+        "- `icon` — Optional icon name",
+        "",
+        f"### GridItem (`{gitem}`)",
+        "- `title` (**required**) — Item title",
+        "- `subtitle` — Optional subtitle",
+        "- `image_url` — Optional image URL",
+        "",
+        f"### CarouselCard (`{ccard}`)",
+        "- `title` (**required**) — Card title",
+        "- `subtitle` — Optional subtitle",
+        "- `text` — Optional card body",
+        "- `image_url` — Optional image",
+        "- `buttons` — Optional list of `{text, url}` dicts",
+        "",
+        f"### TextParagraph (`{s('TextParagraph')}`)",
+        "- `text` (**required**) — Paragraph text (supports HTML)",
+        "",
+        "## Important Rules",
+        "",
+        f"1. **Item count must match DSL multiplier**: `{dtext}×3` requires exactly 3 items in `_items`",
+        f"2. **Symbol keys override flat keys**: If both `{dtext}` and `items` exist, `{dtext}` wins",
+        "3. **Backward compatible**: Flat keys (`items`, `buttons`, `grid_items`) still work",
+        "4. **`title` and `subtitle`** are card-level params, not symbol-keyed",
+        "",
+        "## Full Example",
+        "",
+        f"DSL: `{section}[{dtext}×2, {divider}, {btnlist}[{btn}×2]]`",
+        "",
+        "```json",
+        "{",
+        '  "title": "System Status",',
+        '  "subtitle": "All services",',
+        f'  "{dtext}": {{',
+        '    "_shared": {"icon": "monitoring", "top_label": "Service"},',
+        '    "_items": [',
+        '      {"text": "API: <font color=\\"#34a853\\"><b>Online</b></font>"},',
+        '      {"text": "DB: <font color=\\"#fbbc04\\"><b>Warning</b></font>"}',
+        "    ]",
+        "  },",
+        f'  "{btn}": [',
+        '    {"text": "View Details", "url": "https://example.com/details"},',
+        '    {"text": "Export CSV", "url": "https://example.com/export"}',
+        "  ]",
+        "}",
+        "```",
+        "",
+    ]
+
+    return "\n".join(lines)
 
 
 def _generate_gchat_jinja_template(wrapper) -> str:
@@ -737,11 +959,15 @@ def _register_gchat_skill_templates(wrapper) -> None:
     # Register DSL syntax template
     wrapper.register_skill_template("dsl-syntax", _generate_gchat_dsl_template)
 
+    # Register card_params guide (symbol keys, _shared/_items, field reference)
+    wrapper.register_skill_template("card-params", _generate_gchat_card_params_template)
+
     # Register Jinja filter guide
     wrapper.register_skill_template("jinja-filters", _generate_gchat_jinja_template)
 
-    # Register examples for each skill type
-    for skill_type, examples in GCHAT_SKILL_EXAMPLES.items():
+    # Register examples for each skill type (dynamically generated from symbols)
+    symbols = getattr(wrapper, "symbol_mapping", {})
+    for skill_type, examples in _get_gchat_skill_examples(symbols).items():
         wrapper.register_skill_examples(skill_type, examples)
 
     logger.info("Registered gchat skill templates with ModuleWrapper")

@@ -6,7 +6,6 @@ response that needs privacy and destroyed when the session expires.
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import Optional
 

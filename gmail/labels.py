@@ -464,7 +464,7 @@ async def list_gmail_labels(
             labels=[], total_count=0, system_labels=[], user_labels=[], error=error_msg
         )
 
-    logger.info(f"[list_gmail_labels] Email: '{user_google_email}'")
+    logger.info("[list_gmail_labels] Invoked")
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)

@@ -117,7 +117,7 @@ async def _get_optimized_photos_client(user_google_email: str) -> OptimizedPhoto
     )
 
     _client_cache[user_google_email] = client
-    logger.info(f"Created optimized Photos client for {user_google_email}")
+    logger.info("Created optimized Photos client")
     return client
 
 
@@ -588,7 +588,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
                 client._cache.cache.clear()
                 client._cache.access_order.clear()
                 text_output += "\n\n✅ Cache cleared successfully."
-                logger.info(f"Cleared cache for {user_google_email}")
+                logger.info("Cleared Photos cache")
 
             return PhotosPerformanceStatsResponse(
                 cache_size=stats["cache_size"],

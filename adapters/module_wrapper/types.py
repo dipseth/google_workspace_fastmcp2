@@ -519,6 +519,56 @@ class TimestampedMixin:
         self.access_count += 1
 
 
+@dataclass
+class ContentSupplySummary:
+    """Domain-agnostic summary of user-supplied content for learned scoring.
+
+    Built from card_params (or email_params) before search, passed into
+    the scorer so it can compute content alignment features (V4).
+    Keeps search_mixin decoupled from card/email builder internals.
+    """
+
+    pool_counts: Dict[
+        str, int
+    ]  # context_key → item count (e.g., {"buttons": 2, "content_texts": 3})
+    dominant_pool: str  # pool with the most items (e.g., "content_texts")
+    total_items: int  # sum of all pool counts
+    content_text: str  # concatenated text from all items (for semantic embedding)
+    avg_item_length: float  # mean char length of text items
+    n_pools_used: int  # how many distinct pools have content (complexity signal)
+
+    @classmethod
+    def from_supply_map(cls, supply_map: Dict[str, list]) -> "ContentSupplySummary":
+        """Build from a supply_map dict (pool_key → list of items)."""
+        pool_counts = {k: len(v) for k, v in supply_map.items()}
+        total = sum(pool_counts.values())
+        dominant = max(pool_counts, key=pool_counts.get) if total > 0 else "none"
+        n_used = sum(1 for v in pool_counts.values() if v > 0)
+
+        # Concatenate all text values for semantic embedding
+        texts = []
+        for items in supply_map.values():
+            for item in items:
+                if isinstance(item, dict):
+                    for key in ("text", "title", "label", "subtitle"):
+                        val = item.get(key)
+                        if val and isinstance(val, str):
+                            texts.append(val)
+                elif isinstance(item, str):
+                    texts.append(item)
+        content_text = " ".join(texts)
+        avg_len = sum(len(t) for t in texts) / len(texts) if texts else 0.0
+
+        return cls(
+            pool_counts=pool_counts,
+            dominant_pool=dominant,
+            total_items=total,
+            content_text=content_text,
+            avg_item_length=avg_len,
+            n_pools_used=n_used,
+        )
+
+
 # =============================================================================
 # CONSTANTS
 # =============================================================================
@@ -533,6 +583,14 @@ MINILM_DIM: int = 384
 
 RELATIONSHIPS_DIM: int = 384
 """Dimension for relationship embeddings."""
+
+CONTENT_DIM: int = 384
+"""Dimension for content embeddings (MiniLM, same model as relationships)."""
+
+EXPECTED_VECTOR_NAMES: frozenset = frozenset(
+    {"components", "inputs", "relationships", "content"}
+)
+"""Expected named vectors in the Qdrant collection schema (v2, 4-vector)."""
 
 # Default relationship extraction depth (used by core.py and relationships_mixin.py)
 DEFAULT_RELATIONSHIP_DEPTH: int = 5

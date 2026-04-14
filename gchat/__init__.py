@@ -2,8 +2,6 @@
 Google Chat MCP Tools Package
 """
 
-import logging
-
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()

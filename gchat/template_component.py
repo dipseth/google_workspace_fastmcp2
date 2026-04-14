@@ -11,13 +11,14 @@ Architecture:
 """
 
 import importlib
-import logging
 import os
 from typing import Any, Dict, List, Optional
 
 import yaml
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 # Directory for promoted template YAML files
 TEMPLATES_DIR = os.path.join(

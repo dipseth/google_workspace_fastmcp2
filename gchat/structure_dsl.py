@@ -25,13 +25,14 @@ Symbol Generation:
     or use the hardcoded defaults below for backward compatibility.
 """
 
-import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 # =============================================================================
 # SYMBOL TABLE (Initialized from SymbolGenerator - SSoT)
@@ -58,7 +59,6 @@ _ASCII_CONFUSABLES: Dict[str, str] = {}
 
 # Flag to track initialization
 _initialized = False
-
 
 # =============================================================================
 # DYNAMIC SYMBOL TABLE MANAGEMENT

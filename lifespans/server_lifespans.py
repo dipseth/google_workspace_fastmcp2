@@ -38,6 +38,12 @@ logger = setup_logger()
 _lifespan_state: Dict[str, Any] = {}
 
 
+def register_litellm_handler(handler: Any) -> None:
+    """Register the LiteLLM sampling handler for cache keepalive access."""
+    _lifespan_state["litellm_handler"] = handler
+    logger.debug("Registered LiteLLM handler for lifespan management")
+
+
 def register_qdrant_middleware(middleware: Any) -> None:
     """
     Register the Qdrant middleware instance created in server.py.
@@ -50,6 +56,45 @@ def register_qdrant_middleware(middleware: Any) -> None:
     """
     _lifespan_state["qdrant_middleware"] = middleware
     logger.debug("Registered Qdrant middleware for lifespan management")
+
+
+@lifespan
+async def embedding_lifespan(server: Any):
+    """
+    Centralized embedding service lifecycle.
+
+    Preloads configured embedding models and releases them on shutdown.
+    Must run before qdrant_lifespan so models are available for Qdrant init.
+
+    Yields:
+        Dict with 'embedding_service' reference
+    """
+    from config.embedding_service import close_embedding_service, get_embedding_service
+    from config.settings import settings
+
+    service = get_embedding_service()
+
+    # Preload configured slots (non-blocking — failure enters degraded mode)
+    eager = getattr(settings, "embedding_eager_load", "")
+    if eager:
+        slots = [s.strip() for s in eager.split(",") if s.strip()]
+        if slots:
+            try:
+                logger.info(f"Embedding lifespan: preloading {slots}...")
+                await service.preload(*slots)
+                logger.info(f"Embedding lifespan: preloaded {slots}")
+            except Exception as e:
+                logger.warning(
+                    f"Embedding lifespan: preload failed (degraded mode): {e} "
+                    f"— models will attempt lazy loading on first use"
+                )
+
+    try:
+        yield {"embedding_service": service}
+    finally:
+        logger.info("Embedding lifespan: shutting down...")
+        await close_embedding_service()
+        logger.info("Embedding lifespan: shutdown complete")
 
 
 @lifespan
@@ -240,7 +285,7 @@ async def cache_middleware_lifespan(server: Any):
 # before an opaque OOM kill. Configurable via env vars.
 import os
 
-_MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "2048"))
+_MEMORY_LIMIT_MB = int(os.getenv("MEMORY_LIMIT_MB", "3072"))
 _MEMORY_WARN_PCT = float(os.getenv("MEMORY_WARN_PCT", "0.65"))
 _MEMORY_CRITICAL_PCT = float(os.getenv("MEMORY_CRITICAL_PCT", "0.75"))
 _CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300"))
@@ -414,7 +459,50 @@ async def _periodic_memory_cleanup(
             elif rss_mb > _WARN_THRESHOLD_MB:
                 logger.warning(
                     f"RSS {rss_mb:.0f}MB exceeds warning threshold "
-                    f"{_WARN_THRESHOLD_MB}MB ({_MEMORY_WARN_PCT:.0%} of {_MEMORY_LIMIT_MB}MB)"
+                    f"{_WARN_THRESHOLD_MB}MB ({_MEMORY_WARN_PCT:.0%} of {_MEMORY_LIMIT_MB}MB) "
+                    f"— proactively evicting caches"
+                )
+
+                # Proactive cache eviction to prevent reaching critical threshold
+                evicted_total = 0
+
+                # Clear dashboard cache (in-memory portion)
+                try:
+                    from middleware.dashboard_cache_middleware import (
+                        clear_dashboard_cache,
+                    )
+
+                    evicted_total += clear_dashboard_cache()
+                except Exception as e:
+                    logger.debug(f"Dashboard cache clear skipped: {e}")
+
+                # Clear profile cache
+                profile_mw = cache_refs.get("profile_middleware")
+                if profile_mw is not None:
+                    try:
+                        profile_mw.clear_cache()
+                        evicted_total += 1  # count as 1 batch operation
+                    except Exception as e:
+                        logger.debug(f"Profile cache clear skipped: {e}")
+
+                # Clear template cache
+                template_mw = cache_refs.get("template_middleware")
+                if template_mw is not None:
+                    try:
+                        cm = getattr(template_mw, "cache_manager", None)
+                        if cm is not None:
+                            evicted_total += cm.cleanup_expired_entries()
+                    except Exception as e:
+                        logger.debug(f"Template cache clear skipped: {e}")
+
+                # Force garbage collection
+                gc.collect()
+
+                rss_after = _get_rss_mb()
+                logger.warning(
+                    f"Proactive eviction complete: {evicted_total} items evicted, "
+                    f"RSS {rss_mb:.0f}MB -> {rss_after:.0f}MB "
+                    f"(freed ~{rss_mb - rss_after:.0f}MB)"
                 )
 
         except Exception as e:
@@ -643,28 +731,201 @@ def get_lifespan_state() -> Dict[str, Any]:
     return _lifespan_state.copy()
 
 
+@lifespan
+async def otel_lifespan(server: Any):
+    """
+    OpenTelemetry TracerProvider lifecycle for Langfuse OTLP export.
+
+    Must be first in the composition chain so the TracerProvider is active
+    before any spans are created by other lifespans or tool calls.
+
+    No-op if Langfuse is not configured.
+
+    Yields:
+        Dict with 'otel_configured' flag
+    """
+    configured = False
+    try:
+        from middleware.otel_setup import configure_otel_for_langfuse
+
+        configured = configure_otel_for_langfuse()
+        if configured:
+            logger.info("✅ OTEL lifespan: TracerProvider active")
+        else:
+            logger.info("⏭️ OTEL lifespan: Skipped (Langfuse not configured)")
+    except Exception as e:
+        logger.warning(f"⚠️ OTEL lifespan: Setup failed: {e}")
+
+    try:
+        yield {"otel_configured": configured}
+    finally:
+        if configured:
+            try:
+                from middleware.otel_setup import shutdown_otel
+
+                shutdown_otel()
+                logger.info("✅ OTEL lifespan shutdown complete")
+            except Exception as e:
+                logger.warning(f"⚠️ OTEL shutdown error: {e}")
+
+
+@lifespan
+async def cache_keepalive_lifespan(server: Any):
+    """Prompt cache keepalive lifecycle.
+
+    Sends periodic sampling calls to keep Anthropic prompt cache warm.
+    Must run after embedding and qdrant lifespans (needs DSL docs available).
+    No-op if disabled or model is not Anthropic.
+    """
+    from config.settings import settings
+
+    if not settings.cache_keepalive_enabled:
+        logger.info("Cache keepalive: disabled")
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        from middleware.litellm_sampling_handler import is_anthropic_model
+    except ImportError:
+        is_anthropic_model = lambda m: m.startswith("anthropic/")  # noqa: E731
+
+    if not is_anthropic_model(settings.litellm_model):
+        logger.info("Cache keepalive: skipped (model is not Anthropic)")
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        from middleware.cache_keepalive import (
+            CacheKeepaliveEngine,
+            register_default_modules,
+        )
+
+        engine = CacheKeepaliveEngine(settings=settings)
+        register_default_modules(engine, settings)
+
+        await engine.start()
+        logger.info(
+            "Cache keepalive: started (%d modules, interval=%ds)",
+            len(engine._modules),
+            settings.cache_keepalive_interval_seconds,
+        )
+    except Exception as e:
+        logger.warning("Cache keepalive: failed to start: %s", e)
+        yield {"cache_keepalive_engine": None}
+        return
+
+    try:
+        yield {"cache_keepalive_engine": engine}
+    finally:
+        await engine.stop()
+
+
+@lifespan
+async def model_artifact_lifespan(server: Any):
+    """
+    Model artifact download lifecycle.
+
+    Downloads PyTorch model checkpoints from cloud storage (GCS, S3, Azure, HTTP)
+    on startup using a py-key-value-aio backed registry for metadata tracking.
+
+    Sets MODEL_ARTIFACT_CACHE_DIR in _lifespan_state so that checkpoint resolution
+    can find downloaded artifacts without changing env vars at runtime.
+
+    No-op if MODEL_ARTIFACT_ENABLED is not set.
+
+    Yields:
+        Dict with 'model_artifact_provider' and 'model_artifact_paths' (domain->path)
+    """
+    from config.settings import settings
+
+    if not settings.model_artifact_enabled:
+        logger.info("Model artifacts: disabled (MODEL_ARTIFACT_ENABLED=false)")
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+        return
+
+    from config.model_artifacts import (
+        ModelArtifactProvider,
+        parse_artifact_uri_setting,
+    )
+
+    uri_map = parse_artifact_uri_setting(settings.model_artifact_uri)
+    if not uri_map:
+        logger.warning(
+            "Model artifacts: enabled but MODEL_ARTIFACT_URI is empty, skipping"
+        )
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+        return
+
+    logger.info(
+        f"Model artifacts: downloading {len(uri_map)} artifact(s) "
+        f"({', '.join(uri_map.keys())})"
+    )
+
+    try:
+        provider = await ModelArtifactProvider.create(settings)
+        paths = await provider.ensure_all(uri_map)
+
+        # Store paths in lifespan state for checkpoint resolution
+        _lifespan_state["model_artifact_paths"] = {
+            domain: str(path) for domain, path in paths.items()
+        }
+
+        logger.info(
+            f"Model artifacts: {len(paths)}/{len(uri_map)} downloaded successfully"
+        )
+
+        yield {
+            "model_artifact_provider": provider,
+            "model_artifact_paths": paths,
+        }
+    except Exception as e:
+        logger.error(f"Model artifacts: startup download failed: {e}")
+        logger.warning("Model artifacts: falling back to local checkpoints")
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+
+
+def get_model_artifact_paths() -> Dict[str, str]:
+    """Get downloaded model artifact paths from lifespan state.
+
+    Returns:
+        Dict mapping domain names to local file paths.
+        Empty dict if model artifacts are disabled or not yet downloaded.
+    """
+    return _lifespan_state.get("model_artifact_paths", {})
+
+
 # Pre-composed lifespan for the full server lifecycle using FastMCP's | operator
 # Composition order: enter left-to-right, exit right-to-left
 combined_server_lifespan = (
-    qdrant_lifespan
+    otel_lifespan  # First — TracerProvider must be active for all other spans
+    | model_artifact_lifespan  # Second — download models before anything uses them
+    | embedding_lifespan  # Third — embedding models loaded before Qdrant init
+    | qdrant_lifespan
     | colbert_lifespan
     | session_state_lifespan
     | cache_middleware_lifespan
     | memory_cleanup_lifespan
+    | cache_keepalive_lifespan  # After cleanup — needs DSL docs available
     | dynamic_instructions_lifespan
 )
 
 
 # Export for use in server.py
 __all__ = [
+    "otel_lifespan",
+    "model_artifact_lifespan",
+    "embedding_lifespan",
     "qdrant_lifespan",
     "colbert_lifespan",
     "session_state_lifespan",
     "cache_middleware_lifespan",
     "memory_cleanup_lifespan",
+    "cache_keepalive_lifespan",
     "dynamic_instructions_lifespan",
     "combined_server_lifespan",
+    "register_litellm_handler",
     "register_profile_middleware",
     "register_template_middleware",
     "get_lifespan_state",
+    "get_model_artifact_paths",
 ]

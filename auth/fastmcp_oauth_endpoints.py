@@ -15,15 +15,12 @@ from auth.context import (
     set_session_context,
     set_user_email_context,
 )
-from auth.types import SessionKey
-from config.enhanced_logging import setup_logger
-from config.settings import settings
 
 # Initialize logger early
-logger = setup_logger()
-
 # Import OAuth proxy at module level to ensure singleton behavior
 from auth.oauth_proxy import handle_token_exchange, oauth_proxy, refresh_access_token
+from auth.types import SessionKey
+from config.settings import settings
 
 # Import compatibility shim for OAuth scope management
 try:
@@ -90,7 +87,7 @@ def _get_oauth_endpoint_scopes():
         return _FALLBACK_OAUTH_SCOPES
 
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -244,7 +241,6 @@ async def _store_oauth_user_data_async(
     except Exception as e:
         logger.error(
             f"❌ Failed to integrate OAuth authentication data (async): {e}",
-            exc_info=True,
         )
         # This is background processing, so we don't want to crash anything
 
@@ -253,522 +249,24 @@ def _generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True
 ) -> str:
     """Generate the service selection page HTML with authentication method choice."""
-    from config.settings import settings as _settings
+    from auth.ui import generate_service_selection_html
 
-    _env_client_id = (
-        _settings.google_client_id or _settings.fastmcp_server_auth_google_client_id
-    )
-    _env_client_secret = (
-        _settings.google_client_secret
-        or _settings.fastmcp_server_auth_google_client_secret
-    )
-    _env_has_creds = bool(_env_client_id and _env_client_secret)
-    _env_client_id_display = (_env_client_id[:20] + "...") if _env_client_id else ""
-    _redirect_uri = getattr(
-        _settings, "dynamic_oauth_redirect_uri", "https://localhost:8002/oauth2callback"
-    )
-
+    # Retrieve the requested email from the OAuth state map for THIS specific flow
+    requested_email = ""
     try:
-        from .scope_registry import ScopeRegistry
+        from auth.google_auth import _oauth_state_map
 
-        services_catalog = ScopeRegistry.get_service_catalog()
+        state_info = _oauth_state_map.get(state)
+        if state_info:
+            requested_email = state_info.get("user_email", "")
+            if requested_email == "unknown@gmail.com":
+                requested_email = ""
+    except Exception:
+        pass
 
-        # Group services by category
-        categories = {}
-        for key, service in services_catalog.items():
-            category = service.get("category", "Other")
-            if category not in categories:
-                categories[category] = []
-            categories[category].append((key, service))
-
-        # Build env-configured credentials banner or empty state
-        if _env_has_creds:
-            creds_status_html = f"""
-                <div style="display:flex;align-items:center;gap:10px;background:rgba(52,168,83,0.08);
-                            border:1px solid rgba(52,168,83,0.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;">
-                    <span style="font-size:20px">✅</span>
-                    <div>
-                        <div style="font-size:13px;font-weight:600;color:#137333">Environment credentials configured</div>
-                        <div style="font-size:11px;color:#5f6368;font-family:monospace;margin-top:2px">{_env_client_id_display}</div>
-                    </div>
-                    <div style="margin-left:auto;font-size:11px;color:#137333;background:rgba(52,168,83,0.12);
-                                padding:3px 10px;border-radius:12px;font-weight:600">AUTO</div>
-                </div>"""
-            creds_hint = "Override below only if you need different credentials for this session."
-        else:
-            creds_status_html = f"""
-                <div style="display:flex;align-items:center;gap:10px;background:rgba(234,67,53,0.06);
-                            border:1px solid rgba(234,67,53,0.2);border-radius:10px;padding:12px 16px;margin-bottom:12px;">
-                    <span style="font-size:20px">⚠️</span>
-                    <div>
-                        <div style="font-size:13px;font-weight:600;color:#c5221f">No environment credentials found</div>
-                        <div style="font-size:11px;color:#5f6368;margin-top:2px">Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET or enter below</div>
-                    </div>
-                </div>"""
-            creds_hint = "Enter your Google OAuth credentials to continue."
-
-        html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Authentication — FastMCP</title>
-    <style>
-        *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            padding: 40px 20px;
-        }}
-        .card {{
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-            width: 100%;
-            max-width: 680px;
-            overflow: hidden;
-        }}
-        /* Header — matches success screen gradient treatment */
-        .card-header {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 36px 40px 30px;
-            text-align: center;
-            color: white;
-        }}
-        .card-header .icon {{ font-size: 52px; margin-bottom: 12px; }}
-        .card-header h1 {{ font-size: 26px; font-weight: 700; margin-bottom: 6px; }}
-        .card-header p {{ font-size: 14px; opacity: 0.85; }}
-        .card-body {{ padding: 32px 40px 40px; }}
-
-        /* Section panels */
-        .panel {{
-            border: 1.5px solid #e8eaed;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            overflow: hidden;
-        }}
-        .panel-header {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 14px 18px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e8eaed;
-            cursor: pointer;
-            user-select: none;
-        }}
-        .panel-header .panel-icon {{ font-size: 18px; }}
-        .panel-header .panel-title {{ font-size: 14px; font-weight: 600; color: #202124; flex: 1; }}
-        .panel-header .panel-badge {{
-            font-size: 11px; font-weight: 600; padding: 2px 10px;
-            border-radius: 12px; background: #e8f0fe; color: #1a73e8;
-        }}
-        .panel-header .panel-badge.green {{ background: rgba(52,168,83,0.1); color: #137333; }}
-        .panel-header .chevron {{
-            font-size: 12px; color: #9aa0a6; transition: transform 0.2s;
-        }}
-        .panel-header.collapsed .chevron {{ transform: rotate(-90deg); }}
-        .panel-body {{ padding: 18px; }}
-
-        /* Auth method cards */
-        .auth-options {{ display: flex; gap: 12px; }}
-        .auth-option {{
-            flex: 1; padding: 16px; border: 2px solid #e8eaed; border-radius: 10px;
-            cursor: pointer; transition: all 0.15s ease; background: white;
-        }}
-        .auth-option:hover {{ border-color: #764ba2; background: #f8f5ff; }}
-        .auth-option.selected {{ border-color: #667eea; background: #f0eeff; }}
-        .auth-option input[type="radio"] {{ display: none; }}
-        .auth-option-name {{ font-size: 13px; font-weight: 600; color: #202124; margin-bottom: 5px; }}
-        .auth-option-desc {{ font-size: 12px; color: #5f6368; line-height: 1.4; }}
-        .auth-option-pros {{ font-size: 11px; color: #137333; margin-top: 6px; }}
-        .auth-option-cons {{ font-size: 11px; color: #d93025; margin-top: 3px; }}
-
-        /* Service chips */
-        .services-grid {{ display: flex; flex-wrap: wrap; gap: 6px; }}
-        .service-chip {{
-            display: flex; align-items: center; gap: 5px;
-            padding: 5px 10px; border: 1.5px solid #e8eaed; border-radius: 20px;
-            cursor: pointer; transition: all 0.15s ease; background: white;
-            font-size: 12px; color: #202124;
-        }}
-        .service-chip:hover {{ border-color: #764ba2; background: #f8f5ff; }}
-        .service-chip.checked {{ border-color: #667eea; background: #f0eeff; color: #4527a0; }}
-        .service-chip.required {{ border-color: #34a853; background: #e8f5e9; color: #1b5e20; cursor: default; }}
-        .service-chip input {{ display: none; }}
-        .service-chip .chip-check {{ font-size: 11px; }}
-        .category-label {{
-            font-size: 10px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: 0.8px; color: #9aa0a6; margin: 10px 0 5px;
-        }}
-        .category-label:first-child {{ margin-top: 0; }}
-
-        /* Credential inputs */
-        .field-group {{ display: flex; flex-direction: column; gap: 10px; }}
-        .field-input {{
-            width: 100%; padding: 11px 14px; border: 1.5px solid #dadce0;
-            border-radius: 8px; font-size: 13px; color: #202124;
-            transition: border-color 0.15s; outline: none; font-family: monospace;
-        }}
-        .field-input:focus {{ border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.12); }}
-        .field-label {{ font-size: 12px; color: #5f6368; margin-bottom: 4px; font-weight: 500; }}
-        .field-hint {{ font-size: 11px; color: #9aa0a6; margin-top: 4px; }}
-        .redirect-uri {{
-            font-family: monospace; font-size: 12px; background: #f8f9fa;
-            padding: 8px 12px; border-radius: 6px; border: 1px solid #e8eaed;
-            color: #5f6368; word-break: break-all;
-        }}
-
-        /* Toggle row */
-        .toggle-row {{
-            display: flex; align-items: center; gap: 12px; padding: 4px 0;
-        }}
-        .toggle-label {{ font-size: 13px; color: #202124; flex: 1; }}
-        .toggle-desc {{ font-size: 11px; color: #9aa0a6; margin-top: 2px; }}
-        /* Native checkbox styled */
-        .toggle-row input[type="checkbox"] {{ transform: scale(1.25); accent-color: #667eea; cursor: pointer; }}
-
-        /* Passphrase field */
-        .passphrase-wrap {{ margin-top: 14px; padding-top: 14px; border-top: 1px solid #f1f3f4; }}
-
-        /* Info/warning boxes */
-        .info-box {{
-            border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.5;
-            margin-bottom: 12px;
-        }}
-        .info-box.blue {{ background: #e8f0fe; color: #1a56a0; border: 1px solid #c5d8f8; }}
-        .info-box.amber {{ background: #fff8e1; color: #795700; border: 1px solid #ffe08a; }}
-        .info-box.red {{ background: #fce8e6; color: #c5221f; border: 1px solid #f5c6c3; }}
-        .info-box a {{ color: inherit; }}
-
-        /* Hint bar */
-        .hint-bar {{
-            display: flex; align-items: center; gap: 8px;
-            background: #f0eeff; border-radius: 8px; padding: 10px 14px;
-            margin-bottom: 20px; font-size: 12px; color: #4527a0;
-        }}
-
-        /* Actions */
-        .actions {{
-            display: flex; align-items: center; gap: 12px;
-            padding-top: 24px; border-top: 1px solid #f1f3f4; margin-top: 4px;
-        }}
-        .btn-primary {{
-            flex: 1; padding: 14px; border: none; border-radius: 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white; font-size: 15px; font-weight: 600; cursor: pointer;
-            transition: opacity 0.15s; letter-spacing: 0.2px;
-        }}
-        .btn-primary:hover {{ opacity: 0.92; }}
-        .btn-secondary {{
-            padding: 14px 18px; border: 1.5px solid #dadce0; border-radius: 10px;
-            background: white; color: #3c4043; font-size: 14px; font-weight: 500;
-            cursor: pointer; transition: background 0.15s; white-space: nowrap;
-        }}
-        .btn-secondary:hover {{ background: #f8f9fa; }}
-    </style>
-</head>
-<body>
-<div class="card">
-    <div class="card-header">
-        <div class="icon">🔐</div>
-        <h1>Google Authentication</h1>
-        <p>Select services and configure your auth method for FastMCP</p>
-    </div>
-    <div class="card-body">
-        <form method="POST" action="/auth/services/selected" id="auth-form">
-            <input type="hidden" name="state" value="{state}">
-            <input type="hidden" name="flow_type" value="{flow_type}">
-
-            <!-- Auth Method -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('auth-method-body', this)">
-                    <span class="panel-icon">🔒</span>
-                    <span class="panel-title">Authentication Method</span>
-                    <span class="panel-badge">{"PKCE (Recommended)" if use_pkce else "Legacy OAuth"}</span>
-                    <span class="chevron">▼</span>
-                </div>
-                <div class="panel-body" id="auth-method-body">
-                    <div class="auth-options">
-                        <div class="auth-option {"selected" if use_pkce else ""}" onclick="selectAuthMethod('pkce', this)">
-                            <input type="radio" name="auth_method" value="pkce" {"checked" if use_pkce else ""}>
-                            <div class="auth-option-name">🔐 PKCE Flow</div>
-                            <div class="auth-option-desc">OAuth 2.1 with Proof Key for Code Exchange — enhanced security</div>
-                            <div class="auth-option-pros">✅ Best security · Code verifier protection · Encrypted storage</div>
-                            <div class="auth-option-cons">⚠️ Requires client secret for web apps</div>
-                        </div>
-                        <div class="auth-option {"selected" if not use_pkce else ""}" onclick="selectAuthMethod('credentials', this)">
-                            <input type="radio" name="auth_method" value="credentials" {"checked" if not use_pkce else ""}>
-                            <div class="auth-option-name">📁 Legacy OAuth 2.0</div>
-                            <div class="auth-option-desc">Traditional OAuth flow with encrypted credential storage</div>
-                            <div class="auth-option-pros">✅ Multi-account support · Persists across restarts</div>
-                            <div class="auth-option-cons">⚠️ No PKCE enhancement</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- OAuth Credentials (optional override) -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('creds-body', this)">
-                    <span class="panel-icon">🔑</span>
-                    <span class="panel-title">OAuth Credentials</span>
-                    <span class="panel-badge {"green" if _env_has_creds else ""}">{"Env configured" if _env_has_creds else "Manual entry"}</span>
-                    <span class="chevron">▼</span>
-                </div>
-                <div class="panel-body" id="creds-body">
-                    {creds_status_html}
-                    <label style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer;">
-                        <input type="checkbox" id="use_custom_creds" name="use_custom_creds"
-                               style="transform:scale(1.2);accent-color:#667eea;">
-                        <span style="font-size:13px;color:#202124;font-weight:500;">
-                            Override with custom credentials
-                        </span>
-                    </label>
-                    <div id="custom-creds-fields" style="display:none;">
-                        <div class="info-box amber" style="margin-bottom:12px;">
-                            <strong>Redirect URI required in Google Cloud Console:</strong><br>
-                            <div class="redirect-uri" style="margin-top:6px;">{_redirect_uri}</div>
-                        </div>
-                        <div class="field-group">
-                            <div>
-                                <div class="field-label">Client ID</div>
-                                <input type="text" name="custom_client_id" class="field-input"
-                                       placeholder="xxxxxx.apps.googleusercontent.com"
-                                       value="{_env_client_id if _env_has_creds else ""}">
-                                <div class="field-hint">From Google Cloud Console → APIs &amp; Services → Credentials</div>
-                            </div>
-                            <div>
-                                <div class="field-label">Client Secret</div>
-                                <input type="text" name="custom_client_secret" class="field-input"
-                                       placeholder="GOCSPX-..."
-                                       value="{_env_client_secret if _env_has_creds else ""}">
-                                <div class="field-hint">Optional for PKCE flow · Not recommended to enter in production UI</div>
-                            </div>
-                        </div>
-                        <div class="info-box blue" style="margin-top:12px;">
-                            <strong>🔧 Cloud Console setup:</strong>
-                            <a href="https://console.cloud.google.com/apis/credentials" target="_blank">
-                                APIs &amp; Services → Credentials
-                            </a> · Create/edit OAuth 2.0 Client ID · Add redirect URI above · Enable required APIs
-                        </div>
-                    </div>
-                    <div style="font-size:11px;color:#9aa0a6;margin-top:4px;">{creds_hint}</div>
-                </div>
-            </div>
-
-            <!-- Cross-OAuth Linkage -->
-            <div class="panel">
-                <div class="panel-header" onclick="togglePanel('linkage-body', this)">
-                    <span class="panel-icon">🔗</span>
-                    <span class="panel-title">Cross-OAuth Account Access</span>
-                    <span class="panel-badge green">Enabled</span>
-                    <span class="chevron">▼</span>
-                </div>
-                <div class="panel-body" id="linkage-body">
-                    <div class="toggle-row">
-                        <div>
-                            <div class="toggle-label">Allow cross-OAuth access to this account</div>
-                            <div class="toggle-desc">Linked accounts can access credentials without a per-user API key</div>
-                        </div>
-                        <input type="checkbox" id="oauth_linkage_enabled" name="oauth_linkage_enabled" checked
-                               onchange="document.getElementById('oauth-password-field').style.display=this.checked?'block':'none';">
-                    </div>
-                    <div id="oauth-password-field" class="passphrase-wrap">
-                        <div class="field-label">Optional passphrase (alphanumeric, _, - only)</div>
-                        <input type="text" name="oauth_linkage_password" class="field-input"
-                               placeholder="Leave blank for no passphrase"
-                               pattern="[0-9A-Za-z_-]*"
-                               title="Only 0-9, A-Z, a-z, underscore, and hyphen allowed"
-                               style="max-width:320px;margin-top:6px;">
-                        <div class="field-hint">If set, OAuth sessions require this passphrase to access your credentials.</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Service Selection -->
-            <div class="panel">
-                <div class="panel-header collapsed" onclick="togglePanel('services-body', this)">
-                    <span class="panel-icon">🚀</span>
-                    <span class="panel-title">Google Services</span>
-                    <span class="panel-badge" id="services-badge">Loading...</span>
-                    <span class="chevron">▼</span>
-                </div>
-                <div class="panel-body" id="services-body" style="display:none;">
-                    <div class="hint-bar" style="font-size:11px;padding:8px 12px;">
-                        💡 Common services pre-selected — expand to change
-                    </div>
-                    <div class="services-grid" id="services-grid">
-"""
-
-        # Sort categories
-        category_order = [
-            "Core Services",
-            "Storage & Files",
-            "Communication",
-            "Productivity",
-            "Office Suite",
-            "Other",
-        ]
-        sorted_categories = sorted(
-            categories.items(),
-            key=lambda x: category_order.index(x[0])
-            if x[0] in category_order
-            else len(category_order),
-        )
-
-        for category_name, services in sorted_categories:
-            html += (
-                f'<div class="category-label" style="width:100%">{category_name}</div>'
-            )
-            for service_key, service_info in services:
-                required = service_info.get("required", False)
-                chip_class = "service-chip required" if required else "service-chip"
-                disabled_attr = "disabled" if required else ""
-                check_icon = "✅" if required else "◻"
-                html += f"""
-                        <label class="{chip_class}" title="{service_info["description"]}">
-                            <input type="checkbox" name="services" value="{service_key}" {disabled_attr}
-                                   onchange="updateChip(this);updateBadge();">
-                            <span class="chip-check">{check_icon}</span>
-                            <span>{service_info["name"]}{"&nbsp;🔒" if required else ""}</span>
-                        </label>"""
-
-        html += f"""
-                    </div>
-                    <div style="display:flex;gap:6px;margin-top:10px;">
-                        <button type="button" onclick="selectAll()" class="btn-secondary" style="font-size:11px;padding:6px 12px;">Toggle All</button>
-                        <button type="button" onclick="selectCommon()" class="btn-secondary" style="font-size:11px;padding:6px 12px;">Reset to Common</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="actions">
-                <button type="submit" class="btn-primary">Continue with Selected Configuration</button>
-                <button type="button" class="btn-secondary" onclick="selectCommon()">Reset</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<script>
-    const COMMON_SERVICES = ['drive','gmail','calendar','docs','sheets','slides','photos','chat','forms','people'];
-
-    function updateChip(checkbox) {{
-        const chip = checkbox.closest('.service-chip');
-        if (!chip || chip.classList.contains('required')) return;
-        const icon = chip.querySelector('.chip-check');
-        if (checkbox.checked) {{
-            chip.classList.add('checked');
-            if (icon) icon.textContent = '✅';
-        }} else {{
-            chip.classList.remove('checked');
-            if (icon) icon.textContent = '◻';
-        }}
-    }}
-
-    function updateBadge() {{
-        const checked = document.querySelectorAll('input[name="services"]:checked').length;
-        const badge = document.getElementById('services-badge');
-        if (badge) badge.textContent = checked + ' selected';
-    }}
-
-    function selectCommon() {{
-        document.querySelectorAll('input[name="services"]:not(:disabled)').forEach(cb => {{
-            cb.checked = COMMON_SERVICES.includes(cb.value);
-            updateChip(cb);
-        }});
-        updateBadge();
-    }}
-
-    function selectAll() {{
-        const boxes = document.querySelectorAll('input[name="services"]:not(:disabled)');
-        const allChecked = Array.from(boxes).every(cb => cb.checked);
-        boxes.forEach(cb => {{ cb.checked = !allChecked; updateChip(cb); }});
-        updateBadge();
-    }}
-
-    function selectAuthMethod(method, element) {{
-        document.querySelectorAll('.auth-option').forEach(o => o.classList.remove('selected'));
-        element.classList.add('selected');
-        element.querySelector('input[type="radio"]').checked = true;
-        // Update badge
-        const badge = element.closest('.panel').querySelector('.panel-badge');
-        if (badge) badge.textContent = method === 'pkce' ? 'PKCE (Recommended)' : 'Legacy OAuth';
-    }}
-
-    function togglePanel(bodyId, headerEl) {{
-        const body = document.getElementById(bodyId);
-        if (!body) return;
-        const hidden = body.style.display === 'none';
-        body.style.display = hidden ? '' : 'none';
-        if (headerEl) headerEl.classList.toggle('collapsed', !hidden);
-    }}
-
-    document.addEventListener('DOMContentLoaded', function() {{
-        // Pre-select common services
-        selectCommon();
-        // Required checkboxes always checked
-        document.querySelectorAll('input[name="services"]:disabled').forEach(cb => {{
-            cb.checked = true; updateChip(cb);
-        }});
-        updateBadge();
-
-        // Custom creds toggle
-        const customCheck = document.getElementById('use_custom_creds');
-        const customFields = document.getElementById('custom-creds-fields');
-        if (customCheck && customFields) {{
-            customCheck.addEventListener('change', function() {{
-                customFields.style.display = this.checked ? 'block' : 'none';
-                if (!this.checked) {{
-                    customFields.querySelectorAll('input[type="text"]').forEach(i => i.value = '');
-                }}
-            }});
-        }}
-
-        // Form validation
-        document.getElementById('auth-form').addEventListener('submit', function(e) {{
-            const useCustom = customCheck && customCheck.checked;
-            if (useCustom) {{
-                const clientId = document.querySelector('input[name="custom_client_id"]');
-                if (!clientId || !clientId.value.trim()) {{
-                    e.preventDefault();
-                    alert('Please provide a Client ID when using custom credentials.');
-                    if (clientId) clientId.focus();
-                    return;
-                }}
-                if (!clientId.value.includes('.apps.googleusercontent.com')) {{
-                    if (!confirm('Client ID doesn\\'t look like a Google OAuth ID (should end in .apps.googleusercontent.com). Continue anyway?')) {{
-                        e.preventDefault();
-                    }}
-                }}
-            }}
-        }});
-
-        // Auth method click handlers
-        document.querySelectorAll('.auth-option').forEach(opt => {{
-            opt.addEventListener('click', function() {{
-                selectAuthMethod(this.querySelector('input').value, this);
-            }});
-        }});
-    }});
-</script>
-</body>
-</html>"""
-
-        return html
-
-    except Exception as e:
-        logger.error(f"Error generating service selection HTML: {e}")
-        return f"""<!DOCTYPE html>
-<html><head><title>Error</title></head>
-<body style="font-family:sans-serif;padding:40px">
-<h1>Service Selection Error</h1><p>{html.escape(str(e))}</p>
-</body></html>"""
+    return generate_service_selection_html(
+        state, flow_type, use_pkce, requested_email=requested_email
+    )
 
 
 async def _handle_fastmcp_service_selection(
@@ -835,9 +333,12 @@ def setup_service_selection_routes(mcp) -> None:
 
             if not state:
                 logger.error("❌ Missing state parameter in service selection request")
+                from auth.ui import generate_error_html
+
                 return HTMLResponse(
-                    content="<!DOCTYPE html><html><head><title>Error</title></head>"
-                    "<body><h1>Error: Invalid service selection request</h1></body></html>",
+                    content=generate_error_html(
+                        "Error", "Invalid service selection request"
+                    ),
                     status_code=400,
                 )
 
@@ -850,9 +351,10 @@ def setup_service_selection_routes(mcp) -> None:
 
         except Exception as e:
             logger.error(f"❌ Error showing service selection: {e}")
+            from auth.ui import generate_error_html
+
             return HTMLResponse(
-                content=f"<!DOCTYPE html><html><head><title>Error</title></head>"
-                f"<body><h1>Service Selection Error</h1><p>{html.escape(str(e))}</p></body></html>",
+                content=generate_error_html("Service Selection Error", str(e)),
                 status_code=500,
             )
 
@@ -895,6 +397,30 @@ def setup_service_selection_routes(mcp) -> None:
                 form_data.get("oauth_linkage_password") or ""
             ).strip()
 
+            # Privacy mode and sampling config (submitted as form fields)
+            privacy_mode = form_data.get("privacy_mode") == "on"
+            sampling_model = (form_data.get("sampling_model") or "").strip()
+            sampling_api_key = (form_data.get("sampling_api_key") or "").strip()
+            sampling_api_base = (form_data.get("sampling_api_base") or "").strip()
+
+            # Chat service account JSON (optional)
+            chat_sa_json = None
+            chat_sa_json_raw = (form_data.get("chat_sa_json") or "").strip()
+            if chat_sa_json_raw:
+                try:
+                    import json as _json
+
+                    parsed_sa = _json.loads(chat_sa_json_raw)
+                    if parsed_sa.get("type") != "service_account":
+                        logger.warning(
+                            "Chat SA JSON rejected: missing 'type': 'service_account'"
+                        )
+                    else:
+                        chat_sa_json = chat_sa_json_raw
+                        logger.info("🤖 Chat service account JSON provided")
+                except Exception as sa_err:
+                    logger.warning(f"Chat SA JSON rejected: invalid JSON: {sa_err}")
+
             logger.info(
                 f"📋 Service selection received: state={state}, "
                 f"flow_type={flow_type}, services={services}"
@@ -934,6 +460,18 @@ def setup_service_selection_routes(mcp) -> None:
                 _service_selection_cache[state]["oauth_linkage_password"] = (
                     oauth_linkage_password
                 )
+                # Stash Chat SA JSON — encrypted after OAuth completes
+                if chat_sa_json:
+                    _service_selection_cache[state]["chat_sa_json"] = chat_sa_json
+
+                # Stash privacy mode and sampling config — applied after OAuth
+                _service_selection_cache[state]["privacy_mode"] = privacy_mode
+                if sampling_model or sampling_api_key:
+                    _service_selection_cache[state]["sampling_config"] = {
+                        "model": sampling_model,
+                        "api_key": sampling_api_key,
+                        "api_base": sampling_api_base,
+                    }
 
             if flow_type == "fastmcp":
                 oauth_url = await _handle_fastmcp_service_selection(
@@ -959,16 +497,115 @@ def setup_service_selection_routes(mcp) -> None:
 
         except Exception as e:
             logger.error(f"❌ Error handling service selection: {e}")
+            from auth.ui import generate_error_html
+
             return HTMLResponse(
-                content=f"<!DOCTYPE html><html><head><title>Service Selection Error</title></head>"
-                f"<body><h1>Service Selection Error</h1>"
-                f"<p>Error: {html.escape(str(e))}</p>"
-                f"<p>Please try the authentication process again.</p></body></html>",
+                content=generate_error_html("Service Selection Error", str(e)),
                 status_code=400,
             )
 
     logger.info("  GET /auth/services/select (Service selection page)")
     logger.info("  POST /auth/services/selected (Service selection form handler)")
+
+
+async def _build_oauth_success_html(
+    user_email: str, credentials: Any, session_id: str | None
+) -> str:
+    """Shared post-OAuth logic for both legacy and main callbacks.
+
+    Applies intro-screen settings (privacy, sampling), handles per-user key
+    force-regeneration, builds the API-key and security-viz sections, and
+    returns the full success-page HTML.
+    """
+    from auth.context import get_auth_middleware, store_session_data
+    from auth.types import SessionKey
+
+    # ── Apply privacy mode and sampling config from intro screen ──
+    _intro_privacy = getattr(credentials, "_privacy_mode", False)
+    _intro_sampling = getattr(credentials, "_sampling_config", None)
+    try:
+        if session_id and _intro_privacy:
+            store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
+            logger.info(
+                f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}"
+            )
+        if session_id and _intro_sampling and _intro_sampling.get("model"):
+            auth_mw_sampling = get_auth_middleware()
+            if auth_mw_sampling:
+                _cfg = {k: v for k, v in _intro_sampling.items() if v}
+                auth_mw_sampling.save_sampling_config(
+                    user_email,
+                    _cfg,
+                    per_user_key=getattr(credentials, "_user_api_key", None),
+                    google_sub=getattr(credentials, "_google_sub", None),
+                )
+                store_session_data(session_id, SessionKey.SAMPLING_CONFIG, _cfg)
+                logger.info(
+                    f"🤖 Sampling config saved from intro screen for {user_email}: "
+                    f"model={_cfg.get('model', 'default')}"
+                )
+    except Exception as e:
+        logger.warning(f"⚠️ Could not apply intro screen settings: {e}")
+
+    # ── Handle API key retrieval and force-regen ──
+    user_api_key = getattr(credentials, "_user_api_key", None)
+    user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
+
+    if not user_api_key and user_api_key_exists:
+        try:
+            from auth.user_api_keys import regenerate_unrevealed_key
+
+            new_key = regenerate_unrevealed_key(user_email)
+            if new_key:
+                user_api_key = new_key
+                user_api_key_exists = False
+                try:
+                    auth_mw = get_auth_middleware()
+                    if auth_mw:
+                        auth_mw.save_credentials(
+                            user_email,
+                            credentials,
+                            per_user_key=new_key,
+                            google_sub=getattr(credentials, "_google_sub", None),
+                        )
+                        logger.info(
+                            f"🔑 Force-regenerated per-user key for {user_email}"
+                        )
+                except Exception as re_save_err:
+                    logger.warning(f"Could not re-save with new key: {re_save_err}")
+        except Exception as regen_err:
+            logger.warning(f"Could not regenerate per-user key: {regen_err}")
+
+    # ── Get originally-requested email from this specific OAuth flow ──
+    requested_email = getattr(credentials, "_requested_email", "") or ""
+    # Skip display if the request was a fallback/unknown value
+    if requested_email in ("unknown@gmail.com", ""):
+        requested_email = ""
+
+    # ── Build success page HTML ──
+    from auth.ui import (
+        build_api_key_section,
+        build_envelope_inventory_section,
+        build_revoke_section,
+        build_security_viz_section,
+        generate_success_html,
+    )
+
+    api_key_section = build_api_key_section(
+        user_email, user_api_key, user_api_key_exists
+    )
+    security_viz_section = build_security_viz_section(user_email)
+    envelope_inventory_section = build_envelope_inventory_section(user_email)
+    revoke_section = build_revoke_section(user_email, settings.base_url)
+
+    return generate_success_html(
+        user_email=user_email,
+        api_key_section=api_key_section,
+        security_viz_section=security_viz_section,
+        envelope_inventory_section=envelope_inventory_section,
+        revoke_section=revoke_section,
+        requested_email=requested_email or "",
+    )
 
 
 def setup_legacy_callback_route(mcp) -> None:
@@ -1032,16 +669,16 @@ def setup_legacy_callback_route(mcp) -> None:
                 state=state,
                 code_verifier=code_verifier,
             )
-            logger.info(f"✅ OAuth callback processed for user: {user_email}")
+            logger.info(
+                f"✅ OAuth callback processed for user: {redact_email(user_email)}"
+            )
 
             if not validate_user_access(user_email):
-                logger.warning(f"🚫 Access denied for user: {user_email}")
+                logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
+                from auth.ui import generate_access_denied_html
+
                 return HTMLResponse(
-                    content=f"""<!DOCTYPE html><html><head><title>Access Denied</title>
-                    <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
-                    h1{{color:#dc3545}}</style></head><body>
-                    <h1>Access Denied</h1><p>User <b>{html.escape(user_email)}</b> is not authorized.</p>
-                    </body></html>""",
+                    content=generate_access_denied_html(user_email),
                     status_code=403,
                 )
 
@@ -1051,13 +688,17 @@ def setup_legacy_callback_route(mcp) -> None:
 
                 dual_bridge = get_dual_auth_bridge()
                 dual_bridge.add_secondary_account(user_email)
-                logger.info(f"✅ Registered {user_email} as secondary account")
+                logger.info(
+                    f"✅ Registered {redact_email(user_email)} as secondary account"
+                )
             except Exception as e:
                 logger.warning(
                     f"⚠️ Dual auth bridge registration error (continuing): {e}"
                 )
 
-            # Store in session
+            # Store in session (get_session_context returns None in HTTP context,
+            # so also scan all sessions to fix any with a stale/wrong email)
+            session_id = None
             try:
                 session_id = await get_session_context()
                 if session_id:
@@ -1065,272 +706,81 @@ def setup_legacy_callback_route(mcp) -> None:
             except Exception as e:
                 logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
-            # Retrieve per-user API key if one was generated during credential save
-            user_api_key = getattr(credentials, "_user_api_key", None)
-            user_api_key_exists = getattr(credentials, "_user_api_key_exists", False)
-            api_key_section = ""
-
-            # Gather envelope info for security visualization
-            security_viz_section = ""
-            _num_recipients = 0
-            _has_hmac = False
-            _is_encrypted = False
+            # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+            # TODO(security): This iterates ALL sessions — safe in single-user/dev mode,
+            # but must be scoped to the originating session before multi-tenant deployment
+            # to prevent Session A being rebound to Session B's email on concurrent auth.
             try:
-                from pathlib import Path
+                from auth.context import get_session_data, list_sessions
 
-                from auth.google_auth import _normalize_email
-
-                safe_email = (
-                    _normalize_email(user_email).replace("@", "_at_").replace(".", "_")
-                )
-                enc_path = (
-                    Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-                )
-                if enc_path.exists():
-                    _is_encrypted = True
-                    import json as _json
-
-                    try:
-                        _env = _json.load(open(enc_path))
-                        _num_recipients = len(_env.get("recipients", {}))
-                        _has_hmac = "hmac" in _env
-                    except (ValueError, KeyError):
-                        # Legacy format (raw Fernet bytes) — still encrypted
-                        _num_recipients = 1
-                        _has_hmac = False
-            except Exception:
-                pass
-
-            # Build linked-accounts section (shown for both new and existing keys)
-            accessible_section = ""
-            if user_api_key or user_api_key_exists:
-                try:
-                    from auth.user_api_keys import get_accessible_emails
-
-                    accessible = get_accessible_emails(user_email)
-                    linked = sorted(
-                        e for e in accessible if e != user_email.lower().strip()
+                _verified = user_email.lower().strip()
+                for sid in list_sessions():
+                    sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
+                    requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
+                    owned = set(
+                        get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or []
                     )
-                    if linked:
-                        linked_items = "".join(
-                            f"<li>{html.escape(e)}</li>" for e in linked
+                    authed = set(
+                        get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or []
+                    )
+
+                    # Determine the stale email to replace (from USER_EMAIL or REQUESTED_EMAIL)
+                    old_email = (sid_email or requested or "").lower().strip()
+
+                    # Skip if session already has the correct email
+                    if sid_email and sid_email.lower().strip() == _verified:
+                        # Still ensure owned accounts include the verified email
+                        if _verified not in owned and owned:
+                            owned.add(_verified)
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
+                        continue
+
+                    # Update if: session had a wrong email, or had a requested email pending OAuth
+                    if old_email and old_email != _verified:
+                        store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                        owned.discard(old_email)
+                        owned.add(_verified)
+                        store_session_data(
+                            sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
                         )
-                        accessible_section = f"""
-                        <div class="linked-accounts">
-                            <b>🔗 Linked Accounts</b>
-                            <small>This key can also access credentials for:</small>
-                            <ul>{linked_items}</ul>
-                        </div>"""
-                    else:
-                        accessible_section = """
-                        <div class="linked-accounts solo">
-                            <b>🔒 Single Account</b>
-                            <small>This key only has access to the email above.<br>
-                            Authenticate additional emails in the same session to link them.</small>
-                        </div>"""
-                except Exception:
-                    pass
+                        authed.discard(old_email)
+                        authed.add(_verified)
+                        store_session_data(
+                            sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                        )
+                        logger.info(
+                            f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}"
+                        )
+                    elif not sid_email and owned:
+                        # Session has no USER_EMAIL but has owned accounts — set the verified email
+                        store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                        owned.add(_verified)
+                        store_session_data(
+                            sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                        )
+                        authed.add(_verified)
+                        store_session_data(
+                            sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                        )
+                        logger.info(
+                            f"Set session {sid} email to {redact_email(user_email)} (was empty)"
+                        )
+            except Exception as e:
+                logger.warning(f"Could not update sessions after OAuth: {e}")
 
-            if user_api_key:
-                api_key_section = f"""
-                <div class="api-key">
-                    <b>🔑 Your Personal API Key</b><br>
-                    <small>Use this as a Bearer token to connect without re-authenticating.<br>
-                    This key is shown <b>once</b> — save it now!</small>
-                    <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
-                    <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
-                        Click to Reveal Key
-                    </button>
-                    <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
-                        Copy to Clipboard
-                    </button>
-                </div>
-                {accessible_section}"""
-            elif user_api_key_exists:
-                api_key_section = f"""
-                <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
-                    <b>🔑 API Key Active</b><br>
-                    <small>Your existing per-user API key is still valid.<br>
-                    Credentials have been refreshed — no need to update your key.</small>
-                </div>
-                {accessible_section}"""
-
-            # Build security visualization
-            if _is_encrypted:
-                # Build recipient nodes with linkage method badges
-                _cur = user_email.lower().strip()
-                _all_emails = [_cur]
-                try:
-                    _all_emails = sorted(get_accessible_emails(_cur))
-                except Exception:
-                    pass
-
-                try:
-                    from auth.user_api_keys import get_link_method
-                except Exception:
-
-                    def get_link_method(a, b):
-                        return ""
-
-                _recipient_nodes = ""
-                for em in _all_emails:
-                    _is_current = em == _cur
-                    _highlight = "current" if _is_current else ""
-                    _method_badge = ""
-                    if not _is_current:
-                        _m = get_link_method(_cur, em)
-                        if _m == "oauth":
-                            _method_badge = (
-                                '<span class="sec-method oauth">via OAuth</span>'
-                            )
-                        elif _m == "api_key":
-                            _method_badge = (
-                                '<span class="sec-method api_key">via API key</span>'
-                            )
-                        elif _m == "session":
-                            _method_badge = (
-                                '<span class="sec-method session">via session</span>'
-                            )
-                        elif _m == "both":
-                            _method_badge = (
-                                '<span class="sec-method both">multiple methods</span>'
-                            )
-                        else:
-                            _method_badge = '<span class="sec-method">linked</span>'
-                    _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
-
-                _key_lines = ""
-                for em in _all_emails:
-                    _cls = "current" if (em == _cur) else ""
-                    _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
-
-                _subtitle = (
-                    "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
-                    if _num_recipients > 1
-                    else "Your Google Workspace credentials are protected by split-key encryption"
-                )
-
-                security_viz_section = f"""
-                <div class="sec-panel">
-                    <div class="sec-title">🛡️ Credential Security Model</div>
-                    <div class="sec-subtitle">{_subtitle}</div>
-                    <div class="sec-diagram">
-                        <div class="sec-col sec-col-users">
-                            <div class="sec-col-label">Authorized Users</div>
-                            {_recipient_nodes}
-                        </div>
-                        <div class="sec-col sec-col-keys">
-                            <div class="sec-col-label">Key Wrapping</div>
-                            {_key_lines}
-                        </div>
-                        <div class="sec-col sec-col-envelope">
-                            <div class="sec-col-label">Encrypted Envelope</div>
-                            <div class="sec-envelope">
-                                <div class="sec-env-header">Sealed Envelope</div>
-                                <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
-                                <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="sec-features">
-                        <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
-                        <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
-                        <div class="sec-feat"><span>🔗</span> Link accounts via <b>OAuth</b>, <b>session</b>, or <b>API key</b> (30 min window)</div>
-                        <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
-                    </div>
-                </div>"""
-
-            success_html = f"""<!DOCTYPE html><html><head><title>Authentication Successful</title>
-            <style>
-                body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-                      margin:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
-                      min-height:100vh;display:flex;align-items:center;justify-content:center}}
-                .container{{max-width:560px;background:white;border-radius:20px;padding:50px;
-                           text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.1)}}
-                .success-icon{{font-size:72px;margin-bottom:20px}}
-                h1{{color:#28a745;margin-bottom:10px;font-size:32px}}
-                .email{{color:#6c757d;font-size:18px;margin:20px 0}}
-                .saved{{background:#d4edda;color:#155724;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #c3e6cb}}
-                .api-key{{background:#fff3cd;color:#856404;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #ffc107;text-align:left}}
-                .api-key small{{display:block;margin-bottom:10px}}
-                .key-value{{font-family:monospace;font-size:13px;background:#f8f9fa;padding:10px;border-radius:4px;
-                           word-break:break-all;margin:10px 0;user-select:all;border:1px solid #dee2e6}}
-                .key-value.hidden{{filter:blur(8px);user-select:none;pointer-events:none}}
-                .api-key button{{background:#856404;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:13px}}
-                .api-key button:hover{{background:#6c5200}}
-                .linked-accounts{{background:#e8f4fd;color:#0c5460;padding:15px;border-radius:8px;margin:20px 0;border:1px solid #bee5eb;text-align:left}}
-                .linked-accounts small{{display:block;margin-bottom:8px}}
-                .linked-accounts ul{{margin:8px 0 0 0;padding-left:20px}}
-                .linked-accounts li{{margin:4px 0;font-family:monospace;font-size:14px}}
-                .linked-accounts.solo{{background:#f8f9fa;color:#6c757d;border-color:#dee2e6}}
-                .services{{background:#f8f9fa;padding:20px;border-radius:10px;margin:20px 0}}
-                /* Security visualization */
-                .sec-panel{{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#e0e0e0;
-                           padding:24px;border-radius:12px;margin:24px 0;text-align:left}}
-                .sec-title{{font-size:16px;font-weight:700;color:#fff;margin-bottom:4px}}
-                .sec-subtitle{{font-size:11px;color:#8892b0;margin-bottom:16px}}
-                .sec-diagram{{display:flex;gap:8px;align-items:stretch;margin-bottom:16px}}
-                .sec-col{{flex:1;display:flex;flex-direction:column;gap:6px}}
-                .sec-col-label{{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#64ffda;
-                               font-weight:600;margin-bottom:4px;text-align:center}}
-                .sec-node{{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
-                          border-radius:8px;padding:8px 6px;text-align:center;display:flex;
-                          flex-direction:column;align-items:center;gap:2px}}
-                .sec-node.current{{border-color:#64ffda;background:rgba(100,255,218,0.08)}}
-                .sec-icon{{font-size:18px}}
-                .sec-label{{font-size:9px;font-family:monospace;word-break:break-all;line-height:1.2;color:#ccd6f6}}
-                .sec-method{{font-size:7px;padding:1px 5px;border-radius:3px;margin-top:2px;
-                            background:rgba(255,255,255,0.08);color:#8892b0}}
-                .sec-method.oauth{{background:rgba(100,255,218,0.12);color:#64ffda}}
-                .sec-method.session{{background:rgba(255,183,77,0.12);color:#ffb74d}}
-                .sec-method.both{{background:rgba(129,212,250,0.12);color:#81d4fa}}
-                .sec-method.api_key{{background:rgba(206,147,255,0.12);color:#ce93ff}}
-                .sec-col-keys{{flex:0.7;justify-content:center;gap:8px}}
-                .sec-flow-row{{display:flex;align-items:center;gap:3px;justify-content:center}}
-                .sec-flow-row.current .sec-key-badge{{background:#64ffda;color:#1a1a2e}}
-                .sec-key-badge{{background:rgba(255,255,255,0.12);color:#ccd6f6;font-size:8px;font-weight:600;
-                              padding:3px 6px;border-radius:4px;white-space:nowrap}}
-                .sec-arrow{{width:28px;height:12px;color:#64ffda;flex-shrink:0}}
-                .sec-cek-wrap{{font-size:8px;color:#8892b0;white-space:nowrap}}
-                .sec-col-envelope{{flex:1.1}}
-                .sec-envelope{{background:rgba(255,255,255,0.04);border:1.5px solid #64ffda;
-                              border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:5px}}
-                .sec-env-header{{font-size:10px;font-weight:700;color:#64ffda;text-align:center;
-                                letter-spacing:1px;text-transform:uppercase}}
-                .sec-env-row{{text-align:center}}
-                .sec-env-badge{{display:inline-block;font-size:9px;padding:3px 8px;border-radius:4px;
-                              font-weight:500}}
-                .sec-env-badge.rec{{background:rgba(255,183,77,0.15);color:#ffb74d}}
-                .sec-env-badge.data{{background:rgba(100,255,218,0.1);color:#64ffda}}
-                .sec-env-badge.hmac{{background:rgba(129,212,250,0.1);color:#81d4fa}}
-                .sec-features{{display:grid;grid-template-columns:1fr 1fr;gap:6px}}
-                .sec-feat{{font-size:10px;color:#8892b0;display:flex;align-items:start;gap:5px;line-height:1.3}}
-                .sec-feat span:first-child{{flex-shrink:0}}
-                .sec-feat b{{color:#ccd6f6}}
-            </style></head><body><div class="container">
-                <div class="success-icon">✅</div>
-                <h1>Authentication Successful!</h1>
-                <div class="email">Authenticated: <b>{html.escape(user_email)}</b></div>
-                <div class="saved"><b>🔐 Credentials Saved!</b><br>Ready to use.</div>
-                {api_key_section}
-                {security_viz_section}
-                <div class="services"><h3>🚀 Services Available</h3>
-                    <div>Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms</div>
-                </div>
-                <p>You can close this window and return to your application.</p>
-            </div></body></html>"""
-
+            success_html = await _build_oauth_success_html(
+                user_email, credentials, session_id
+            )
             return HTMLResponse(content=success_html, status_code=200)
 
         except Exception as e:
-            logger.error(f"❌ Legacy oauth2callback error: {e}", exc_info=True)
+            logger.error(f"❌ Legacy oauth2callback error: {e}")
+            from auth.ui import generate_error_html
+
             return HTMLResponse(
-                content=f"""<!DOCTYPE html><html><head><title>OAuth Error</title>
-                <style>body{{font-family:sans-serif;text-align:center;padding:60px}}
-                .error{{color:#dc3545;font-size:48px}}</style></head><body>
-                <div class="error">❌</div><h1>OAuth Error</h1>
-                <p>{html.escape(str(e))}</p><p>Please try again.</p></body></html>""",
+                content=generate_error_html("OAuth Error", str(e)),
                 status_code=500,
             )
 
@@ -1753,7 +1203,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             return RedirectResponse(url=google_auth_url, status_code=302)
 
         except Exception as e:
-            logger.error(f"❌ Authorization proxy failed: {e}", exc_info=True)
+            logger.error(f"❌ Authorization proxy failed: {e}")
             return JSONResponse(
                 content={
                     "error": "server_error",
@@ -2158,49 +1608,20 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
                 logger.info(
-                    f"✅ OAuth callback processed successfully for user: {user_email}"
+                    f"✅ OAuth callback processed successfully for user: {redact_email(user_email)}"
                 )
 
                 # SECURITY: Validate user access before saving credentials
                 if not validate_user_access(user_email):
-                    logger.warning(f"🚫 Access denied for user: {user_email}")
+                    logger.warning(
+                        f"🚫 Access denied for user: {redact_email(user_email)}"
+                    )
 
                     # Return access denied page
-                    denied_html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Access Denied</title>
-                        <style>
-                            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #fff5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-                            .container {{ max-width: 600px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
-                            .error-icon {{ font-size: 72px; margin-bottom: 20px; }}
-                            h1 {{ color: #dc3545; margin-bottom: 10px; font-size: 32px; }}
-                            .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
-                            .message {{ color: #495057; font-size: 16px; line-height: 1.5; margin: 20px 0; }}
-                            .info {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffeaa7; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <div class="error-icon">🚫</div>
-                            <h1>Access Denied</h1>
-                            <div class="email">User: <strong>{html.escape(user_email)}</strong></div>
-                            <div class="message">
-                                You are not authorized to access this MCP server.
-                            </div>
-                            <div class="info">
-                                <strong>ℹ️ Access Restricted</strong><br>
-                                This server requires pre-authorization. Please contact the server administrator
-                                to request access for your email address.
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """
+                    from auth.ui import generate_access_denied_html
 
                     return HTMLResponse(
-                        content=denied_html,
+                        content=generate_access_denied_html(user_email),
                         status_code=403,
                         headers={
                             "Content-Type": "text/html; charset=utf-8",
@@ -2209,10 +1630,12 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     )
 
                 logger.info(
-                    f"✅ Access granted - credentials saved for user: {user_email}"
+                    f"✅ Access granted - credentials saved for user: {redact_email(user_email)}"
                 )
 
-                # Store user email in session context
+                # Store user email in session context (get_session_context returns
+                # None in HTTP context, so also scan all sessions)
+                session_id = None
                 try:
                     session_id = await get_session_context()
                     if session_id:
@@ -2220,349 +1643,78 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             session_id, SessionKey.USER_EMAIL, user_email
                         )
                         logger.info(
-                            f"✅ Stored user email {user_email} in session {session_id}"
+                            f"✅ Stored user email {redact_email(user_email)} in session {session_id}"
                         )
                 except Exception as e:
                     logger.warning(f"⚠️ Session storage error (continuing): {e}")
 
-                # Retrieve per-user API key if one was generated
-                user_api_key = getattr(credentials, "_user_api_key", None)
-                user_api_key_exists = getattr(
-                    credentials, "_user_api_key_exists", False
-                )
-                api_key_section = ""
+                # Fix 2: Update ALL sessions that have a wrong/missing email from this OAuth flow
+                # TODO(security): Same cross-session concern as legacy callback above.
+                try:
+                    from auth.context import get_session_data, list_sessions
 
-                # Build linked-accounts section (shown for both new and existing keys)
-                accessible_section = ""
-                if user_api_key or user_api_key_exists:
-                    try:
-                        from auth.user_api_keys import get_accessible_emails
-
-                        accessible = get_accessible_emails(user_email)
-                        linked = sorted(
-                            e for e in accessible if e != user_email.lower().strip()
+                    _verified = user_email.lower().strip()
+                    for sid in list_sessions():
+                        sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
+                        requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
+                        owned = set(
+                            get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS)
+                            or []
                         )
-                        if linked:
-                            linked_items = "".join(
-                                f"<li>{html.escape(e)}</li>" for e in linked
-                            )
-                            accessible_section = f"""
-                            <div class="linked-accounts">
-                                <b>🔗 Linked Accounts</b>
-                                <small>This key can also access credentials for:</small>
-                                <ul>{linked_items}</ul>
-                            </div>"""
-                        else:
-                            accessible_section = """
-                            <div class="linked-accounts solo">
-                                <b>🔒 Single Account</b>
-                                <small>This key only has access to the email above.<br>
-                                Authenticate additional emails in the same session to link them.</small>
-                            </div>"""
-                    except Exception:
-                        pass
+                        authed = set(
+                            get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS)
+                            or []
+                        )
 
-                if user_api_key:
-                    api_key_section = f"""
-                    <div class="api-key">
-                        <b>🔑 Your Personal API Key</b><br>
-                        <small>Use this as a Bearer token to connect without re-authenticating.<br>
-                        This key is shown <b>once</b> — save it now!</small>
-                        <div class="key-value hidden" id="apiKey">{html.escape(user_api_key)}</div>
-                        <button id="revealBtn" onclick="document.getElementById('apiKey').classList.remove('hidden');this.style.display='none';document.getElementById('copyBtn').style.display=''">
-                            Click to Reveal Key
-                        </button>
-                        <button id="copyBtn" style="display:none" onclick="navigator.clipboard.writeText(document.getElementById('apiKey').textContent).then(()=>this.textContent='Copied!')">
-                            Copy to Clipboard
-                        </button>
-                    </div>
-                    {accessible_section}"""
-                elif user_api_key_exists:
-                    api_key_section = f"""
-                    <div class="api-key" style="background:#d1ecf1;color:#0c5460;border-color:#bee5eb">
-                        <b>🔑 API Key Active</b><br>
-                        <small>Your existing per-user API key is still valid.<br>
-                        Credentials have been refreshed — no need to update your key.</small>
-                    </div>
-                    {accessible_section}"""
+                        # Determine the stale email to replace
+                        old_email = (sid_email or requested or "").lower().strip()
 
-                # Build privacy mode toggle section
-                privacy_section = ""
-                _privacy_session_id = ""
-                try:
-                    _privacy_session_id = session_id or ""
-                except Exception:
-                    pass
-                if _privacy_session_id:
-                    privacy_section = f"""
-                    <div class="privacy-toggle">
-                        <div class="privacy-header">
-                            <b>🛡️ Privacy Mode</b>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="privacyToggle"
-                                       onchange="togglePrivacy(this.checked)">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <small class="privacy-desc">
-                            When enabled, tool responses have personal information
-                            (emails, names, phone numbers) replaced with
-                            <code>[PRIVATE:token]</code> placeholders before the AI sees them.
-                            Your data stays encrypted on the server and can be revealed
-                            when needed. Disabled by default.
-                        </small>
-                        <div id="privacyStatus" class="privacy-status"></div>
-                    </div>
-                    <script>
-                    function togglePrivacy(enabled) {{
-                        var mode = enabled ? 'auto' : 'disabled';
-                        var statusEl = document.getElementById('privacyStatus');
-                        statusEl.textContent = 'Updating...';
-                        statusEl.className = 'privacy-status';
-                        fetch('/api/privacy-mode', {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            body: JSON.stringify({{
-                                session_id: '{_privacy_session_id}',
-                                mode: mode
-                            }})
-                        }})
-                        .then(function(r) {{ return r.json(); }})
-                        .then(function(data) {{
-                            if (data.success) {{
-                                statusEl.textContent = enabled
-                                    ? 'Privacy mode active — PII will be masked in tool responses'
-                                    : 'Privacy mode off — tool responses show full data';
-                                statusEl.className = 'privacy-status ' + (enabled ? 'active' : 'off');
-                            }} else {{
-                                statusEl.textContent = 'Error: ' + (data.error || 'unknown');
-                                statusEl.className = 'privacy-status error';
-                                document.getElementById('privacyToggle').checked = !enabled;
-                            }}
-                        }})
-                        .catch(function(err) {{
-                            statusEl.textContent = 'Network error';
-                            statusEl.className = 'privacy-status error';
-                            document.getElementById('privacyToggle').checked = !enabled;
-                        }});
-                    }}
-                    </script>"""
-
-                # Gather envelope info for security visualization
-                security_viz_section = ""
-                _num_recipients = 0
-                _has_hmac = False
-                _is_encrypted = False
-                try:
-                    from pathlib import Path
-
-                    from auth.google_auth import _normalize_email
-
-                    safe_email = (
-                        _normalize_email(user_email)
-                        .replace("@", "_at_")
-                        .replace(".", "_")
-                    )
-                    enc_path = (
-                        Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-                    )
-                    if enc_path.exists():
-                        _is_encrypted = True
-                        import json as _json
-
-                        try:
-                            _env = _json.load(open(enc_path))
-                            _num_recipients = len(_env.get("recipients", {}))
-                            _has_hmac = "hmac" in _env
-                        except (ValueError, KeyError):
-                            # Legacy format (raw Fernet bytes) — still encrypted
-                            _num_recipients = 1
-                            _has_hmac = False
-                except Exception:
-                    pass
-
-                # Build security visualization
-                if _is_encrypted:
-                    _cur = user_email.lower().strip()
-                    _all_emails = [_cur]
-                    try:
-                        _all_emails = sorted(get_accessible_emails(_cur))
-                    except Exception:
-                        pass
-
-                    try:
-                        from auth.user_api_keys import get_link_method
-                    except Exception:
-
-                        def get_link_method(a, b):
-                            return ""
-
-                    _recipient_nodes = ""
-                    for em in _all_emails:
-                        _is_current = em == _cur
-                        _highlight = "current" if _is_current else ""
-                        _method_badge = ""
-                        if not _is_current:
-                            _m = get_link_method(_cur, em)
-                            if _m == "oauth":
-                                _method_badge = (
-                                    '<span class="sec-method oauth">via OAuth</span>'
+                        # Skip if session already has the correct email
+                        if sid_email and sid_email.lower().strip() == _verified:
+                            if _verified not in owned and owned:
+                                owned.add(_verified)
+                                store_session_data(
+                                    sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
                                 )
-                            elif _m == "session":
-                                _method_badge = '<span class="sec-method session">via session</span>'
-                            elif _m == "both":
-                                _method_badge = '<span class="sec-method both">OAuth + session</span>'
-                            else:
-                                _method_badge = '<span class="sec-method">linked</span>'
-                        _recipient_nodes += f'<div class="sec-node sec-user {_highlight}"><span class="sec-icon">👤</span><span class="sec-label">{html.escape(em)}</span>{_method_badge}</div>'
+                            continue
 
-                    _key_lines = ""
-                    for em in _all_emails:
-                        _cls = "current" if (em == _cur) else ""
-                        _key_lines += f'<div class="sec-flow-row {_cls}"><div class="sec-key-badge">🔑 Key</div><svg class="sec-arrow" viewBox="0 0 40 12"><path d="M0 6h32l-5-4M32 6l-5 4" stroke="currentColor" stroke-width="1.5" fill="none"/></svg><div class="sec-cek-wrap">Wrapped CEK</div></div>'
+                        # Update if session had a wrong email or a requested email pending OAuth
+                        if old_email and old_email != _verified:
+                            store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                            owned.discard(old_email)
+                            owned.add(_verified)
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
+                            authed.discard(old_email)
+                            authed.add(_verified)
+                            store_session_data(
+                                sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                            )
+                            logger.info(
+                                f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}"
+                            )
+                        elif not sid_email and owned:
+                            store_session_data(sid, SessionKey.USER_EMAIL, user_email)
+                            owned.add(_verified)
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
+                            authed.add(_verified)
+                            store_session_data(
+                                sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                            )
+                            logger.info(
+                                f"Set session {sid} email to {redact_email(user_email)} (was empty)"
+                            )
+                except Exception as e:
+                    logger.warning(f"Could not update sessions after OAuth: {e}")
 
-                    _subtitle = (
-                        "Your Google Workspace credentials are protected by multi-recipient envelope encryption"
-                        if _num_recipients > 1
-                        else "Your Google Workspace credentials are protected by split-key encryption"
-                    )
-
-                    security_viz_section = f"""
-                    <div class="sec-panel">
-                        <div class="sec-title">🛡️ Credential Security Model</div>
-                        <div class="sec-subtitle">{_subtitle}</div>
-                        <div class="sec-diagram">
-                            <div class="sec-col sec-col-users">
-                                <div class="sec-col-label">Authorized Users</div>
-                                {_recipient_nodes}
-                            </div>
-                            <div class="sec-col sec-col-keys">
-                                <div class="sec-col-label">Key Wrapping</div>
-                                {_key_lines}
-                            </div>
-                            <div class="sec-col sec-col-envelope">
-                                <div class="sec-col-label">Encrypted Envelope</div>
-                                <div class="sec-envelope">
-                                    <div class="sec-env-header">Sealed Envelope</div>
-                                    <div class="sec-env-row"><span class="sec-env-badge rec">🔐 {_num_recipients} Wrapped CEK(s)</span></div>
-                                    <div class="sec-env-row"><span class="sec-env-badge data">🔒 Gmail · Drive · Calendar · Docs · Sheets</span></div>
-                                    <div class="sec-env-row"><span class="sec-env-badge hmac">{"✅" if _has_hmac else "⚠️"} HMAC Integrity Seal</span></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="sec-features">
-                            <div class="sec-feat"><span>🔀</span> Split-Key: requires <b>your key + server secret</b></div>
-                            <div class="sec-feat"><span>🚫</span> Server alone <b>cannot</b> decrypt your credentials</div>
-                            <div class="sec-feat"><span>🔗</span> Linked accounts share access via separate key wraps</div>
-                            <div class="sec-feat"><span>🛡️</span> HMAC detects tampering or unauthorized changes</div>
-                        </div>
-                    </div>"""
-
-                # Create beautiful success page
-                success_html = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Authentication Successful</title>
-                    <style>
-                        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-                        .container {{ max-width: 560px; background: white; border-radius: 20px; padding: 50px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }}
-                        .success-icon {{ font-size: 72px; margin-bottom: 20px; }}
-                        h1 {{ color: #28a745; margin-bottom: 10px; font-size: 32px; }}
-                        .email {{ color: #6c757d; font-size: 18px; margin: 20px 0; }}
-                        .message {{ color: #495057; font-size: 16px; line-height: 1.5; margin: 20px 0; }}
-                        .services {{ background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; }}
-                        .services h3 {{ color: #495057; margin-top: 0; }}
-                        .service-list {{ color: #6c757d; font-size: 14px; }}
-                        .credentials-saved {{ background: #d4edda; color: #155724; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #c3e6cb; }}
-                        .api-key {{ background: #fff3cd; color: #856404; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffc107; text-align: left; }}
-                        .api-key small {{ display: block; margin-bottom: 10px; }}
-                        .key-value {{ font-family: monospace; font-size: 13px; background: #f8f9fa; padding: 10px; border-radius: 4px; word-break: break-all; margin: 10px 0; user-select: all; border: 1px solid #dee2e6; }}
-                        .key-value.hidden {{ filter: blur(8px); user-select: none; pointer-events: none; }}
-                        .api-key button {{ background: #856404; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; }}
-                        .api-key button:hover {{ background: #6c5200; }}
-                        .linked-accounts {{ background: #e8f4fd; color: #0c5460; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #bee5eb; text-align: left; }}
-                        .linked-accounts small {{ display: block; margin-bottom: 8px; }}
-                        .linked-accounts ul {{ margin: 8px 0 0 0; padding-left: 20px; }}
-                        .linked-accounts li {{ margin: 4px 0; font-family: monospace; font-size: 14px; }}
-                        .linked-accounts.solo {{ background: #f8f9fa; color: #6c757d; border-color: #dee2e6; }}
-                        /* Privacy mode toggle */
-                        .privacy-toggle {{ background: #f0f4ff; border: 1px solid #c5cae9; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left; }}
-                        .privacy-header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }}
-                        .privacy-desc {{ display: block; color: #495057; line-height: 1.5; }}
-                        .privacy-desc code {{ background: #e8eaf6; padding: 1px 5px; border-radius: 3px; font-size: 12px; }}
-                        .privacy-status {{ font-size: 12px; margin-top: 8px; min-height: 16px; }}
-                        .privacy-status.active {{ color: #2e7d32; }}
-                        .privacy-status.off {{ color: #6c757d; }}
-                        .privacy-status.error {{ color: #c62828; }}
-                        .toggle-switch {{ position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }}
-                        .toggle-switch input {{ opacity: 0; width: 0; height: 0; }}
-                        .toggle-slider {{ position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; border-radius: 26px; transition: 0.3s; }}
-                        .toggle-slider:before {{ content: ""; position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }}
-                        .toggle-switch input:checked + .toggle-slider {{ background: #5c6bc0; }}
-                        .toggle-switch input:checked + .toggle-slider:before {{ transform: translateX(22px); }}
-                        /* Security visualization */
-                        .sec-panel {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #e0e0e0; padding: 24px; border-radius: 12px; margin: 24px 0; text-align: left; }}
-                        .sec-title {{ font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }}
-                        .sec-subtitle {{ font-size: 11px; color: #8892b0; margin-bottom: 16px; }}
-                        .sec-diagram {{ display: flex; gap: 8px; align-items: stretch; margin-bottom: 16px; }}
-                        .sec-col {{ flex: 1; display: flex; flex-direction: column; gap: 6px; }}
-                        .sec-col-label {{ font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #64ffda; font-weight: 600; margin-bottom: 4px; text-align: center; }}
-                        .sec-node {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 6px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }}
-                        .sec-node.current {{ border-color: #64ffda; background: rgba(100,255,218,0.08); }}
-                        .sec-icon {{ font-size: 18px; }}
-                        .sec-label {{ font-size: 9px; font-family: monospace; word-break: break-all; line-height: 1.2; color: #ccd6f6; }}
-                        .sec-method {{ font-size: 7px; padding: 1px 5px; border-radius: 3px; margin-top: 2px; background: rgba(255,255,255,0.08); color: #8892b0; }}
-                        .sec-method.oauth {{ background: rgba(100,255,218,0.12); color: #64ffda; }}
-                        .sec-method.session {{ background: rgba(255,183,77,0.12); color: #ffb74d; }}
-                        .sec-method.both {{ background: rgba(129,212,250,0.12); color: #81d4fa; }}
-                        .sec-method.api_key {{ background: rgba(206,147,255,0.12); color: #ce93ff; }}
-                        .sec-col-keys {{ flex: 0.7; justify-content: center; gap: 8px; }}
-                        .sec-flow-row {{ display: flex; align-items: center; gap: 3px; justify-content: center; }}
-                        .sec-flow-row.current .sec-key-badge {{ background: #64ffda; color: #1a1a2e; }}
-                        .sec-key-badge {{ background: rgba(255,255,255,0.12); color: #ccd6f6; font-size: 8px; font-weight: 600; padding: 3px 6px; border-radius: 4px; white-space: nowrap; }}
-                        .sec-arrow {{ width: 28px; height: 12px; color: #64ffda; flex-shrink: 0; }}
-                        .sec-cek-wrap {{ font-size: 8px; color: #8892b0; white-space: nowrap; }}
-                        .sec-col-envelope {{ flex: 1.1; }}
-                        .sec-envelope {{ background: rgba(255,255,255,0.04); border: 1.5px solid #64ffda; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 5px; }}
-                        .sec-env-header {{ font-size: 10px; font-weight: 700; color: #64ffda; text-align: center; letter-spacing: 1px; text-transform: uppercase; }}
-                        .sec-env-row {{ text-align: center; }}
-                        .sec-env-badge {{ display: inline-block; font-size: 9px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }}
-                        .sec-env-badge.rec {{ background: rgba(255,183,77,0.15); color: #ffb74d; }}
-                        .sec-env-badge.data {{ background: rgba(100,255,218,0.1); color: #64ffda; }}
-                        .sec-env-badge.hmac {{ background: rgba(129,212,250,0.1); color: #81d4fa; }}
-                        .sec-features {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }}
-                        .sec-feat {{ font-size: 10px; color: #8892b0; display: flex; align-items: start; gap: 5px; line-height: 1.3; }}
-                        .sec-feat span:first-child {{ flex-shrink: 0; }}
-                        .sec-feat b {{ color: #ccd6f6; }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <div class="success-icon">✅</div>
-                        <h1>Authentication Successful!</h1>
-                        <div class="email">Authenticated: <strong>{html.escape(user_email)}</strong></div>
-                        <div class="credentials-saved">
-                            <strong>🔐 Credentials Saved!</strong><br>
-                            Ready to use.
-                        </div>
-                        {api_key_section}
-                        {privacy_section}
-                        {security_viz_section}
-                        <div class="services">
-                            <h3>🚀 Services Available</h3>
-                            <div class="service-list">
-                                Drive · Gmail · Calendar · Docs · Sheets · Slides · Photos · Chat · Forms
-                            </div>
-                        </div>
-                        <p>You can close this window and return to your application.</p>
-                    </div>
-                </body>
-                </html>
-                """
-
+                success_html = await _build_oauth_success_html(
+                    user_email, credentials, session_id
+                )
                 logger.info(
-                    f"✅ Returning success page for {user_email} with credential confirmation"
+                    f"✅ Returning success page for {redact_email(user_email)} with credential confirmation"
                 )
                 return HTMLResponse(
                     content=success_html,
@@ -2577,92 +1729,21 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
             except Exception as oauth_error:
-                logger.error(
-                    f"❌ OAuth processing failed: {oauth_error}", exc_info=True
-                )
+                logger.error(f"❌ OAuth processing failed: {oauth_error}")
 
                 # Enhanced error messaging for OAuth issues
                 error_str = str(oauth_error).lower()
 
                 if "invalid_client" in error_str or "unauthorized" in error_str:
-                    error_html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>OAuth Client Configuration Error</title>
-                        <style>
-                            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #fff5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
-                            .container {{ max-width: 700px; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-                            .error {{ color: #dc3545; font-size: 48px; margin-bottom: 20px; text-align: center; }}
-                            h1 {{ color: #333; margin-bottom: 20px; text-align: center; }}
-                            .error-details {{ background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0; }}
-                            .solution-steps {{ background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-                            .solution-steps h3 {{ margin-top: 0; color: #155724; }}
-                            .solution-steps ol {{ text-align: left; padding-left: 20px; }}
-                            .solution-steps li {{ margin: 8px 0; }}
-                            .redirect-uri {{ background: #f8f9fa; padding: 8px 12px; border-radius: 4px; font-family: monospace; border: 1px solid #dee2e6; }}
-                            .important {{ font-weight: bold; color: #dc3545; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <div class="error">❌</div>
-                            <h1>OAuth Client Configuration Error</h1>
-                            
-                            <div class="error-details">
-                                <strong>Error:</strong> {str(oauth_error)}<br><br>
-                                <strong>Most Likely Cause:</strong> Your OAuth client's redirect URI configuration doesn't match what the authentication system expects.
-                            </div>
-                            
-                            <div class="solution-steps">
-                                <h3>🔧 How to Fix This:</h3>
-                                <ol>
-                                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console → APIs & Services → Credentials</a></li>
-                                    <li>Find and click on your OAuth 2.0 Client ID</li>
-                                    <li>In the "Authorized redirect URIs" section, add this exact URI:</li>
-                                    <div class="redirect-uri">https://localhost:8002/oauth2callback</div>
-                                    <li>Click "Save" to update your OAuth client configuration</li>
-                                    <li>Wait a few minutes for changes to propagate</li>
-                                    <li class="important">Try the authentication process again</li>
-                                </ol>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 30px;">
-                                <p>If you continue having issues, verify that:</p>
-                                <ul style="text-align: left; display: inline-block;">
-                                    <li>Your OAuth consent screen is configured</li>
-                                    <li>Required APIs are enabled (Drive, Gmail, Calendar, etc.)</li>
-                                    <li>Your client ID and secret are correct</li>
-                                    <li>You're using the latest client credentials</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """
+                    from auth.ui import generate_oauth_client_error_html
+
+                    error_html = generate_oauth_client_error_html(str(oauth_error))
                 else:
-                    error_html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>OAuth Processing Error</title>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; background: #fff5f5; }}
-                            .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-                            .error {{ color: #dc3545; font-size: 48px; margin-bottom: 20px; }}
-                            h1 {{ color: #333; margin-bottom: 20px; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <div class="error">❌</div>
-                            <h1>OAuth Processing Error</h1>
-                            <p><strong>Error:</strong> {str(oauth_error)}</p>
-                            <p>Please try the authentication process again.</p>
-                        </div>
-                    </body>
-                    </html>
-                    """
+                    from auth.ui import generate_error_html
+
+                    error_html = generate_error_html(
+                        "OAuth Processing Error", str(oauth_error)
+                    )
 
                 return HTMLResponse(
                     content=error_html,
@@ -2675,21 +1756,15 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
         except Exception as e:
-            logger.error(f"🚨 CRITICAL: Basic callback error: {e}", exc_info=True)
+            logger.error(f"🚨 CRITICAL: Basic callback error: {e}")
 
             # Even if everything fails, return a basic HTML response
-            error_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head><title>Callback Route Error</title></head>
-            <body>
-                <h1>🚨 Callback Route Error</h1>
-                <p><strong>Error:</strong> {str(e)}</p>
-                <p><strong>State:</strong> Unknown</p>
-                <p>At least we know the route is being hit!</p>
-            </body>
-            </html>
-            """
+            from auth.ui import generate_error_html
+
+            error_html = generate_error_html(
+                "Callback Route Error",
+                str(e) + "\nAt least we know the route is being hit!",
+            )
 
             return HTMLResponse(
                 content=error_html,
@@ -2739,55 +1814,25 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 error_description = query_params.get(
                     "error_description", "No description provided"
                 )
+                from auth.ui import generate_error_html
+
                 return HTMLResponse(
-                    content=f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>OAuth Error</title>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
-                            .error {{ color: #dc3545; }}
-                            .container {{ max-width: 600px; margin: 0 auto; }}
-                            .code {{ background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; }}
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1 class="error">❌ OAuth Error</h1>
-                            <p><strong>Error:</strong> {error}</p>
-                            <p><strong>Description:</strong> {error_description}</p>
-                            <p>Please try the authentication process again.</p>
-                        </div>
-                    </body>
-                    </html>
-                    """,
+                    content=generate_error_html(
+                        "OAuth Error",
+                        f"Error: {error}\nDescription: {error_description}",
+                    ),
                     status_code=400,
                 )
 
             if not auth_code:
                 logger.error("❌ No authorization code in callback")
+                from auth.ui import generate_error_html
+
                 return HTMLResponse(
-                    content="""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>OAuth Callback Error</title>
-                        <style>
-                            body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
-                            .error { color: #dc3545; }
-                            .container { max-width: 600px; margin: 0 auto; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <h1 class="error">❌ Authorization Code Missing</h1>
-                            <p>No authorization code received from Google OAuth.</p>
-                            <p>Please try the authentication process again.</p>
-                        </div>
-                    </body>
-                    </html>
-                    """,
+                    content=generate_error_html(
+                        "Authorization Code Missing",
+                        "No authorization code received from Google OAuth.",
+                    ),
                     status_code=400,
                 )
 
@@ -2796,76 +1841,16 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
             # For debugging, show the authorization code to the user
             # In production, you might want to automatically exchange it for tokens
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>OAuth Callback Success</title>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
-                        .success {{ color: #28a745; }}
-                        .container {{ max-width: 600px; margin: 0 auto; }}
-                        .code {{
-                            background: #f8f9fa;
-                            padding: 15px;
-                            border-radius: 5px;
-                            margin: 20px 0;
-                            font-family: monospace;
-                            word-break: break-all;
-                            border: 1px solid #dee2e6;
-                        }}
-                        .params {{
-                            text-align: left;
-                            background: #e9ecef;
-                            padding: 15px;
-                            border-radius: 5px;
-                            margin: 20px 0;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1 class="success">✅ OAuth Callback Successful!</h1>
-                        <p>Authorization code received from Google OAuth.</p>
-                        
-                        <div class="params">
-                            <h3>Callback Parameters:</h3>
-                            <p><strong>Authorization Code:</strong></p>
-                            <div class="code">{auth_code}</div>
-                            {"<p><strong>State:</strong> " + state + "</p>" if state else ""}
-                        </div>
-                        
-                        <p><em>You can now close this window or use the authorization code for token exchange.</em></p>
-                    </div>
-                </body>
-                </html>
-                """
-            )
+            from auth.ui import generate_debug_success_html
+
+            return HTMLResponse(content=generate_debug_success_html(auth_code, state))
 
         except Exception as e:
-            logger.error(f"❌ OAuth callback error: {e}", exc_info=True)
+            logger.error(f"❌ OAuth callback error: {e}")
+            from auth.ui import generate_error_html
+
             return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>OAuth Callback Error</title>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; margin: 40px; text-align: center; }}
-                        .error {{ color: #dc3545; }}
-                        .container {{ max-width: 600px; margin: 0 auto; }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1 class="error">❌ Callback Processing Error</h1>
-                        <p>Error processing OAuth callback: {str(e)}</p>
-                        <p>Please try the authentication process again.</p>
-                    </div>
-                </body>
-                </html>
-                """,
+                content=generate_error_html("Callback Processing Error", str(e)),
                 status_code=500,
             )
 
@@ -3054,6 +2039,139 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
             logger.exception("Privacy mode API error")
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+    # ── Per-session sampling configuration (called from OAuth success page) ──
+    @mcp.custom_route("/api/sampling-config", methods=["POST", "OPTIONS"])
+    async def sampling_config_api(request: Any):
+        """Save or clear per-user sampling LLM configuration."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            target_session = body.get("session_id") or ""
+            fallback_email = (body.get("user_email") or "").strip()
+            model = (body.get("model") or "").strip()
+            api_key = (body.get("api_key") or "").strip()
+            api_base = (body.get("api_base") or "").strip()
+            action = body.get("action", "save")  # "save" or "clear"
+
+            from auth.context import (
+                get_auth_middleware,
+                get_session_data,
+                list_sessions,
+                store_session_data,
+            )
+            from auth.types import AuthProvenance, SessionKey
+
+            # If no session_id provided, find one by email
+            if not target_session and fallback_email:
+                for _sid in reversed(list_sessions()):
+                    _sid_email = get_session_data(
+                        _sid, SessionKey.USER_EMAIL, default=None
+                    )
+                    if (
+                        _sid_email
+                        and _sid_email.lower().strip() == fallback_email.lower()
+                    ):
+                        target_session = _sid
+                        break
+
+            if not target_session:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Missing session_id and could not find session for email",
+                    },
+                    status_code=400,
+                )
+
+            # Reject shared API key sessions (no identity binding)
+            provenance = get_session_data(
+                target_session, SessionKey.AUTH_PROVENANCE, default=None
+            )
+            if provenance == AuthProvenance.API_KEY:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Sampling config requires authenticated session (not shared API key)",
+                    },
+                    status_code=403,
+                )
+
+            user_email = (
+                get_session_data(target_session, SessionKey.USER_EMAIL, default=None)
+                or fallback_email
+            )
+            if not user_email:
+                return JSONResponse(
+                    {"success": False, "error": "No user email in session"},
+                    status_code=400,
+                )
+
+            auth_middleware = get_auth_middleware()
+            per_user_key = get_session_data(
+                target_session, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+            )
+            google_sub = get_session_data(
+                target_session, SessionKey.GOOGLE_SUB, default=None
+            )
+
+            if action == "clear" or not model:
+                # Clear: remove from disk + session
+                if auth_middleware:
+                    auth_middleware.delete_sampling_config(user_email)
+                store_session_data(target_session, SessionKey.SAMPLING_CONFIG, None)
+                logger.info(
+                    "Sampling config cleared via API: session=%s, user=%s",
+                    target_session[:8] + "...",
+                    user_email,
+                )
+                return JSONResponse({"success": True, "cleared": True})
+
+            # Save config
+            config_dict = {"model": model}
+            if api_key:
+                config_dict["api_key"] = api_key
+            if api_base:
+                config_dict["api_base"] = api_base
+
+            if auth_middleware:
+                auth_middleware.save_sampling_config(
+                    user_email,
+                    config_dict,
+                    per_user_key=per_user_key,
+                    google_sub=google_sub,
+                )
+
+            store_session_data(target_session, SessionKey.SAMPLING_CONFIG, config_dict)
+
+            logger.info(
+                "Sampling config saved via API: session=%s, model=%s",
+                target_session[:8] + "...",
+                model,
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "model": model,
+                    "has_api_key": bool(api_key),
+                    "has_api_base": bool(api_base),
+                }
+            )
+        except Exception as e:
+            logger.exception("Sampling config API error")
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
     # For simplicity, let's focus on the core endpoints that MCP Inspector needs
     # The client configuration endpoints can be added later if needed
 
@@ -3080,3 +2198,717 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
     # Register service selection routes (shared with GoogleProvider path)
     setup_service_selection_routes(mcp)
+
+    # Register status check routes (shared with GoogleProvider path)
+    setup_status_check_routes(mcp)
+
+    # Register config API routes (shared with GoogleProvider path)
+    # In GoogleProvider mode these are registered separately via setup_config_api_routes()
+    # Here they're already inline above, so no separate call needed.
+
+
+def setup_config_api_routes(mcp) -> None:
+    """Register /api/privacy-mode and /api/sampling-config routes.
+
+    These are needed by the OAuth success page regardless of whether
+    GoogleProvider or the legacy OAuth system is active.
+    """
+
+    @mcp.custom_route("/api/privacy-mode", methods=["POST", "OPTIONS"])
+    async def privacy_mode_api(request: Any):
+        """Set per-session privacy mode from the OAuth success page."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            target_session = body.get("session_id")
+            mode = body.get("mode")
+
+            if mode not in ("disabled", "auto", "strict"):
+                return JSONResponse(
+                    {"success": False, "error": f"Invalid mode: {mode}"},
+                    status_code=400,
+                )
+
+            if not target_session:
+                return JSONResponse(
+                    {"success": False, "error": "Missing session_id"},
+                    status_code=400,
+                )
+
+            from auth.context import get_session_data, store_session_data
+            from auth.types import AuthProvenance, SessionKey
+
+            provenance = get_session_data(
+                target_session, SessionKey.AUTH_PROVENANCE, default=None
+            )
+            if provenance == AuthProvenance.API_KEY:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Privacy mode requires authenticated session (not shared API key)",
+                    },
+                    status_code=403,
+                )
+
+            previous = get_session_data(
+                target_session, SessionKey.PRIVACY_MODE, default=None
+            )
+            store_session_data(target_session, SessionKey.PRIVACY_MODE, mode)
+
+            logger.info(
+                "Privacy mode set via API: session=%s, %s -> %s",
+                target_session[:8] + "...",
+                previous or "default",
+                mode,
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "previous_mode": previous or "disabled",
+                    "current_mode": mode,
+                }
+            )
+        except Exception as e:
+            logger.exception("Privacy mode API error")
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+    @mcp.custom_route("/api/sampling-config", methods=["POST", "OPTIONS"])
+    async def sampling_config_api(request: Any):
+        """Save or clear per-user sampling LLM configuration."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            target_session = body.get("session_id") or ""
+            fallback_email = (body.get("user_email") or "").strip()
+            model = (body.get("model") or "").strip()
+            api_key = (body.get("api_key") or "").strip()
+            api_base = (body.get("api_base") or "").strip()
+            action = body.get("action", "save")
+
+            from auth.context import (
+                get_auth_middleware,
+                get_session_data,
+                list_sessions,
+                store_session_data,
+            )
+            from auth.types import AuthProvenance, SessionKey
+
+            if not target_session and fallback_email:
+                for _sid in reversed(list_sessions()):
+                    _sid_email = get_session_data(
+                        _sid, SessionKey.USER_EMAIL, default=None
+                    )
+                    if (
+                        _sid_email
+                        and _sid_email.lower().strip() == fallback_email.lower()
+                    ):
+                        target_session = _sid
+                        break
+
+            if not target_session:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Missing session_id and could not find session for email",
+                    },
+                    status_code=400,
+                )
+
+            provenance = get_session_data(
+                target_session, SessionKey.AUTH_PROVENANCE, default=None
+            )
+            if provenance == AuthProvenance.API_KEY:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Sampling config requires authenticated session (not shared API key)",
+                    },
+                    status_code=403,
+                )
+
+            user_email = (
+                get_session_data(target_session, SessionKey.USER_EMAIL, default=None)
+                or fallback_email
+            )
+            if not user_email:
+                return JSONResponse(
+                    {"success": False, "error": "No user email in session"},
+                    status_code=400,
+                )
+
+            auth_middleware = get_auth_middleware()
+            per_user_key = get_session_data(
+                target_session, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+            )
+            google_sub = get_session_data(
+                target_session, SessionKey.GOOGLE_SUB, default=None
+            )
+
+            if action == "clear" or not model:
+                if auth_middleware:
+                    auth_middleware.delete_sampling_config(user_email)
+                store_session_data(target_session, SessionKey.SAMPLING_CONFIG, None)
+                logger.info(
+                    "Sampling config cleared via API: session=%s, user=%s",
+                    target_session[:8] + "...",
+                    user_email,
+                )
+                return JSONResponse({"success": True, "cleared": True})
+
+            config_dict = {"model": model}
+            if api_key:
+                config_dict["api_key"] = api_key
+            if api_base:
+                config_dict["api_base"] = api_base
+
+            # Validate: quick provider connectivity check if API key provided
+            validation_ok = True
+            validation_msg = ""
+            if api_key:
+                try:
+                    import httpx
+
+                    check_base = api_base or settings.litellm_api_base
+                    if (
+                        not check_base
+                        and settings.venice_inference_key
+                        and not settings.litellm_api_key
+                    ):
+                        check_base = "https://api.venice.ai/api/v1"
+                    if check_base:
+                        async with httpx.AsyncClient(
+                            timeout=5.0, verify=False
+                        ) as client:
+                            resp = await client.get(
+                                f"{check_base.rstrip('/')}/models",
+                                headers={"Authorization": f"Bearer {api_key}"},
+                            )
+                            if resp.status_code == 401:
+                                validation_ok = False
+                                validation_msg = (
+                                    "Invalid API key — authentication failed"
+                                )
+                            elif resp.status_code == 200:
+                                validation_msg = "API key verified"
+                            else:
+                                validation_msg = f"Provider returned status {resp.status_code} (saved anyway)"
+                except Exception as ve:
+                    validation_msg = f"Could not reach provider (saved anyway): {ve}"
+                    logger.debug("Sampling config validation warning: %s", ve)
+
+            if not validation_ok:
+                return JSONResponse(
+                    {"success": False, "error": validation_msg},
+                    status_code=400,
+                )
+
+            # Encrypt and save to disk
+            num_recipients = 0
+            if auth_middleware:
+                auth_middleware.save_sampling_config(
+                    user_email,
+                    config_dict,
+                    per_user_key=per_user_key,
+                    google_sub=google_sub,
+                )
+                # Count recipients in the saved envelope
+                try:
+                    import json as _json
+                    from pathlib import Path
+
+                    from auth.google_auth import _normalize_email
+
+                    safe_email = (
+                        _normalize_email(user_email)
+                        .replace("@", "_at_")
+                        .replace(".", "_")
+                    )
+                    enc_path = (
+                        Path(settings.credentials_dir)
+                        / f"{safe_email}_sampling_config.enc"
+                    )
+                    if enc_path.exists():
+                        _env = _json.loads(enc_path.read_text())
+                        num_recipients = len(_env.get("recipients", {}))
+                except Exception:
+                    pass
+
+            store_session_data(target_session, SessionKey.SAMPLING_CONFIG, config_dict)
+
+            logger.info(
+                "Sampling config saved via API: session=%s, model=%s, recipients=%d",
+                target_session[:8] + "...",
+                model,
+                num_recipients,
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "model": model,
+                    "has_api_key": bool(api_key),
+                    "has_api_base": bool(api_base),
+                    "validated": validation_msg or None,
+                    "encryption": {
+                        "method": "split-key envelope (AES + HMAC-SHA256)",
+                        "recipients": num_recipients,
+                    }
+                    if num_recipients
+                    else None,
+                }
+            )
+        except Exception as e:
+            logger.exception("Sampling config API error")
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+    @mcp.custom_route("/api/models", methods=["GET", "OPTIONS"])
+    async def models_api(request: Any):
+        """Return available LLM models for the sampling config dropdown."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        models = []
+
+        # Query Venice /models endpoint if key is configured
+        try:
+            api_key = settings.litellm_api_key or settings.venice_inference_key
+            api_base = settings.litellm_api_base
+            if (
+                not api_base
+                and settings.venice_inference_key
+                and not settings.litellm_api_key
+            ):
+                api_base = "https://api.venice.ai/api/v1"
+
+            if api_key and api_base:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+                    resp = await client.get(
+                        f"{api_base.rstrip('/')}/models",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        provider_prefix = (
+                            "openai"  # LiteLLM provider prefix for OpenAI-compatible
+                        )
+                        for m in data.get("data", []):
+                            model_id = m.get("id", "")
+                            if model_id:
+                                models.append(
+                                    {
+                                        "id": f"{provider_prefix}/{model_id}",
+                                        "name": model_id,
+                                        "owned_by": m.get("owned_by", ""),
+                                    }
+                                )
+                        logger.debug(
+                            "Models API: fetched %d models from %s",
+                            len(models),
+                            api_base,
+                        )
+        except Exception as e:
+            logger.debug("Models API: provider query failed (non-fatal): %s", e)
+
+        # Fallback: add common LiteLLM models if provider query returned nothing
+        if not models:
+            for m in [
+                "openai/gpt-4o",
+                "openai/gpt-4o-mini",
+                "openai/gpt-4-turbo",
+                "anthropic/claude-sonnet-4-20250514",
+                "anthropic/claude-haiku-4-5-20251001",
+                "groq/llama-3.1-70b-versatile",
+                "groq/llama-3.1-8b-instant",
+                "together_ai/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            ]:
+                models.append(
+                    {"id": m, "name": m.split("/", 1)[1], "owned_by": m.split("/")[0]}
+                )
+
+        return JSONResponse(
+            {"data": models},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=300",
+            },
+        )
+
+    @mcp.custom_route("/api/revoke", methods=["POST", "OPTIONS"])
+    async def revoke_api(request: Any):
+        """Revoke selected credentials and encrypted envelopes for a user."""
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            user_email = (body.get("user_email") or "").strip()
+            items = body.get("items", [])
+            confirmation_email = (body.get("confirmation_email") or "").strip()
+
+            if not user_email or not items:
+                return JSONResponse(
+                    {"success": False, "error": "Missing user_email or items"},
+                    status_code=400,
+                )
+
+            if confirmation_email.lower() != user_email.lower():
+                return JSONResponse(
+                    {"success": False, "error": "Confirmation email does not match"},
+                    status_code=400,
+                )
+
+            from auth.context import get_auth_middleware
+
+            auth_mw = get_auth_middleware()
+            revoked = []
+            errors = []
+
+            for item in items:
+                try:
+                    if item == "api_key":
+                        from auth.user_api_keys import revoke_user_key
+
+                        if revoke_user_key(user_email):
+                            revoked.append("api_key")
+                        else:
+                            errors.append("api_key: not found")
+                    elif item == "credentials" and auth_mw:
+                        if auth_mw.delete_credential_file(user_email):
+                            revoked.append("credentials")
+                        else:
+                            errors.append("credentials: not found")
+                    elif item == "chat_sa" and auth_mw:
+                        if auth_mw.delete_chat_service_account(user_email):
+                            revoked.append("chat_sa")
+                        else:
+                            errors.append("chat_sa: not found")
+                    elif item == "sampling_config" and auth_mw:
+                        if auth_mw.delete_sampling_config(user_email):
+                            revoked.append("sampling_config")
+                        else:
+                            errors.append("sampling_config: not found")
+                    elif item == "backup" and auth_mw:
+                        if auth_mw.delete_backup_file(user_email):
+                            revoked.append("backup")
+                        else:
+                            errors.append("backup: not found")
+                    elif item == "links":
+                        from auth.user_api_keys import (
+                            get_accessible_emails,
+                            unlink_accounts,
+                        )
+
+                        accessible = get_accessible_emails(user_email)
+                        linked = [
+                            e for e in accessible if e != user_email.lower().strip()
+                        ]
+                        for linked_email in linked:
+                            unlink_accounts(user_email, linked_email)
+                        if linked:
+                            revoked.append("links")
+                        else:
+                            errors.append("links: none found")
+                    else:
+                        errors.append(f"{item}: unknown or unavailable")
+                except Exception as e:
+                    errors.append(f"{item}: {e}")
+
+            logger.info(
+                "Revoke API: user=%s, revoked=%s, errors=%s",
+                user_email,
+                revoked,
+                errors,
+            )
+
+            return JSONResponse(
+                {"success": True, "revoked": revoked, "errors": errors},
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+        except Exception as e:
+            logger.exception("Revoke API error")
+            return JSONResponse(
+                {"success": False, "error": str(e)},
+                status_code=500,
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
+    logger.info(
+        "  ✅ Config API routes registered (/api/privacy-mode, /api/sampling-config, /api/models, /api/revoke)"
+    )
+
+
+def setup_status_check_routes(mcp) -> None:
+    """Register /auth/status-check route for viewing credential status in browser."""
+
+    @mcp.custom_route("/auth/status-check", methods=["GET", "OPTIONS"])
+    async def status_check(request: Any):
+        """Show credential status page with envelope inventory and revoke controls."""
+        from starlette.responses import HTMLResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
+
+        query_params = dict(request.query_params)
+        email = (query_params.get("email") or "").strip()
+
+        if not email:
+            from auth.ui import generate_error_html
+
+            return HTMLResponse(
+                content=generate_error_html(
+                    "Missing Email", "The 'email' query parameter is required."
+                ),
+                status_code=400,
+            )
+
+        # Verify credentials exist
+        try:
+            from auth.google_auth import get_valid_credentials
+
+            creds = get_valid_credentials(email)
+        except Exception:
+            creds = None
+
+        if not creds:
+            from auth.ui import generate_error_html
+
+            return HTMLResponse(
+                content=generate_error_html(
+                    "No Credentials Found",
+                    f"No valid credentials found for {email}. "
+                    "Please authenticate first using start_google_auth.",
+                ),
+                status_code=404,
+            )
+
+        from auth.ui import (
+            build_api_key_section,
+            build_envelope_inventory_section,
+            build_revoke_section,
+            build_security_viz_section,
+            generate_success_html,
+        )
+        from auth.user_api_keys import was_key_revealed
+
+        api_key_section = build_api_key_section(email, None, was_key_revealed(email))
+        security_viz_section = build_security_viz_section(email)
+        envelope_inventory_section = build_envelope_inventory_section(email)
+        revoke_section = build_revoke_section(email, settings.base_url)
+
+        page_html = generate_success_html(
+            user_email=email,
+            api_key_section=api_key_section,
+            security_viz_section=security_viz_section,
+            envelope_inventory_section=envelope_inventory_section,
+            revoke_section=revoke_section,
+            page_mode="status_check",
+        )
+
+        return HTMLResponse(content=page_html)
+
+    logger.info("  ✅ Status check route registered (/auth/status-check)")
+
+
+def setup_complete_oauth_endpoints(
+    mcp,
+    google_auth_provider,
+    settings,
+    use_google_oauth: bool,
+    enable_jwt_auth: bool,
+):
+    """Register all OAuth endpoints — GoogleProvider supplemental or legacy.
+
+    When GoogleProvider is active, registers only supplemental endpoints
+    (status polling, service selection, legacy callback, config API, status check).
+    When not active, registers full legacy OAuth discovery + operational endpoints
+    and configures JWT-based authentication.
+    """
+    if google_auth_provider:
+        # GoogleProvider is active — it already registered all discovery endpoints.
+        logger.info(
+            "🔍 GoogleProvider active — RFC-compliant OAuth endpoints auto-registered"
+        )
+        logger.info(
+            f"  ✅ Protected Resource:  {settings.base_url}/.well-known/oauth-protected-resource"
+        )
+        logger.info(
+            f"  ✅ Auth Server Metadata: {settings.base_url}/.well-known/oauth-authorization-server"
+        )
+        logger.info(f"  ✅ Authorization:        {settings.base_url}/authorize")
+        logger.info(f"  ✅ Token Exchange:       {settings.base_url}/token")
+        logger.info(f"  ✅ Callback:             {settings.base_url}/auth/callback")
+        logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
+
+        try:
+
+            @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
+            async def oauth_status_check_gp(request):
+                """OAuth authentication status polling endpoint (supplemental)."""
+                from starlette.responses import JSONResponse, Response
+
+                if request.method == "OPTIONS":
+                    return Response(
+                        status_code=200, headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                import json
+                from pathlib import Path as _Path
+
+                oauth_data_path = (
+                    _Path(settings.credentials_dir) / ".oauth_authentication.json"
+                )
+                if oauth_data_path.exists():
+                    try:
+                        with open(oauth_data_path, "r") as f:
+                            oauth_data = json.load(f)
+                    except (json.JSONDecodeError, OSError):
+                        oauth_data = {}
+                    authenticated_email = oauth_data.get("authenticated_email")
+                    if authenticated_email:
+                        return JSONResponse(
+                            content={
+                                "authenticated": True,
+                                "user_email": authenticated_email,
+                            },
+                            headers={
+                                "Access-Control-Allow-Origin": "*",
+                                "Cache-Control": "no-store",
+                            },
+                        )
+                return JSONResponse(
+                    content={
+                        "authenticated": False,
+                        "message": "No authentication data found",
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-store",
+                    },
+                )
+
+            logger.info("  ✅ Supplemental /oauth/status endpoint registered")
+
+            setup_service_selection_routes(mcp)
+            logger.info(
+                "  ✅ Service selection routes registered (/auth/services/select)"
+            )
+
+            setup_legacy_callback_route(mcp)
+            logger.info(
+                "  ✅ Legacy /oauth2callback registered for start_google_auth flow"
+            )
+
+            setup_config_api_routes(mcp)
+            logger.info("  ✅ Config API routes registered for OAuth success page")
+
+            setup_status_check_routes(mcp)
+            logger.info("  ✅ Status check route registered for credential status page")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not register supplemental OAuth endpoints: {e}")
+
+        # Do NOT set mcp._auth — GoogleProvider already handles Bearer token validation
+        logger.info(
+            "🔐 Authentication: Handled by GoogleProvider (no manual _auth override)"
+        )
+
+    else:
+        # Legacy mode: register all custom OAuth discovery + operational endpoints
+        logger.info("🔍 Setting up legacy OAuth discovery endpoints...")
+        try:
+            setup_oauth_endpoints_fastmcp(mcp)
+            logger.info("✅ Legacy OAuth discovery endpoints configured")
+            logger.info(
+                f"  Discovery: {settings.base_url}/.well-known/oauth-protected-resource/mcp"
+            )
+            logger.info(
+                f"  Authorization: {settings.base_url}/.well-known/oauth-authorization-server"
+            )
+            logger.info(f"  Registration: {settings.base_url}/oauth/register")
+            logger.info(f"  Callback: {settings.base_url}/oauth2callback")
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to setup legacy OAuth endpoints: {e}", exc_info=True
+            )
+
+        # Legacy Authentication System Setup with Access Control
+        if use_google_oauth:
+            from auth.token_validator import create_access_controlled_auth_provider
+
+            jwt_auth_provider = create_access_controlled_auth_provider(
+                jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+                issuer="https://accounts.google.com",
+                required_scopes=["openid", "email"],
+            )
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Legacy Google OAuth Bearer Token authentication enabled WITH ACCESS CONTROL"
+            )
+            logger.info(
+                "🌐 Using Google's JWKS endpoint: https://www.googleapis.com/oauth2/v3/certs"
+            )
+            logger.info("🎯 OAuth issuer: https://accounts.google.com")
+            logger.info(
+                "🔒 Access enforcement: Only users with stored credentials can connect"
+            )
+
+        elif enable_jwt_auth:
+            from auth.jwt_auth import setup_jwt_auth
+
+            jwt_auth_provider = setup_jwt_auth()
+            mcp._auth = jwt_auth_provider
+            logger.info(
+                "🔐 Custom JWT Bearer Token authentication enabled (development mode)"
+            )
+            logger.info("⚠️  No access control on JWT tokens - for testing only")
+
+        else:
+            logger.info("⚠️ Authentication DISABLED (for testing)")

@@ -13,11 +13,13 @@ import time
 # Import the ModuleWrapper
 from module_wrapper import ModuleWrapper
 
+from config.enhanced_logging import setup_logger
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def test_basic_wrapping():

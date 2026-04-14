@@ -9,16 +9,14 @@ Usage:
     from gchat.wrapper_api import get_gchat_symbols, parse_dsl
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import gchat.wrapper_setup as _setup
 from config.enhanced_logging import setup_logger
 
-logger = setup_logger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # PYDANTIC RESULT TYPES
@@ -26,10 +24,26 @@ logger = setup_logger(__name__)
 
 
 class CardDSLResult(BaseModel):
-    """Structured card DSL generation result."""
+    """Structured card DSL generation result.
 
-    card_description: str  # e.g. "§[δ×3, Ƀ[ᵬ×2]]"
-    card_params: dict  # content for each symbol key
+    Used by DSL recovery to return corrected DSL. Fields must contain ONLY
+    the corrected values — no explanations, commentary, or reasoning.
+    """
+
+    card_description: str = Field(
+        description=(
+            "The corrected DSL notation followed by the card description. "
+            "Must start with the DSL expression (e.g. '§[δ×3, Ƀ[ᵬ×2]]') "
+            "followed by the original description text. "
+            "Do NOT include explanations or commentary — ONLY the DSL and description."
+        ),
+    )
+    card_params: dict = Field(
+        description=(
+            "Block content keyed by DSL symbol or class name. "
+            "Preserve the original content from the user's request."
+        ),
+    )
 
 
 # =============================================================================
@@ -329,7 +343,7 @@ def search_patterns_for_card(
         # Use hybrid search
         feedback_filter = "positive" if require_positive_feedback else None
 
-        class_results, content_patterns, form_patterns = wrapper.search_hybrid(
+        class_results, content_patterns, form_patterns = wrapper.search_hybrid_dispatch(
             description=description,
             component_paths=None,
             limit=limit,
@@ -499,10 +513,9 @@ def get_dsl_field_description() -> str:
 
     Returns a single-line description suitable for Field(description=...).
     """
-    symbols = get_gchat_symbols()
+    from adapters.module_wrapper.wrapper_factory import generate_dsl_field_description
 
-    # Core symbols - most commonly used components
-    key_mappings = []
+    wrapper = _setup.get_card_framework_wrapper()
     key_components = [
         "Section",
         "DecoratedText",
@@ -515,16 +528,31 @@ def get_dsl_field_description() -> str:
         "NestedWidget",
     ]
 
-    for comp in key_components:
-        if comp in symbols:
-            key_mappings.append(f"{symbols[comp]}={comp}")
+    symbols = wrapper.symbol_mapping or {}
+    s = symbols.get
 
+    # Build dynamic examples using actual symbols
+    section = s("Section", "§")
+    dtext = s("DecoratedText", "δ")
+    btnlist = s("ButtonList", "Ƀ")
+    btn = s("Button", "ᵬ")
+    carousel = s("Carousel", "◦")
+    ccard = s("CarouselCard", "▲")
+
+    base = generate_dsl_field_description(
+        wrapper,
+        key_components=key_components,
+        skill_uri="skill://gchat-cards/",
+    )
+
+    # Add dynamic examples to the description
     return (
         f"DSL structure using symbols. "
-        f"Examples: '§[δ, Ƀ[ᵬ×2]]' = Section + text + 2 buttons, "
-        f"'◦[▲×3]' = Carousel with 3 cards. "
-        f"Symbols: {', '.join(key_mappings)}. "
-        f"Read skill://gchat-cards/ for full reference."
+        f"Examples: '{section}[{dtext}, {btnlist}[{btn}×2]]' = Section + text + 2 buttons, "
+        f"'{carousel}[{ccard}×3]' = Carousel with 3 cards. "
+        + base.split("Symbols:", 1)[-1].strip()
+        if "Symbols:" in base
+        else base
     )
 
 

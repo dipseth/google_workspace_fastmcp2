@@ -5,9 +5,6 @@ import logging
 import os
 import ssl
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Union
 

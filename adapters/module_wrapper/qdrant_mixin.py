@@ -5,7 +5,6 @@ Provides Qdrant client initialization, collection management, and lazy imports
 for the ModuleWrapper system.
 """
 
-import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,9 +13,9 @@ from adapters.module_wrapper.types import (
     Payload,
     QdrantConfig,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # LAZY-LOADED IMPORTS
@@ -133,6 +132,7 @@ class QdrantMixin:
             logger.info("ModuleWrapper using centralized Qdrant client")
 
         except Exception as e:
+            self.client = None
             logger.error(f"Failed to get Qdrant client: {e}")
             raise
 

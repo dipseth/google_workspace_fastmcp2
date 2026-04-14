@@ -23,12 +23,12 @@ Usage:
     # => {"Button": "g:ᵬ", "Grid": "g:ℊ"}
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
 
+logger = setup_logger()
 
 # =============================================================================
 # UNICODE SYMBOL POOLS
@@ -110,7 +110,6 @@ MODULE_PREFIX_SYMBOLS: Dict[str, str] = {
     "slides": "i",
     "tasks": "t",
 }
-
 
 # =============================================================================
 # STYLING REGISTRY

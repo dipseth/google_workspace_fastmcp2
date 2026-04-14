@@ -7,7 +7,6 @@ for the ModuleWrapper system.
 
 import dataclasses
 import inspect
-import logging
 from collections import defaultdict
 from typing import (
     Any,
@@ -29,10 +28,11 @@ from adapters.module_wrapper.types import (
     RelationshipInfo,
     RelationshipList,
 )
+from config.enhanced_logging import setup_logger
 
 from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES, ModuleComponent
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
@@ -529,14 +529,25 @@ class RelationshipsMixin:
 
             enriched_count = 0
 
+            # Build all payload updates, then batch them to reduce round-trips.
+            # Each parent class has a different payload, so we accumulate
+            # SetPayloadOperation entries and flush in batches.
+            try:
+                from qdrant_client.models import SetPayload, SetPayloadOperation
+
+                _has_batch = True
+            except ImportError:
+                _has_batch = False
+
+            pending_ops = []
+            BATCH_FLUSH = 50  # flush every 50 operations
+
             for parent_class, relationships in by_parent.items():
                 point_ids = class_name_to_ids.get(parent_class, [])
-
                 if not point_ids:
                     continue
 
                 nl_descriptions = ", ".join(r["nl_description"] for r in relationships)
-
                 relationships_payload = {
                     "children": relationships,
                     "child_classes": list(set(r["child_class"] for r in relationships)),
@@ -546,19 +557,63 @@ class RelationshipsMixin:
                     "nl_descriptions": nl_descriptions,
                 }
 
-                # Batch update: set_payload accepts multiple point IDs at once
-                try:
-                    self.client.set_payload(
-                        collection_name=collection_name,
-                        payload={"relationships": relationships_payload},
-                        points=point_ids,  # All points for this parent class at once
+                if _has_batch:
+                    pending_ops.append(
+                        SetPayloadOperation(
+                            set_payload=SetPayload(
+                                payload={"relationships": relationships_payload},
+                                points=point_ids,
+                            )
+                        )
                     )
                     enriched_count += len(point_ids)
-                    logger.debug(f"Enriched {len(point_ids)} points for {parent_class}")
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to enrich {parent_class} ({len(point_ids)} points): {e}"
+
+                    # Flush batch
+                    if len(pending_ops) >= BATCH_FLUSH:
+                        self.client.batch_update_points(
+                            collection_name=collection_name,
+                            update_operations=pending_ops,
+                        )
+                        logger.debug(
+                            "Flushed %d relationship batch ops", len(pending_ops)
+                        )
+                        pending_ops = []
+                else:
+                    # Fallback: individual set_payload calls
+                    try:
+                        self.client.set_payload(
+                            collection_name=collection_name,
+                            payload={"relationships": relationships_payload},
+                            points=point_ids,
+                        )
+                        enriched_count += len(point_ids)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to enrich {parent_class} ({len(point_ids)} points): {e}"
+                        )
+
+            # Flush remaining batch ops
+            if pending_ops:
+                try:
+                    self.client.batch_update_points(
+                        collection_name=collection_name,
+                        update_operations=pending_ops,
                     )
+                    logger.debug(
+                        "Flushed final %d relationship batch ops", len(pending_ops)
+                    )
+                except Exception as e:
+                    logger.warning("batch_update_points failed: %s, falling back", e)
+                    # Fallback: individual calls for remaining ops
+                    for op in pending_ops:
+                        try:
+                            self.client.set_payload(
+                                collection_name=collection_name,
+                                payload=op.set_payload.payload,
+                                points=op.set_payload.points,
+                            )
+                        except Exception:
+                            pass
 
             logger.info(
                 f"Enriched {enriched_count} components with relationship metadata"
@@ -1039,20 +1094,17 @@ class RelationshipsMixin:
 
         if use_multi_vector and has_multi_vector and "components" in vector_names:
             try:
-                from fastembed import LateInteractionTextEmbedding, TextEmbedding
+                from config.embedding_service import get_embedding_service
 
+                service = get_embedding_service()
                 # ColBERT for components and inputs (128d multi-vector)
-                colbert_embedder = LateInteractionTextEmbedding(
-                    "colbert-ir/colbertv2.0"
-                )
+                colbert_embedder = service.get_model_sync("colbert")
                 # MiniLM for relationships (384d dense)
-                relationships_embedder = TextEmbedding(
-                    "sentence-transformers/all-MiniLM-L6-v2"
-                )
+                relationships_embedder = service.get_model_sync("minilm")
                 logger.info(
-                    "Initialized ColBERT + MiniLM embedders for 3-vector indexing"
+                    "Got ColBERT + MiniLM embedders from EmbeddingService for 3-vector indexing"
                 )
-            except ImportError as e:
+            except Exception as e:
                 logger.warning(
                     f"FastEmbed models not available, falling back to single vector: {e}"
                 )

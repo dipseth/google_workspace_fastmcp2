@@ -7,11 +7,11 @@ Provides:
 - normalize_html_for_snapshot() — normalize HTML for snapshot testing
 """
 
-import logging
 import re
 import subprocess
 from typing import Optional
 
+from config.enhanced_logging import setup_logger
 from gmail.mjml_types import (
     EmailSpec,
     MjmlDiagnostic,
@@ -19,7 +19,7 @@ from gmail.mjml_types import (
     MjmlRenderResult,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def email_spec_to_mjml(spec: EmailSpec) -> str:

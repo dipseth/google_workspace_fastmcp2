@@ -304,7 +304,7 @@ async def list_gmail_filters(
     Returns:
         GmailFiltersResponse: Structured response with filter list and metadata
     """
-    logger.info(f"[list_gmail_filters] Email: '{user_google_email}'")
+    logger.info("[list_gmail_filters] Invoked")
 
     try:
         gmail_service = await _get_gmail_service_with_fallback(user_google_email)
@@ -503,7 +503,7 @@ async def create_gmail_filter(
     """
     import json
 
-    logger.info(f"[create_gmail_filter] Email: '{user_google_email}'")
+    logger.info("[create_gmail_filter] Invoked")
     logger.info(
         f"[create_gmail_filter] Raw add_label_ids: {add_label_ids} (type: {type(add_label_ids)})"
     )

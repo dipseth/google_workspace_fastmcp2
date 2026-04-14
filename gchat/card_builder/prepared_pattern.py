@@ -5,7 +5,6 @@ This module provides PreparedPattern for deferred card rendering,
 using the card_builder package utilities for metadata and rendering.
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +15,7 @@ from adapters.module_wrapper.types import (
     Payload,
     Serializable,
 )
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.constants import COMPONENT_PARAMS
 from gchat.card_builder.metadata import (
     get_children_field,
@@ -24,8 +24,7 @@ from gchat.card_builder.metadata import (
 )
 from gchat.card_builder.rendering import get_json_key
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # INPUT MAPPING REPORT - Tracks how inputs are consumed during card building
@@ -36,10 +35,14 @@ logger = logging.getLogger(__name__)
 class InputMappingReport:
     """Tracks how inputs are consumed during card building.
 
-    Implements Serializable protocol for consistent JSON serialization.
+    Self-contained: stores supply/demand counts so to_dict() doesn't need
+    the build context. Also tracks any DSL multiplier corrections.
     """
 
     consumptions: List[JsonDict] = field(default_factory=list)
+    supplies: Dict[str, int] = field(default_factory=dict)
+    demands: Dict[str, int] = field(default_factory=dict)
+    corrections: Dict[str, int] = field(default_factory=dict)
 
     def record(
         self,
@@ -63,20 +66,41 @@ class InputMappingReport:
     def to_dict(self, context: Optional[JsonDict] = None) -> JsonDict:
         """Convert to dictionary for API response.
 
-        Args:
-            context: Optional build context for unconsumed counts
+        Uses self-contained supplies for unconsumed counts when available,
+        falls back to context dict for backwards compatibility.
 
         Returns:
-            JSON-serializable dictionary with mappings and unconsumed counts
+            JSON-serializable dictionary with mappings, unconsumed, and corrections
         """
         result: JsonDict = {"mappings": self.consumptions}
-        if context:
+
+        # Compute unconsumed from self-contained supplies
+        if self.supplies:
+            consumed_counts: Dict[str, int] = {}
+            for c in self.consumptions:
+                # Extract key from "button[0]" -> "buttons"
+                input_key = c["input"].split("[")[0] + "s"
+                consumed_counts[input_key] = consumed_counts.get(input_key, 0) + 1
+            result["unconsumed"] = {
+                k: v - consumed_counts.get(k, 0)
+                for k, v in self.supplies.items()
+                if v - consumed_counts.get(k, 0) != 0
+            }
+        elif context:
+            # Backwards-compatible path
             buttons_total = len(context.get("buttons", []))
             texts_total = len(context.get("content_texts", []))
             result["unconsumed"] = {
                 "buttons": buttons_total - context.get("_button_index", 0),
                 "texts": texts_total - context.get("_text_index", 0),
             }
+
+        if self.demands:
+            result["dsl_demands"] = self.demands
+
+        if self.corrections:
+            result["auto_corrections"] = self.corrections
+
         return result
 
 

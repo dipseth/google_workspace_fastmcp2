@@ -129,6 +129,10 @@ def get_fastembed():
     """
     Lazy load FastEmbed when first needed.
 
+    .. deprecated::
+        Use ``config.embedding_service.get_embedding_service().get_model_sync("minilm")``
+        for a shared model instance instead of creating a new one via the class.
+
     Returns:
         TextEmbedding class from FastEmbed
     """

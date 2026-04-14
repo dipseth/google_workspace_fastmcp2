@@ -5,17 +5,22 @@ Handles parsing of Google Docs structure to identify line positions
 and character indices for targeted editing operations.
 """
 
-import logging
 from typing import Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 class DocumentLine:
     """Represents a single line in a Google Doc with its position metadata."""
 
     def __init__(
-        self, line_number: int, start_index: int, end_index: int, content: str
+        self,
+        line_number: int,
+        start_index: int,
+        end_index: int,
+        content: str,
     ):
         self.line_number = line_number
         self.start_index = start_index

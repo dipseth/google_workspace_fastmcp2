@@ -16,21 +16,23 @@ Usage:
         )
 """
 
-import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
+
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
     from adapters.module_wrapper import ModuleWrapper
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 # Module name to skill directory name mapping
 SKILL_NAMES = {
     "card_framework": "gchat-cards",
     "gmail.mjml_types": "mjml-email",
+    "qdrant_client.models": "qdrant-search",
     "google_drive": "drive-files",
     "google_gmail": "gmail-automation",
 }
@@ -39,6 +41,7 @@ SKILL_NAMES = {
 SKILL_TITLES = {
     "card_framework": "Google Chat Card Builder",
     "gmail.mjml_types": "MJML Email Composer",
+    "qdrant_client.models": "Qdrant Vector Search",
     "google_drive": "Google Drive File Operations",
     "google_gmail": "Gmail Automation",
 }
@@ -107,7 +110,9 @@ def setup_skills_provider(
         )
     """
     try:
-        from fastmcp.server.providers.skills import SkillsDirectoryProvider
+        from fastmcp.server.providers.skills import (
+            SkillsDirectoryProvider,
+        )
     except ImportError:
         logger.warning(
             "FastMCP skills provider not available. "
@@ -115,7 +120,9 @@ def setup_skills_provider(
         )
         return None
 
-    from adapters.module_wrapper.skill_types import SkillGeneratorConfig
+    from adapters.module_wrapper.skill_types import (
+        SkillGeneratorConfig,
+    )
 
     skills_root = skills_root or Path.home() / ".claude" / "skills"
     skills_root = Path(skills_root).expanduser().resolve()
@@ -215,7 +222,9 @@ def regenerate_skills(
     Returns:
         Path to the skill directory, or None on failure
     """
-    from adapters.module_wrapper.skill_types import SkillGeneratorConfig
+    from adapters.module_wrapper.skill_types import (
+        SkillGeneratorConfig,
+    )
 
     skills_root = skills_root or Path.home() / ".claude" / "skills"
     skills_root = Path(skills_root).expanduser().resolve()

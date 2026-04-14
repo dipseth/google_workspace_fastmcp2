@@ -4,9 +4,6 @@ This module provides a unified session management interface that works with
 both FastMCP 2.12.0 GoogleProvider and legacy OAuth flows.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
@@ -15,7 +12,7 @@ import jwt
 from fastmcp import Context
 from pydantic import BaseModel, Field
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -95,7 +92,9 @@ class UnifiedSession:
             )
 
             if self._enhanced_logging:
-                logger.info(f"📧 Extracted email from token: {email}")
+                logger.info(
+                    f"📧 Extracted email from token: {redact_email(email) if email else None}"
+                )
 
             return email
         except Exception as e:
@@ -140,7 +139,7 @@ class UnifiedSession:
 
             if self._enhanced_logging:
                 logger.info(
-                    f"✅ Created session for {email} from GoogleProvider context"
+                    f"✅ Created session for {redact_email(email)} from GoogleProvider context"
                 )
                 logger.info(f"  Session ID: {session_state.session_id}")
                 logger.info(f"  Scopes: {', '.join(session_state.scopes)}")
@@ -184,7 +183,7 @@ class UnifiedSession:
 
             if self._enhanced_logging:
                 logger.info(
-                    f"✅ Created session for {user_email} from legacy credentials"
+                    f"✅ Created session for {redact_email(user_email)} from legacy credentials"
                 )
                 logger.info(f"  Session ID: {session_state.session_id}")
                 logger.info(f"  Token expires: {session_state.token_expiry}")
@@ -220,7 +219,7 @@ class UnifiedSession:
             if datetime.now(UTC) >= self._session_state.token_expiry:
                 if self._enhanced_logging:
                     logger.warning(
-                        f"⏰ Session expired for {self._session_state.user_email}"
+                        f"⏰ Session expired for {redact_email(self._session_state.user_email)}"
                     )
                 return False
 
@@ -269,12 +268,16 @@ class UnifiedSession:
         self._session_state.last_accessed = datetime.now(UTC)
 
         if self._enhanced_logging:
-            logger.info(f"🔄 Updated tokens for {self._session_state.user_email}")
+            logger.info(
+                f"🔄 Updated tokens for {redact_email(self._session_state.user_email)}"
+            )
 
     def clear_session(self):
         """Clear current session."""
         if self._session_state and self._enhanced_logging:
-            logger.info(f"🗑️ Clearing session for {self._session_state.user_email}")
+            logger.info(
+                f"🗑️ Clearing session for {redact_email(self._session_state.user_email)}"
+            )
         self._session_state = None
 
     # Helper methods

@@ -17,15 +17,15 @@ Usage:
     # result is a qdrant_client.models.Filter instance
 """
 
-import logging
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from adapters.module_wrapper.dsl_parser import DSLNode, DSLParseResult
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 class QueryBuilder:

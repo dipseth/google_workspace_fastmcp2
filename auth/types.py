@@ -19,7 +19,8 @@ class AuthProvenance(str, Enum):
 
     API_KEY = "api_key"  # Shared MCP_API_KEY (admin token)
     USER_API_KEY = "user_api_key"  # Per-user key (generated on OAuth)
-    OAUTH = "oauth"  # Browser-based OAuth flow
+    OAUTH = "oauth"  # Browser-based OAuth flow (Google)
+    GITHUB_OAUTH = "github_oauth"  # GitHub OAuth flow
 
 
 class SessionKey(str, Enum):
@@ -49,4 +50,32 @@ class SessionKey(str, Enum):
     )
     PRIVACY_VAULT_SEED = (
         "privacy_vault_seed"  # Random bytes for shared API key sessions
+    )
+
+    # Payment / x402 protocol
+    PAYMENT_VERIFIED = "payment_verified"  # bool
+    PAYMENT_TX_HASH = "payment_tx_hash"  # str
+    PAYMENT_VERIFIED_AT = "payment_verified_at"  # float (timestamp)
+    PAYMENT_AMOUNT = "payment_amount"  # str (USDC amount)
+    PAYMENT_SETTLE_TX_HASH = "payment_settle_tx_hash"  # str (facilitator settlement)
+    PAYMENT_NETWORK = "payment_network"  # str (CAIP-2 network id)
+    PAYMENT_PAYER_ADDRESS = "payment_payer_address"  # str (EVM wallet that paid)
+    PAYMENT_RECEIPT = "payment_receipt"  # dict (HMAC-signed PaymentReceipt)
+    PAYMENT_RECEIPT_HMAC = "payment_receipt_hmac"  # str (HMAC for validation)
+
+    # Chat service account (per-user encrypted)
+    CHAT_SERVICE_ACCOUNT_JSON = "chat_service_account_json"  # dict (in-memory cache)
+
+    # Per-user sampling configuration (in-memory cache, encrypted on disk)
+    SAMPLING_CONFIG = "sampling_config"  # dict: {model, api_key, api_base}
+
+    # LLM-guessed email from start_google_auth (unverified, for display only)
+    REQUESTED_EMAIL = "requested_email"
+
+    # GitHub OAuth session data
+    GITHUB_LOGIN = "github_login"  # str (GitHub username)
+    GITHUB_EMAIL = "github_email"  # str (GitHub email, may be None)
+    GITHUB_USER_ID = "github_user_id"  # str (GitHub numeric user ID)
+    GITHUB_STARRED_REPO = (
+        "github_starred_repo"  # bool (has user starred the gating repo)
     )

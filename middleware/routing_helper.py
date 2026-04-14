@@ -6,7 +6,6 @@ metadata-driven analysis, using ServiceCategorizer and confidence scoring.
 It serves as a routing engine component for the service dispatcher.
 """
 
-import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastmcp import FastMCP
@@ -68,7 +67,7 @@ class ServiceRouter:
         self.mcp_server = mcp_server
         self.categorizer = ServiceCategorizer(mcp_server)
         self.metadata_handler = MCPMetadataHandler(mcp_server)
-        self.logger = logging.getLogger(f"{__name__}.ServiceRouter")
+        self.logger = setup_logger()
 
         # Cache for service mappings
         self._service_cache = {}

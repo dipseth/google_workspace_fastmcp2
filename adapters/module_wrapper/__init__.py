@@ -31,11 +31,12 @@ Usage:
     )
 """
 
-import logging
 import threading
 from typing import Any, Dict, List, Optional, Set, Union
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 # =============================================================================
 # TYPE DEFINITIONS (Import First for Use by Other Modules)
@@ -239,6 +240,13 @@ from adapters.module_wrapper.types import (
 from adapters.module_wrapper.types import (
     RELATIONSHIPS_DIM as TYPES_RELATIONSHIPS_DIM,
 )
+from adapters.module_wrapper.variation_generator import register_default_wrapper_getter
+from adapters.module_wrapper.wrapper_factory import (
+    WrapperRegistry,
+    generate_dsl_field_description,
+    generate_dsl_quick_reference,
+    get_skill_resources_safe,
+)
 
 # =============================================================================
 # FULL MODULE WRAPPER - COMPOSED FROM MIXINS
@@ -361,6 +369,7 @@ class ModuleWrapper(
         self._pipeline_error: Optional[str] = None
         self._post_pipeline_callbacks: List[callable] = []
         self._pipeline_lock = threading.Lock()
+        self._degraded: bool = False
 
         # When domain_config is provided, use it to supply priority_overrides
         # and nl_relationship_patterns if not explicitly given
@@ -404,38 +413,107 @@ class ModuleWrapper(
         if auto_initialize:
             self.initialize()
 
+    @property
+    def is_degraded(self) -> bool:
+        """True when Qdrant/embeddings are unavailable and wrapper runs in-memory only."""
+        return self._degraded
+
     def initialize(self):
-        """Initialize the wrapper and index the module components."""
+        """Initialize the wrapper and index the module components.
+
+        If Qdrant or embeddings are unavailable, enters **degraded mode**:
+        components are introspected in-memory (symbols, DSL parsing work),
+        but vector search returns empty results.  Lazy reconnection is
+        attempted on the next search call.
+        """
+        logger.info(f"Initializing ModuleWrapper for {self.module_name}...")
+
+        # --- Try to connect to Qdrant + embeddings ---
         try:
-            logger.info(f"Initializing ModuleWrapper for {self.module_name}...")
-
-            # Initialize Qdrant client (from QdrantMixin)
             self._initialize_qdrant()
-
-            # Initialize embedding model (from EmbeddingMixin)
             self._initialize_embedder()
+        except Exception as e:
+            logger.warning(
+                f"ModuleWrapper entering DEGRADED mode for {self.module_name}: {e} "
+                f"— in-memory operations (symbols, DSL) will work; "
+                f"vector search will return empty results until services recover"
+            )
+            self._degraded = True
+            self.client = None
+            self.embedder = None
 
-            # Named vectors path: 3 named vectors (components, inputs, relationships)
-            self._initialize_collection()
+        # --- Collection init (needs Qdrant) or fallback to introspection ---
+        if not self._degraded:
+            try:
+                self._initialize_collection()
+            except Exception as e:
+                logger.warning(
+                    f"Collection init failed for {self.module_name}: {e} "
+                    f"— falling back to in-memory introspection"
+                )
+                self._degraded = True
+                self._introspect_module()
+        else:
+            # Degraded: populate components from module introspection only
+            self._introspect_module()
 
-            self._initialized = True
+        self._initialized = True
+
+        if self._degraded:
+            logger.warning(
+                f"ModuleWrapper DEGRADED for {self.module_name}: "
+                f"{len(self.components)} components introspected in-memory"
+            )
+        else:
             logger.info(f"ModuleWrapper initialized for {self.module_name}")
-
             # Optional strict-mode validation
             import os
 
             if os.environ.get("MODULE_WRAPPER_STRICT") == "1":
                 self.validate_dependencies(strict=True)
 
+    def _try_reconnect(self) -> bool:
+        """Attempt to reconnect to Qdrant and embeddings when in degraded mode.
+
+        Called lazily by search methods.  Returns True if reconnection
+        succeeded and the wrapper is no longer degraded.
+        """
+        if not self._degraded:
+            return True
+        try:
+            self._initialize_qdrant()
+            self._initialize_embedder()
+            # Re-run collection init now that services are available
+            self._initialize_collection()
+            self._degraded = False
+            logger.info(
+                f"ModuleWrapper RECOVERED from degraded mode for {self.module_name}"
+            )
+            return True
         except Exception as e:
-            logger.error(f"Failed to initialize ModuleWrapper: {e}", exc_info=True)
-            raise
+            logger.debug(f"Reconnect attempt failed for {self.module_name}: {e}")
+            return False
+
+    @property
+    def service_health(self) -> Dict[str, Any]:
+        """Report wrapper health status for diagnostics."""
+        return {
+            "module": self.module_name,
+            "initialized": self._initialized,
+            "degraded": self._degraded,
+            "components_count": len(self.components) if self.components else 0,
+            "symbols_count": len(self._symbol_mapping) if self._symbol_mapping else 0,
+            "qdrant_available": self.client is not None,
+            "embedder_available": self.embedder is not None,
+            "pipeline_status": self._pipeline_status,
+        }
 
     def _initialize_collection(self):
-        """Initialize using 3-vector named-vectors schema via PipelineMixin.
+        """Initialize using 4-vector named-vectors schema via PipelineMixin.
 
-        Fast path: If collection exists with data, loads components from
-        Qdrant synchronously. The wrapper is fully ready when this returns.
+        Fast path: If collection exists with all expected vectors and data,
+        loads components from Qdrant synchronously. The wrapper is fully
+        ready when this returns.
 
         Slow path: If collection needs (re)creation, does module introspection
         synchronously (populating self.components and symbols), then runs the
@@ -443,6 +521,8 @@ class ModuleWrapper(
         for in-memory operations (DSL parsing, symbol lookup, etc.) while
         the pipeline indexes to Qdrant in the background.
         """
+        from adapters.module_wrapper.types import EXPECTED_VECTOR_NAMES
+
         coll_name = self.collection_name
         logger.info(f"Using named-vectors schema for collection: {coll_name}")
 
@@ -455,13 +535,16 @@ class ModuleWrapper(
                 info = self.client.get_collection(coll_name)
                 vectors_config = info.config.params.vectors
 
-                # Verify it uses named vectors (dict, not single)
+                # Verify it uses named vectors with all expected vector names
                 is_named = isinstance(vectors_config, dict)
+                actual_vectors = set(vectors_config.keys()) if is_named else set()
+                has_all_vectors = is_named and actual_vectors >= EXPECTED_VECTOR_NAMES
 
-                if is_named and info.points_count > 0 and not self.force_reindex:
+                if has_all_vectors and info.points_count > 0 and not self.force_reindex:
                     logger.info(
                         f"Collection {coll_name} exists with {info.points_count} points "
-                        f"and correct schema — loading existing components"
+                        f"and correct schema ({len(actual_vectors)} vectors) "
+                        f"— loading existing components"
                     )
                     self._load_existing_components(coll_name)
                     self._pipeline_status = "completed"
@@ -473,9 +556,14 @@ class ModuleWrapper(
                     "wrong schema (single vector)"
                     if not is_named
                     else (
-                        "force_reindex requested"
-                        if self.force_reindex
-                        else f"empty ({info.points_count} points)"
+                        f"missing vectors (have {actual_vectors}, "
+                        f"need {EXPECTED_VECTOR_NAMES})"
+                        if not has_all_vectors
+                        else (
+                            "force_reindex requested"
+                            if self.force_reindex
+                            else f"empty ({info.points_count} points)"
+                        )
                     )
                 )
                 logger.warning(
@@ -902,6 +990,12 @@ __all__ = [
     # Search constants
     "COLBERT_DIM",
     "RELATIONSHIPS_DIM",
+    # Wrapper factory
+    "WrapperRegistry",
+    "generate_dsl_quick_reference",
+    "generate_dsl_field_description",
+    "get_skill_resources_safe",
+    "register_default_wrapper_getter",
     # Mixin dependency contracts
     "MixinContract",
     "validate_mixin_dependencies",

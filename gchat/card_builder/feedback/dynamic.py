@@ -2,17 +2,17 @@
 Dynamic feedback builder using ModuleWrapper's DAG and variation system.
 """
 
-import logging
 import random
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.feedback.prompts import (
     CONTENT_FEEDBACK_PROMPTS,
     FEEDBACK_TEXT_STYLES,
     FORM_FEEDBACK_PROMPTS,
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 class DynamicFeedbackBuilder:

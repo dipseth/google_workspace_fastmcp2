@@ -1,15 +1,20 @@
 """
-MCP Apps Phase 1 — UI resource registration.
+MCP Apps — UI resource registration.
 
-Registers ``ui://`` resources that serve self-contained HTML dashboards.
-Phase 1 is read-only (no postMessage bridge); the HTML renders a static
-snapshot of tool state injected via ``window.__MCP_TOOLS__``.
+Phase 1: Read-only HTML dashboards (``ui://`` resources) with static data
+injection via ``window.__MCP_TOOLS__``.
+
+Phase 2 (FastMCP 3.2+): Prefab UI components for interactive dashboards
+using ``DataTable``, ``PrefabApp``, and ``FastMCPApp`` providers.
 """
 
 import json
+import logging
 
 from fastmcp import FastMCP
-from fastmcp.server.apps import AppConfig
+from fastmcp.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 _TOOLS_PLACEHOLDER = "/*__MCP_TOOLS_DATA__*/"
 
@@ -432,9 +437,43 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         :class:`~middleware.dashboard_cache_middleware.DashboardCacheMiddleware`
         intercepts list-tool calls and stores the last result.  This resource
         reads from that cache so the HTML is pre-populated with live data.
+
+        NOTE: MCP resources must return str/bytes, so PrefabApp cannot be
+        returned here.  Prefab dashboards are served via FastMCPApp providers
+        instead (see ``create_tool_management_app``).
         """
         from middleware.dashboard_cache_middleware import get_cached_result
 
+        cached = get_cached_result(tool_name) or {}
+        config = get_data_dashboard_config(tool_name)
+        payload = json.dumps({"data": cached, "config": config})
+        return _build_data_dashboard_html(payload)
+
+    @mcp.resource(
+        "ui://data-dashboard/_latest",
+        name="latest_data_dashboard",
+        title="Latest Data Dashboard",
+        description="Dashboard for the most recently called list tool",
+        tags={"ui", "dashboard", "data"},
+        mime_type="text/html",
+        app=AppConfig(prefers_border=True),
+    )
+    def latest_data_dashboard() -> str:
+        """Serve the dashboard for the last dashboard tool that was called.
+
+        Used by Code Mode's ``execute`` tool, which sets
+        ``meta["ui"]["resourceUri"]`` to this resource.  After each
+        execute call that invokes a dashboard-enabled tool, VS Code
+        auto-fetches this resource and renders the latest dashboard.
+        """
+        from middleware.dashboard_cache_middleware import (
+            get_cached_result,
+            get_last_dashboard_tool,
+        )
+
+        tool_name = get_last_dashboard_tool()
+        if not tool_name:
+            return _build_data_dashboard_html("{}")
         cached = get_cached_result(tool_name) or {}
         config = get_data_dashboard_config(tool_name)
         payload = json.dumps({"data": cached, "config": config})
@@ -988,6 +1027,53 @@ def get_data_dashboard_config(tool_name: str) -> dict:
     return _DASHBOARD_CONFIGS.get(tool_name, {})
 
 
+# ---------------------------------------------------------------------------
+# Prefab UI Data Dashboard (FastMCP 3.2+)
+# ---------------------------------------------------------------------------
+
+
+def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict):
+    """Build a Prefab DataTable dashboard from cached tool data.
+
+    Returns a :class:`PrefabApp` with a searchable, sortable, paginated
+    ``DataTable`` populated from the dashboard cache.  Falls back to
+    ``None`` if ``prefab-ui`` is not installed.
+    """
+    try:
+        from prefab_ui.app import PrefabApp
+        from prefab_ui.components import Column, DataTable, DataTableColumn, Heading
+    except ImportError:
+        return None
+
+    items_field = config.get("itemsField", "items")
+    items = cached_data.get(items_field, []) if cached_data else []
+    title = config.get("title", tool_name.replace("_", " ").title())
+    icon = config.get("icon", "")
+    columns_config = config.get("columns", [])
+
+    # Map _DASHBOARD_CONFIGS column specs to DataTableColumn
+    dt_columns = (
+        [
+            DataTableColumn(key=c["key"], header=c["label"], sortable=True)
+            for c in columns_config
+        ]
+        if columns_config
+        else None
+    )  # None = auto-detect from data
+
+    with Column(gap=4, css_class="p-6") as view:
+        Heading(f"{icon} {title}" if icon else title)
+        DataTable(
+            rows=items,
+            columns=dt_columns,
+            search=True,
+            paginated=True,
+            page_size=20,
+        )
+
+    return PrefabApp(view=view)
+
+
 def build_data_dashboard_for_tool(tool_name: str, tool_result: dict) -> str:
     """Build a data dashboard HTML string for any list tool's result.
 
@@ -1018,7 +1104,7 @@ def wire_dashboard_to_list_tools(mcp: FastMCP) -> int:
     Returns:
         Number of tools patched.
     """
-    from fastmcp.server.apps import app_config_to_meta_dict
+    from fastmcp.apps import app_config_to_meta_dict
 
     from middleware.dashboard_cache_middleware import register_watched_tools
 
@@ -1040,3 +1126,142 @@ def wire_dashboard_to_list_tools(mcp: FastMCP) -> int:
     register_watched_tools(set(_DASHBOARD_CONFIGS.keys()))
 
     return patched
+
+
+# ---------------------------------------------------------------------------
+# Interactive Tool Management App (FastMCP 3.2+)
+# ---------------------------------------------------------------------------
+
+
+def create_tool_management_app(mcp: FastMCP):
+    """Create a ``FastMCPApp`` for interactive tool enable/disable management.
+
+    Returns a :class:`FastMCPApp` instance with:
+
+    - ``@app.ui()`` entry point that renders a Prefab dashboard with toggle
+      switches for each registered tool, grouped by Google Workspace service.
+    - ``@app.tool()`` backend that toggles a tool's enabled/disabled state,
+      reusing the existing ``manage_tools`` logic.
+
+    Returns ``None`` if ``prefab-ui`` is not installed.
+    """
+    try:
+        from fastmcp import FastMCPApp
+        from prefab_ui.app import PrefabApp
+        from prefab_ui.components import (
+            Accordion,
+            AccordionItem,
+            Badge,
+            Column,
+            Heading,
+            Row,
+            Separator,
+            Switch,
+            Text,
+        )
+    except ImportError:
+        logger.debug("prefab-ui not installed, skipping interactive tool manager")
+        return None
+
+    app = FastMCPApp("ToolManager")
+
+    @app.tool()
+    def toggle_tool_state(tool_name: str, enabled: bool) -> dict:
+        """Toggle a tool's enabled/disabled state (session scope).
+
+        Args:
+            tool_name: Name of the tool to toggle.
+            enabled: True to enable, False to disable.
+
+        Returns:
+            Dict with the tool name and its new state.
+        """
+        lp = mcp.local_provider
+        for key, component in lp._components.items():
+            if not key.startswith("tool:"):
+                continue
+            if component.name == tool_name:
+                if tool_name in _PROTECTED_TOOLS:
+                    return {
+                        "tool": tool_name,
+                        "enabled": True,
+                        "error": "Protected tool cannot be disabled",
+                    }
+                if enabled:
+                    component.enable()
+                else:
+                    component.disable()
+                return {"tool": tool_name, "enabled": enabled}
+        return {"tool": tool_name, "error": "Tool not found"}
+
+    @app.ui()
+    def interactive_tool_manager() -> PrefabApp:
+        """Interactive tool management dashboard with toggle switches."""
+        from middleware.qdrant_core.query_parser import extract_service_from_tool
+
+        # Collect tools grouped by service
+        services: dict[str, list[dict]] = {}
+        lp = mcp.local_provider
+        for key, component in lp._components.items():
+            if not key.startswith("tool:"):
+                continue
+            name = component.name
+            if name.startswith("_"):
+                continue
+            service = extract_service_from_tool(name) or "other"
+            is_protected = name in _PROTECTED_TOOLS
+            is_enabled = (
+                component.is_enabled if hasattr(component, "is_enabled") else True
+            )
+            services.setdefault(service, []).append(
+                {
+                    "name": name,
+                    "enabled": is_enabled,
+                    "protected": is_protected,
+                    "description": getattr(component, "description", "") or "",
+                }
+            )
+
+        # Sort services and tools within each service
+        for tools_list in services.values():
+            tools_list.sort(key=lambda t: t["name"])
+
+        # Build Prefab UI
+        tool_states = {}
+        with Column(gap=4, css_class="p-6") as view:
+            with Row(gap=2, align="center"):
+                Heading("Tool Management")
+                Badge(
+                    f"{sum(len(v) for v in services.values())} tools",
+                    variant="outline",
+                )
+            Separator()
+
+            with Accordion(multiple=True):
+                for service_name in sorted(services.keys()):
+                    tools_list = services[service_name]
+                    enabled_count = sum(1 for t in tools_list if t["enabled"])
+                    label = f"{service_name.title()} ({enabled_count}/{len(tools_list)} enabled)"
+
+                    with AccordionItem(label):
+                        for tool_info in tools_list:
+                            state_key = f"tool_{tool_info['name']}"
+                            tool_states[state_key] = tool_info["enabled"]
+
+                            with Row(gap=2, align="center"):
+                                Switch(
+                                    name=state_key,
+                                    label=tool_info["name"],
+                                    disabled=tool_info["protected"],
+                                )
+                                if tool_info["protected"]:
+                                    Badge("protected", variant="outline")
+                                if tool_info["description"]:
+                                    Text(
+                                        tool_info["description"][:80],
+                                        css_class="text-sm text-muted-foreground",
+                                    )
+
+        return PrefabApp(view=view, state=tool_states)
+
+    return app

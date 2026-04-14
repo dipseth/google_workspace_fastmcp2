@@ -8,7 +8,6 @@ for the ModuleWrapper system.
 import hashlib
 import importlib
 import inspect
-import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -19,11 +18,11 @@ from adapters.module_wrapper.types import (
     IndexingStats,
     Payload,
 )
+from config.enhanced_logging import setup_logger
 
 from .core import ModuleComponent
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # STANDARD LIBRARY DETECTION
@@ -123,7 +122,6 @@ THIRD_PARTY_PREFIXES = [
     "qdrant_client",
     "sentence_transformers",
 ]
-
 
 # =============================================================================
 # INDEXING MIXIN

@@ -22,12 +22,13 @@ Usage:
 """
 
 import html
-import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Discriminator, Field, Tag, model_validator
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 def _safe_url(url: Optional[str]) -> str:
@@ -153,9 +154,11 @@ class TextBlock(EmailBlock):
     def to_mjml(self, theme: Optional[EmailTheme] = None) -> str:
         theme = theme or EmailTheme()
         color = self.color or theme.text_color
+        # Allow HTML in text content (MJML's mj-text supports it natively).
+        # Only escape attribute values, not the text body.
         return (
-            f'<mj-text font-size="{self.font_size}" color="{color}" '
-            f'padding="{self.padding}">{html.escape(self.text)}</mj-text>'
+            f'<mj-text font-size="{html.escape(self.font_size)}" color="{html.escape(color)}" '
+            f'padding="{html.escape(self.padding)}">{self.text}</mj-text>'
         )
 
 
@@ -295,7 +298,7 @@ class FooterBlock(EmailBlock):
         parts = [
             f'<mj-divider border-color="{theme.border_color}" padding="16px 0" />',
             f'<mj-text font-size="{self.font_size}" color="{color}" padding="0">'
-            f"{html.escape(self.text)}</mj-text>",
+            f"{self.text}</mj-text>",
         ]
         if self.unsubscribe_url:
             parts.append(

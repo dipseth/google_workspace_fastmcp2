@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     credential_storage_mode: str = "FILE_ENCRYPTED"
     chat_service_account_file: str = ""
 
+    # Attachment download temp directory (for signed URL mode)
+    attachment_temp_dir: str = "/tmp/gw-mcp-attachments"
+
     @property
     def is_cloud_deployment(self) -> bool:
         """Detect if running in FastMCP Cloud."""
@@ -123,7 +126,39 @@ class Settings(BaseSettings):
 
     # Sampling Tools Configuration
     sampling_tools: bool = False  # Enable sampling middleware tools (default: False)
+    sampling_validation_enabled: bool = Field(
+        default=True,
+        description="Enable per-tool validation agents for semantic input validation via sampling",
+        json_schema_extra={"env": "SAMPLING_VALIDATION_ENABLED"},
+    )
     anthropic_api_key: Optional[str] = None  # For sampling fallback handler
+
+    # LiteLLM Sampling Configuration
+    litellm_model: str = Field(
+        default="openai/zai-org-glm-4.6",
+        description="LiteLLM model identifier (provider/model format, e.g. 'openai/zai-org-glm-4.6' for Venice AI, 'anthropic/claude-sonnet-4-6')",
+        json_schema_extra={"env": "LITELLM_MODEL"},
+    )
+    litellm_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for the LiteLLM provider. Falls back to VENICE_INFERENCE_KEY or provider-specific env vars.",
+        json_schema_extra={"env": "LITELLM_API_KEY"},
+    )
+    litellm_api_base: Optional[str] = Field(
+        default=None,
+        description="Custom API base URL for OpenAI-compatible providers (e.g. 'https://api.venice.ai/api/v1')",
+        json_schema_extra={"env": "LITELLM_API_BASE"},
+    )
+    venice_inference_key: Optional[str] = Field(
+        default=None,
+        description="Venice AI API key (used as LiteLLM api_key when model targets Venice)",
+        json_schema_extra={"env": "VENICE_INFERENCE_KEY"},
+    )
+    sampling_provider: str = Field(
+        default="auto",
+        description="Sampling provider: 'auto' (LiteLLM if configured, else Anthropic), 'litellm', or 'anthropic'",
+        json_schema_extra={"env": "SAMPLING_PROVIDER"},
+    )
 
     # MCP List Page Size Configuration
     # Controls pagination of tools/resources/prompts listing responses.
@@ -160,6 +195,28 @@ class Settings(BaseSettings):
         default="",
         description="Comma-separated list of services to enable by default in minimal startup mode (e.g., 'drive,gmail'). Empty = only protected tools.",
         json_schema_extra={"env": "MINIMAL_STARTUP_SERVICES"},
+    )
+
+    # Centralized Embedding Service Configuration
+    embedding_minilm_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="MiniLM model for dense 384-dim embeddings",
+        json_schema_extra={"env": "EMBEDDING_MINILM_MODEL"},
+    )
+    embedding_colbert_model: str = Field(
+        default="colbert-ir/colbertv2.0",
+        description="ColBERT model for multi-vector 128-dim embeddings",
+        json_schema_extra={"env": "EMBEDDING_COLBERT_MODEL"},
+    )
+    embedding_bge_model: str = Field(
+        default="BAAI/bge-small-en-v1.5",
+        description="BGE-small model for icon search embeddings",
+        json_schema_extra={"env": "EMBEDDING_BGE_MODEL"},
+    )
+    embedding_eager_load: str = Field(
+        default="",
+        description="Comma-separated embedding slots to preload on startup (e.g. 'minilm,colbert')",
+        json_schema_extra={"env": "EMBEDDING_EAGER_LOAD"},
     )
 
     # ColBERT Embedding Configuration (Development/Testing)
@@ -251,6 +308,102 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 
+    # App Providers (FastMCP 3.2+)
+    # When enabled, registers Approval and Choice providers for interactive UIs
+    enable_app_providers: bool = Field(
+        default=False,
+        description="Enable FastMCP App providers (Approval, Choice)",
+        json_schema_extra={"env": "ENABLE_APP_PROVIDERS"},
+    )
+
+    # Multi-Dimensional Search (Horizon 1 — RIC-TRM)
+    # When enabled, callers use search_hybrid_multidim (multiplicative cross-dim scoring)
+    # instead of search_hybrid (RRF rank fusion). POC validated: +9.5% Top-1 accuracy.
+    enable_multidim_search: bool = Field(
+        default=False,
+        description="Use multi-dimensional scoring instead of RRF for hybrid search",
+        json_schema_extra={"env": "ENABLE_MULTIDIM_SEARCH"},
+    )
+
+    search_mode: str = Field(
+        default="rrf",
+        description="Search scoring mode: 'rrf' (legacy), 'multidim' (multiplicative), 'learned' (trained MLP), 'recursive' (iterative refinement)",
+        json_schema_extra={"env": "SEARCH_MODE"},
+    )
+
+    # Shadow A/B scoring — runs all 3 search modes on every query, logs comparison
+    search_shadow_scoring: bool = Field(
+        default=False,
+        description="Enable shadow A/B scoring: run all search modes and log comparison metrics",
+        json_schema_extra={"env": "SEARCH_SHADOW_SCORING"},
+    )
+
+    # Recursive refinement settings (H3 bridge)
+    recursive_max_cycles: int = Field(
+        default=3,
+        description="Max refinement cycles for recursive search mode",
+        json_schema_extra={"env": "RECURSIVE_MAX_CYCLES"},
+    )
+    recursive_halt_margin: float = Field(
+        default=0.5,
+        description="Score margin between #1 and #2 to stop recursion early",
+        json_schema_extra={"env": "RECURSIVE_HALT_MARGIN"},
+    )
+    recursive_alpha_init: float = Field(
+        default=0.7,
+        description="Initial query blend weight for recursive refinement (alpha * original + (1-alpha) * top-K mean)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_INIT"},
+    )
+
+    # Dual-Head Scorer Configuration
+    dual_head_form_weight: float = Field(
+        default=0.6,
+        description="Form vs content weight for dual-head scorer (1.0 = pure form, 0.0 = pure content)",
+        json_schema_extra={"env": "DUAL_HEAD_FORM_WEIGHT"},
+    )
+    recursive_alpha_decay: float = Field(
+        default=0.1,
+        description="Per-cycle alpha decay for recursive dual-head search (shifts from form to content)",
+        json_schema_extra={"env": "RECURSIVE_ALPHA_DECAY"},
+    )
+    recursive_content_pool_size: int = Field(
+        default=10,
+        description="Candidate pool size for content RecommendQuery in recursive search",
+        json_schema_extra={"env": "RECURSIVE_CONTENT_POOL_SIZE"},
+    )
+
+    # Model Artifact Management
+    # Multi-provider model artifact download + local cache with py-key-value-aio registry
+    model_artifact_enabled: bool = Field(
+        default=False,
+        description="Enable cloud model artifact download on startup",
+        json_schema_extra={"env": "MODEL_ARTIFACT_ENABLED"},
+    )
+    model_artifact_uri: str = Field(
+        default="",
+        description=(
+            "JSON mapping of domain->artifact URI, or single URI for all domains. "
+            "Supports gs://, s3://, az://, https:// schemes. "
+            'Example: \'{"gchat": "gs://my-bucket/trm/best_model_unified.pt"}\''
+        ),
+        json_schema_extra={"env": "MODEL_ARTIFACT_URI"},
+    )
+    model_artifact_cache_dir: str = Field(
+        default="",
+        description="Local directory for cached model artifacts. If empty, uses credentials_dir/model_cache",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CACHE_DIR"},
+    )
+    model_artifact_registry_backend: str = Field(
+        default="file",
+        description="Registry backend for artifact metadata: 'memory', 'file', or 'redis'",
+        json_schema_extra={"env": "MODEL_ARTIFACT_REGISTRY_BACKEND"},
+    )
+    model_artifact_checksum_verify: bool = Field(
+        default=True,
+        description="Verify SHA-256 checksum of downloaded artifacts against registry",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CHECKSUM_VERIFY"},
+    )
+
     # Response Limiting Configuration
     response_limit_max_size: int = Field(
         default=500_000,
@@ -280,11 +433,270 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "PRIVACY_EXCLUDE_TOOLS"},
     )
 
+    # X402 Payment Protocol Configuration
+    payment_enabled: bool = Field(
+        default=False,
+        description="Enable x402 payment protocol for tool access gating",
+        json_schema_extra={"env": "PAYMENT_ENABLED"},
+    )
+    payment_recipient_wallet: str = Field(
+        default="",
+        description="Wallet address to receive USDC payments",
+        json_schema_extra={"env": "PAYMENT_RECIPIENT_WALLET"},
+    )
+    payment_usdc_amount: str = Field(
+        default="0.01",
+        description="Required USDC payment amount",
+        json_schema_extra={"env": "PAYMENT_USDC_AMOUNT"},
+    )
+    payment_chain_id: int = Field(
+        default=84532,
+        description="Blockchain chain ID (derived from payment_network for backward compat)",
+        json_schema_extra={"env": "PAYMENT_CHAIN_ID"},
+    )
+    payment_network: str = Field(
+        default="eip155:84532",
+        description="CAIP-2 network identifier (Base Sepolia default = testnet-safe)",
+        json_schema_extra={"env": "PAYMENT_NETWORK"},
+    )
+    payment_facilitator_url: str = Field(
+        default="https://x402.org/facilitator",
+        description="x402 facilitator service URL for payment verification/settlement",
+        json_schema_extra={"env": "PAYMENT_FACILITATOR_URL"},
+    )
+    payment_scheme: str = Field(
+        default="exact",
+        description="x402 payment scheme (exact = EIP-3009 signature-based)",
+        json_schema_extra={"env": "PAYMENT_SCHEME"},
+    )
+    payment_rpc_url: str = Field(
+        default="",
+        description="RPC URL for on-chain verification (legacy, kept for backward compat)",
+        json_schema_extra={"env": "PAYMENT_RPC_URL"},
+    )
+    payment_verification_url: str = Field(
+        default="",
+        description="External verification service URL (legacy, kept for backward compat)",
+        json_schema_extra={"env": "PAYMENT_VERIFICATION_URL"},
+    )
+    payment_session_ttl_minutes: int = Field(
+        default=60,
+        description="Minutes a payment verification remains valid",
+        json_schema_extra={"env": "PAYMENT_SESSION_TTL_MINUTES"},
+    )
+    payment_gated_tools: str = Field(
+        default="",
+        description="Comma-separated tool names to gate. Empty = all tools.",
+        json_schema_extra={"env": "PAYMENT_GATED_TOOLS"},
+    )
+    payment_free_for_oauth: bool = Field(
+        default=True,
+        description="OAuth and per-user API key sessions bypass payment",
+        json_schema_extra={"env": "PAYMENT_FREE_FOR_OAUTH"},
+    )
+    receipt_collection: str = Field(
+        default="mcp_payment_receipts",
+        description="Qdrant collection for payment receipt storage",
+        json_schema_extra={"env": "RECEIPT_COLLECTION"},
+    )
+
+    # Payment Flow UX Configuration
+    payment_auto_open_browser: bool = Field(
+        default=True,
+        description="Automatically open browser payment page on 402 Payment Required",
+        json_schema_extra={"env": "PAYMENT_AUTO_OPEN_BROWSER"},
+    )
+    payment_send_email: bool = Field(
+        default=False,
+        description="Send payment request email on 402 Payment Required",
+        json_schema_extra={"env": "PAYMENT_SEND_EMAIL"},
+    )
+    payment_poll_timeout_seconds: int = Field(
+        default=300,
+        description="Max seconds to wait for browser/email payment completion",
+        json_schema_extra={"env": "PAYMENT_POLL_TIMEOUT_SECONDS"},
+    )
+    payment_poll_interval_seconds: int = Field(
+        default=2,
+        description="Seconds between payment completion polls",
+        json_schema_extra={"env": "PAYMENT_POLL_INTERVAL_SECONDS"},
+    )
+    payment_token_ttl_seconds: int = Field(
+        default=900,
+        description="TTL for HMAC-signed payment tokens (default: 15 minutes)",
+        json_schema_extra={"env": "PAYMENT_TOKEN_TTL_SECONDS"},
+    )
+
+    # Cost Tracking Rates (USD)
+    sampling_input_token_rate: float = Field(
+        default=0.000003,
+        description="Cost per input token in USD (default: Claude Sonnet rate)",
+        json_schema_extra={"env": "SAMPLING_INPUT_TOKEN_RATE"},
+    )
+    sampling_output_token_rate: float = Field(
+        default=0.000015,
+        description="Cost per output token in USD (default: Claude Sonnet rate)",
+        json_schema_extra={"env": "SAMPLING_OUTPUT_TOKEN_RATE"},
+    )
+    sampling_default_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Default model identifier for cost tracking",
+        json_schema_extra={"env": "SAMPLING_DEFAULT_MODEL"},
+    )
+    qdrant_cost_per_upsert: float = Field(
+        default=0.0001,
+        description="Estimated USD cost per Qdrant upsert operation",
+        json_schema_extra={"env": "QDRANT_COST_PER_UPSERT"},
+    )
+    qdrant_cost_per_search: float = Field(
+        default=0.00005,
+        description="Estimated USD cost per Qdrant search operation",
+        json_schema_extra={"env": "QDRANT_COST_PER_SEARCH"},
+    )
+
+    # Redis Cloud Configuration
+    redis_io_url_string: Optional[str] = Field(
+        default=None,
+        description="Redis Cloud connection URL (redis://user:pass@host:port). Used for response caching and dashboard cache offloading.",
+        json_schema_extra={"env": "REDIS_IO_URL_STRING"},
+    )
+
+    # Sampling Cache Configuration
+    sampling_cache_enabled: bool = Field(
+        default=False,
+        description="Enable Qdrant semantic response cache for sampling calls",
+        json_schema_extra={"env": "SAMPLING_CACHE_ENABLED"},
+    )
+    sampling_cache_collection: str = Field(
+        default="mcp_sampling_cache",
+        description="Qdrant collection for semantic sampling cache",
+        json_schema_extra={"env": "SAMPLING_CACHE_COLLECTION"},
+    )
+    sampling_cache_similarity_threshold: float = Field(
+        default=0.85,
+        description="Similarity threshold for cache hits (0.0-1.0). Higher = stricter matching.",
+        json_schema_extra={"env": "SAMPLING_CACHE_SIMILARITY_THRESHOLD"},
+    )
+    sampling_cache_fastembed_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="FastEmbed model for semantic cache embeddings",
+        json_schema_extra={"env": "SAMPLING_CACHE_FASTEMBED_MODEL"},
+    )
+
+    # Prompt Cache Keepalive Configuration
+    cache_keepalive_enabled: bool = Field(
+        default=False,
+        description="Enable periodic keepalive to keep Anthropic prompt cache warm",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_ENABLED"},
+    )
+    cache_keepalive_interval_seconds: int = Field(
+        default=2700,
+        description="Seconds between keepalive calls per module (45 min default; cache may go cold between calls)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_INTERVAL_SECONDS"},
+    )
+    cache_keepalive_jitter_seconds: int = Field(
+        default=300,
+        description="Jitter range (+/-) around keepalive interval (default 300 = 40-50 min range)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_JITTER_SECONDS"},
+    )
+    cache_keepalive_modules: str = Field(
+        default="gchat,email,qdrant,execute",
+        description="Comma-separated module names to keep warm",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MODULES"},
+    )
+    cache_keepalive_mode: str = Field(
+        default="explore",
+        description="'ping' (minimal output) or 'explore' (generate DSL variations)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MODE"},
+    )
+    cache_keepalive_max_tokens: int = Field(
+        default=100,
+        description="Max output tokens for keepalive calls",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_MAX_TOKENS"},
+    )
+    cache_keepalive_index_results: bool = Field(
+        default=True,
+        description="Index exploration results into Qdrant",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_INDEX_RESULTS"},
+    )
+
+    # Sampling Cost Persistence
+    sampling_cost_persistence_file: str = Field(
+        default="data/sampling_costs.json",
+        description="JSON file for persistent sampling cost tracking (empty to disable)",
+        json_schema_extra={"env": "SAMPLING_COST_PERSISTENCE_FILE"},
+    )
+
+    # Sampling Monthly Budget
+    sampling_monthly_budget_usd: float = Field(
+        default=0.0,
+        description="Monthly sampling budget in USD. 0 = unlimited. When exceeded, sampling calls are skipped.",
+        json_schema_extra={"env": "SAMPLING_MONTHLY_BUDGET_USD"},
+    )
+
+    # Reactive Cache Keepalive
+    cache_keepalive_reactive: bool = Field(
+        default=True,
+        description="Reactive mode: only keep cache warm after real sampling activity (ignores continuous loop)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_REACTIVE"},
+    )
+    cache_keepalive_idle_timeout_seconds: int = Field(
+        default=3600,
+        description="Stop keepalive after this many seconds of no real sampling activity (default 1 hour)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_IDLE_TIMEOUT_SECONDS"},
+    )
+
+    # Argument Recovery
+    sampling_argument_recovery_enabled: bool = Field(
+        default=True,
+        description="Enable LLM-assisted argument recovery on Pydantic ValidationError",
+        json_schema_extra={"env": "SAMPLING_ARGUMENT_RECOVERY_ENABLED"},
+    )
+
+    # Langfuse Observability Configuration
+    langfuse_public_key: str = Field(
+        default="",
+        description="Langfuse public key for LLM observability",
+        json_schema_extra={"env": "LANGFUSE_PUBLIC_KEY"},
+    )
+    langfuse_secret_key: str = Field(
+        default="",
+        description="Langfuse secret key for LLM observability",
+        json_schema_extra={"env": "LANGFUSE_SECRET_KEY"},
+    )
+    langfuse_host: str = Field(
+        default="https://us.cloud.langfuse.com",
+        description="Langfuse host URL",
+        json_schema_extra={"env": "LANGFUSE_HOST"},
+    )
+
+    @property
+    def langfuse_enabled(self) -> bool:
+        """Check if Langfuse credentials are configured."""
+        return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
     # FastMCP 2.12.0 GoogleProvider Configuration
     fastmcp_server_auth: str = ""
     fastmcp_server_auth_google_client_id: str = ""
     fastmcp_server_auth_google_client_secret: str = ""
     fastmcp_server_auth_google_base_url: str = ""
+
+    # GitHub OAuth Configuration (for alpha access via repo star gating)
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_required_scopes: str = "user:email"  # Comma-separated GitHub scopes
+    github_oauth_gating_repo: str = (
+        ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+    )
+
+    # Alpha Access Control
+    alpha_mode: bool = False  # Enable alpha access gating
+    alpha_google_email_allowlist: str = (
+        ""  # Comma-separated emails allowed via Google OAuth
+    )
+    alpha_github_require_star: bool = (
+        True  # Require GitHub users to star the gating repo
+    )
 
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry
@@ -717,6 +1129,18 @@ class Settings(BaseSettings):
         Useful when BASE_URL points to a proxy that doesn't forward /card-feedback.
         """
         explicit = os.getenv("FEEDBACK_BASE_URL")
+        if explicit:
+            return explicit
+        return self.base_url
+
+    @property
+    def payment_base_url(self) -> str:
+        """Get the base URL for payment flow pages (/pay, /api/payment-complete).
+
+        Uses PAYMENT_BASE_URL env var if set, otherwise falls back to base_url.
+        Same pattern as feedback_base_url.
+        """
+        explicit = os.getenv("PAYMENT_BASE_URL")
         if explicit:
             return explicit
         return self.base_url

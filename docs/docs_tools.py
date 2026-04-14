@@ -68,10 +68,10 @@ async def search_docs(
     Returns:
         SearchDocsResponse: Structured response with list of matching Google Docs.
     """
-    logger.info(f"[search_docs] Email={user_google_email}, Query='{query}'")
+    logger.info(f"[search_docs] Query='{query}'")
 
     # Request Drive service through middleware
-    logger.debug(f"[search_docs] Requesting drive service for {user_google_email}")
+    logger.debug("[search_docs] Requesting drive service")
     drive_key = await request_service("drive")
     logger.debug(f"[search_docs] Got service key: {drive_key}")
 

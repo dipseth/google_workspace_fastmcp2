@@ -43,7 +43,6 @@ Usage:
     jinja = parser.content_to_jinja(content)  # "{{ 'Hello World' | success_text | bold }}"
 """
 
-import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -62,12 +61,12 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
 if TYPE_CHECKING:
     from adapters.module_wrapper.core import ModuleWrapper
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # DATA CLASSES
@@ -476,7 +475,6 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
     "time": ("time", None),
     "datetime": ("datetime", None),
 }
-
 
 # =============================================================================
 # DSL PARSER
@@ -1148,7 +1146,7 @@ class DSLParser:
     def to_qdrant_queries(
         self,
         result: DSLParseResult,
-        collection_name: str = "mcp_gchat_cards",
+        collection_name: str = "module_components",
         search_strategy: str = "auto",
     ) -> List[QdrantQuery]:
         """
@@ -1645,7 +1643,7 @@ class DSLParser:
 def parse_dsl_to_qdrant_query(
     dsl_string: str,
     symbol_mapping: Dict[str, str],
-    collection_name: str = "mcp_gchat_cards",
+    collection_name: str = "module_components",
 ) -> List[Dict[str, Any]]:
     """
     Standalone function to parse DSL and generate Qdrant queries.

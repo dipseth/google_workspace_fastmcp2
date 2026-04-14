@@ -23,7 +23,6 @@ Usage:
     # => {"Button": "g:ᵬ", "Grid": "g:ℊ"}
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -34,9 +33,9 @@ from adapters.module_wrapper.types import (
     Symbol,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # UNICODE SYMBOL POOLS
@@ -104,8 +103,9 @@ FALLBACK_SYMBOLS = [
     "◘",
 ]
 
-# Module prefix symbols - use for multi-module disambiguation
-MODULE_PREFIX_SYMBOLS: Dict[str, str] = {
+# Default module prefix symbols — applied lazily for backwards compat.
+# New modules should call register_module_prefix() instead.
+_DEFAULT_PREFIXES: Dict[str, str] = {
     "gchat": "g",
     "google_chat": "g",
     "card_framework": "c",
@@ -118,6 +118,19 @@ MODULE_PREFIX_SYMBOLS: Dict[str, str] = {
     "slides": "i",
     "tasks": "t",
 }
+
+# Active registry — starts with defaults, extended via register_module_prefix()
+MODULE_PREFIX_SYMBOLS: Dict[str, str] = dict(_DEFAULT_PREFIXES)
+
+
+def register_module_prefix(module_name: str, prefix: str) -> None:
+    """Register a module prefix symbol for multi-module disambiguation.
+
+    Args:
+        module_name: Module identifier (e.g. "gchat", "gmail")
+        prefix: Single-character prefix (e.g. "g", "m")
+    """
+    MODULE_PREFIX_SYMBOLS[module_name] = prefix
 
 
 # =============================================================================

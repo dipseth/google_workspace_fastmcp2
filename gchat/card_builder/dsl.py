@@ -7,7 +7,6 @@ This module provides standalone functions for:
 - Converting between card JSON and component paths
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from adapters.module_wrapper.types import (
@@ -17,11 +16,11 @@ from adapters.module_wrapper.types import (
     JsonDict,
     SymbolMapping,
 )
+from config.enhanced_logging import setup_logger
 from gchat.card_builder.metadata import get_children_field, get_container_child_type
 from gchat.card_builder.rendering import json_key_to_component_name
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logger()
 
 # =============================================================================
 # WIDGET TYPE MAPPINGS
@@ -32,7 +31,6 @@ logger = logging.getLogger(__name__)
 from gchat.card_builder.rendering import _JSON_KEY_TO_COMPONENT
 
 WIDGET_JSON_KEYS = frozenset(_JSON_KEY_TO_COMPONENT.keys())
-
 
 # =============================================================================
 # COMPONENT PATH EXTRACTION

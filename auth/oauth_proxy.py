@@ -5,9 +5,6 @@ This proxy generates temporary credentials for MCP clients and maps them interna
 to real Google OAuth credentials, ensuring the real credentials are never exposed.
 """
 
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import secrets
 import threading
 import time
@@ -115,7 +112,7 @@ class OAuthProxy:
 
             logger.info("🎫 Created proxy client mapping:")
             logger.info(f"   Temp ID: {temp_client_id}")
-            logger.info(f"   Real ID: {real_client_id[:20]}...")
+            logger.info(f"   Real ID: {'configured' if real_client_id else 'not set'}")
             logger.info(f"   Metadata: {client_metadata.get('client_name', 'Unknown')}")
 
             # Perform cleanup if needed
@@ -396,7 +393,7 @@ def handle_token_exchange(
             raise ValueError("Invalid proxy client credentials")
 
         real_client_id, real_client_secret = real_credentials
-        logger.info(f"✅ Mapped to real client: {real_client_id[:20]}...")
+        logger.info("✅ Mapped to real client for token exchange")
 
         # Get proxy client to check for stored PKCE parameters
         proxy_client = oauth_proxy.get_proxy_client(client_id)
@@ -411,7 +408,7 @@ def handle_token_exchange(
             # Note: code_verifier must come from client, we can't generate it
     else:
         # Direct usage of real credentials (for backward compatibility)
-        logger.info(f"🔄 Token exchange with direct credentials: {client_id[:20]}...")
+        logger.info("🔄 Token exchange with direct credentials")
         real_client_id = client_id
         real_client_secret = client_secret
 
@@ -429,18 +426,10 @@ def handle_token_exchange(
     # Add PKCE code_verifier if provided
     if code_verifier:
         data["code_verifier"] = code_verifier
-        logger.info(
-            f"🔐 Including PKCE code_verifier in token exchange: {code_verifier[:10]}..."
-        )
+        logger.info("🔐 Including PKCE code_verifier in token exchange")
 
     try:
-        # DIAGNOSTIC: Log the exact token exchange request
-        logger.info("🔍 DEBUG: Token exchange request:")
-        logger.info(f"   URL: {token_url}")
-        logger.info(f"   auth_code: {auth_code[:20]}...")
-        logger.info(f"   real_client_id: {real_client_id[:20]}...")
-        logger.info(f"   redirect_uri: {redirect_uri}")
-        logger.info("   grant_type: authorization_code")
+        logger.info("🔄 Token exchange request to Google OAuth")
 
         response = requests.post(token_url, data=data)
         response.raise_for_status()
@@ -452,10 +441,8 @@ def handle_token_exchange(
 
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ Token exchange failed: {e}")
-        logger.error(f"🔍 DEBUG: Request data was: {data}")
         if hasattr(e, "response") and e.response:
             logger.error(f"   Response status: {e.response.status_code}")
-            logger.error(f"   Response body: {e.response.text}")
         raise ValueError(f"Token exchange failed: {str(e)}")
 
 
@@ -480,7 +467,7 @@ def refresh_access_token(
 
     # Check if this is a proxy client
     if client_id.startswith("mcp_"):
-        logger.info(f"🔄 Token refresh for proxy client: {client_id}")
+        logger.info("🔄 Token refresh for proxy client")
 
         # Get real credentials from proxy
         real_credentials = oauth_proxy.get_real_credentials(client_id, client_secret)
@@ -489,7 +476,7 @@ def refresh_access_token(
             raise ValueError("Invalid proxy client credentials")
 
         real_client_id, real_client_secret = real_credentials
-        logger.info(f"✅ Mapped to real client for refresh: {real_client_id[:20]}...")
+        logger.info("✅ Mapped to real client for refresh")
     else:
         # Direct usage of real credentials
         real_client_id = client_id
@@ -517,5 +504,5 @@ def refresh_access_token(
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ Token refresh failed: {e}")
         if hasattr(e, "response") and e.response:
-            logger.error(f"   Response: {e.response.text}")
+            logger.error(f"   Response status: {e.response.status_code}")
         raise ValueError(f"Token refresh failed: {str(e)}")

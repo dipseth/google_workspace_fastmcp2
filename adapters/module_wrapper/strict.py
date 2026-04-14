@@ -11,11 +11,12 @@ Usage:
     CARD_BUILDER_STRICT=1 uv run python my_script.py
 """
 
-import logging
 import os
 import traceback
 
-logger = logging.getLogger("card_builder.strict")
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 CARD_BUILDER_STRICT: bool = os.environ.get("CARD_BUILDER_STRICT", "").lower() in (
     "1",

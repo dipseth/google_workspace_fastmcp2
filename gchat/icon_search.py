@@ -17,13 +17,14 @@ Usage:
     result = semantic_icon_search("TREND_UP")
 """
 
-import logging
 import threading
 from typing import List, Optional, Tuple
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 # Lazy-loaded singletons (guarded by _init_lock)
 _embedder = None
@@ -44,13 +45,12 @@ def _ensure_index():
         if _icon_embeddings is not None:
             return
 
-        from fastembed import TextEmbedding
-
+        from config.embedding_service import get_embedding_service
         from gchat.material_icons import MATERIAL_ICONS
 
         logger.info(f"Building icon search index ({len(MATERIAL_ICONS)} icons)...")
 
-        _embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        _embedder = get_embedding_service().get_model_sync("bge-small")
 
         # Prepare icon names with readable descriptions for better embeddings
         # "trending_up" -> "trending up" (underscores to spaces for semantic meaning)

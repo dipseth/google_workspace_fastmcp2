@@ -319,6 +319,14 @@ class InputMappingInfo(BaseModel):
         default_factory=dict,
         description="Count of unconsumed inputs: {'buttons': 1, 'texts': 0}",
     )
+    dsl_demands: Optional[Dict[str, int]] = Field(
+        None,
+        description="Component counts requested by DSL: {'Button': 5, 'DecoratedText': 3}",
+    )
+    auto_corrections: Optional[Dict[str, int]] = Field(
+        None,
+        description="Multipliers auto-corrected to match params: {'Button': 2}",
+    )
 
 
 class ExpectedParamsInfo(BaseModel):

@@ -9,10 +9,11 @@ domain-specific to the middleware layer.
 """
 
 import json
-import logging
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
+
+logger = setup_logger()
 
 
 class ToolResponseProvider:

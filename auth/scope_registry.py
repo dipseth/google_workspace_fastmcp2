@@ -5,11 +5,6 @@ This module provides a centralized registry for all Google API scopes used acros
 the FastMCP2 system, eliminating the previous fragmentation across 7+ files.
 """
 
-import logging
-
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 from dataclasses import dataclass
 
 from typing_extensions import Any, Dict, List, Optional
@@ -109,9 +104,24 @@ class ScopeRegistry:
         "chat": {
             "messages_readonly": "https://www.googleapis.com/auth/chat.messages.readonly",
             "messages": "https://www.googleapis.com/auth/chat.messages",
+            "messages_create": "https://www.googleapis.com/auth/chat.messages.create",
             "spaces": "https://www.googleapis.com/auth/chat.spaces",
+            "spaces_create": "https://www.googleapis.com/auth/chat.spaces.create",
             "memberships_readonly": "https://www.googleapis.com/auth/chat.memberships.readonly",
             "memberships": "https://www.googleapis.com/auth/chat.memberships",
+            "memberships_app": "https://www.googleapis.com/auth/chat.memberships.app",
+            "delete": "https://www.googleapis.com/auth/chat.delete",
+            # Reaction scopes (require user-level / delegated auth)
+            "reactions": "https://www.googleapis.com/auth/chat.messages.reactions",
+            "reactions_create": "https://www.googleapis.com/auth/chat.messages.reactions.create",
+            "reactions_readonly": "https://www.googleapis.com/auth/chat.messages.reactions.readonly",
+            # App-level scopes (service account authentication)
+            "app_memberships": "https://www.googleapis.com/auth/chat.app.memberships",
+            "app_spaces": "https://www.googleapis.com/auth/chat.app.spaces",
+            "app_spaces_create": "https://www.googleapis.com/auth/chat.app.spaces.create",
+            "app_delete": "https://www.googleapis.com/auth/chat.app.delete",
+            # Bot identity scope (SA acts as the Chat app itself — required for sending cards)
+            "bot": "https://www.googleapis.com/auth/chat.bot",
         },
         # Google Forms scopes
         "forms": {
@@ -341,6 +351,7 @@ class ScopeRegistry:
             "base.openid",
             "drive.full",  # Full Drive access for MCP - required to access shared/organizational files
             "drive.readonly",
+            "drive.file",
         ],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
         "gmail_basic": [
@@ -348,6 +359,9 @@ class ScopeRegistry:
             "base.openid",
             "gmail.readonly",
             "gmail.send",
+            "gmail.compose",
+            "gmail.modify",
+            "gmail.labels",
             "gmail.settings_basic",
             "gmail.settings_sharing",
         ],
@@ -380,12 +394,37 @@ class ScopeRegistry:
             "chat.messages",
             "chat.spaces",
             "chat.memberships_readonly",
+            "chat.memberships",
             "people.readonly",
+        ],
+        # Bot identity scope (SA acts as Chat app — can send cards)
+        "chat_bot": [
+            "chat.bot",
+        ],
+        # Service account (app-level) scopes for Chat API
+        "chat_app": [
+            "chat.spaces",
+            "chat.spaces_create",
+            "chat.delete",
+            "chat.messages",
+            "chat.messages_readonly",
+            "chat.messages_create",
+            "chat.memberships",
+            "chat.memberships_readonly",
+            "chat.memberships_app",
+            "chat.app_memberships",
+            "chat.app_spaces",
+            "chat.app_spaces_create",
+            "chat.app_delete",
+            "chat.reactions",
+            "chat.reactions_create",
+            "chat.reactions_readonly",
         ],
         "forms_basic": [
             "base.userinfo_email",
             "base.openid",
             "forms.body",
+            "forms.body_readonly",
             "forms.responses_readonly",
         ],
         "slides_basic": [
@@ -399,6 +438,7 @@ class ScopeRegistry:
             "base.openid",
             "photos.readonly",
             "photos.appendonly",
+            "photos.full",
             # appcreateddata scopes excluded — restricts API to app-created content only
         ],
         "photos_full": [
@@ -422,6 +462,7 @@ class ScopeRegistry:
             "base.openid",
             "people.readonly",
             "people.contacts",  # Write access needed for contact group management
+            "people.directory_readonly",
         ],
         "people_full": [
             "base.userinfo_email",
@@ -879,7 +920,24 @@ class ScopeRegistry:
                 "required": False,
                 "scopes": cls.get_service_scopes("people", "basic"),
             },
+            "tasks": {
+                "name": "Google Tasks",
+                "description": "Manage task lists and to-do items",
+                "category": "Productivity",
+                "required": False,
+                "default_selected": False,
+                "scopes": cls.get_service_scopes("tasks", "basic"),
+            },
         }
+
+    @classmethod
+    def get_default_services(cls) -> List[str]:
+        """Return optional service keys that are selected by default."""
+        return [
+            key
+            for key, info in cls.get_service_catalog().items()
+            if not info.get("required", False) and info.get("default_selected", True)
+        ]
 
     @classmethod
     def get_scopes_for_services(cls, service_keys: List[str]) -> List[str]:
@@ -911,7 +969,7 @@ class ServiceScopeManager:
             service_name: Name of the Google service
         """
         self.service_name = service_name
-        self.logger = logging.getLogger(f"{__name__}.{service_name}")
+        self.logger = setup_logger()
 
         if service_name not in ScopeRegistry.GOOGLE_API_SCOPES:
             available_services = list(ScopeRegistry.GOOGLE_API_SCOPES.keys())

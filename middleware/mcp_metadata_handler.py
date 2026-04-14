@@ -5,7 +5,6 @@ This module provides utilities for extracting, validating, and managing MCP tool
 including required scopes, service categorization, and operation validation.
 """
 
-import logging
 from typing import Any, Dict, List, Optional, Set, Union
 
 from fastmcp import FastMCP
@@ -27,7 +26,7 @@ class MCPMetadataHandler:
             mcp_server: FastMCP server instance
         """
         self.mcp_server = mcp_server
-        self.logger = logging.getLogger(f"{__name__}.MCPMetadataHandler")
+        self.logger = setup_logger()
 
     def get_registered_tools(self) -> Dict[str, Any]:
         """
@@ -39,7 +38,7 @@ class MCPMetadataHandler:
             Dictionary of tool name to tool metadata
         """
         try:
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = self.mcp_server.local_provider._components
             tools = {v.name: v for v in components.values() if isinstance(v, Tool)}

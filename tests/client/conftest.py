@@ -20,6 +20,7 @@ Note: This is the pytest framework configuration file.
 """
 
 import asyncio
+import inspect
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -521,5 +522,5 @@ async def real_chat_space_id(client):
 def pytest_collection_modifyitems(config, items):
     """Automatically mark async tests with asyncio marker."""
     for item in items:
-        if asyncio.iscoroutinefunction(item.function):
+        if inspect.iscoroutinefunction(item.function):
             item.add_marker(pytest.mark.asyncio)

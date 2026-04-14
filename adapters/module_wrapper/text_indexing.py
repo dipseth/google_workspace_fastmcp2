@@ -16,8 +16,8 @@ Usage (standalone functions):
     )
 
     client = get_qdrant_client()
-    create_component_text_indices(client, "mcp_gchat_cards")
-    results = search_by_text(client, "mcp_gchat_cards", "name", "Button")
+    create_component_text_indices(client, "my_collection")
+    results = search_by_text(client, "my_collection", "name", "Button")
 
 Usage (via ModuleWrapper - preferred):
     wrapper = ModuleWrapper("card_framework.v2", auto_initialize=True)
@@ -29,15 +29,15 @@ client and collection_name. These standalone functions are maintained for
 backwards compatibility and for use in scripts without a wrapper instance.
 """
 
-import logging
 from typing import List, Optional
 
 from adapters.module_wrapper.types import (
     ComponentName,
     QueryText,
 )
+from config.enhanced_logging import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 def create_component_text_indices(

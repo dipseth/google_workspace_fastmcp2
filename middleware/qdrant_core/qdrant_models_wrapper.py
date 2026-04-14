@@ -18,15 +18,11 @@ Usage:
     parser = wrapper.get_dsl_parser()
 """
 
-import logging
-import threading
 from typing import Dict, Optional
 
-logger = logging.getLogger(__name__)
+from config.enhanced_logging import setup_logger
 
-# Thread-safe singleton
-_wrapper: Optional["ModuleWrapper"] = None
-_wrapper_lock = threading.Lock()
+logger = setup_logger()
 
 
 def get_qdrant_models_wrapper(
@@ -41,13 +37,12 @@ def get_qdrant_models_wrapper(
     Returns:
         Shared ModuleWrapper instance configured for qdrant_client.models
     """
-    global _wrapper
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
 
-    with _wrapper_lock:
-        if _wrapper is None or force_reinitialize:
-            _wrapper = _create_wrapper()
+    if not WrapperRegistry.is_registered("qdrant_models"):
+        WrapperRegistry.register("qdrant_models", _create_wrapper)
 
-    return _wrapper
+    return WrapperRegistry.get("qdrant_models", force_reinitialize=force_reinitialize)
 
 
 def _create_wrapper() -> "ModuleWrapper":
@@ -74,6 +69,10 @@ def _create_wrapper() -> "ModuleWrapper":
     class_count = sum(
         1 for c in wrapper.components.values() if c.component_type == "class"
     )
+
+    # Register Qdrant-specific skill templates
+    _register_qdrant_skill_templates(wrapper)
+
     logger.info(
         f"ModuleWrapper ready for qdrant_client.models: "
         f"{component_count} components, {class_count} classes"
@@ -82,10 +81,184 @@ def _create_wrapper() -> "ModuleWrapper":
     return wrapper
 
 
+def _register_qdrant_skill_templates(wrapper) -> None:
+    """Register Qdrant-specific skill templates with the ModuleWrapper."""
+    wrapper.register_skill_template("qdrant-dsl-syntax", _generate_qdrant_dsl_template)
+    wrapper.register_skill_template(
+        "qdrant-dsl-params", _generate_qdrant_dsl_params_template
+    )
+    logger.info("Registered Qdrant skill templates with ModuleWrapper")
+
+
+def _generate_qdrant_dsl_template(wrapper) -> str:
+    """Generate the Qdrant DSL syntax skill document dynamically from wrapper symbols."""
+    symbols = getattr(wrapper, "symbol_mapping", {})
+
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+
+    # Categorize symbols
+    filter_names = [
+        "Filter",
+        "FieldCondition",
+        "MatchValue",
+        "MatchAny",
+        "MatchText",
+        "Range",
+        "HasIdCondition",
+        "IsNullCondition",
+        "IsEmptyCondition",
+    ]
+    query_names = [
+        "RecommendQuery",
+        "DiscoverQuery",
+        "FusionQuery",
+        "Prefetch",
+        "OrderBy",
+        "OrderByQuery",
+        "ContextQuery",
+        "SearchParams",
+    ]
+
+    filter_rows = "\n".join(
+        f"| `{s(n)}` | {n} |" for n in filter_names if s(n, None) is not None
+    )
+    query_rows = "\n".join(
+        f"| `{s(n)}` | {n} |" for n in query_names if s(n, None) is not None
+    )
+
+    lines = [
+        "# Qdrant DSL Syntax",
+        "",
+        "The `qdrant_search` tool supports a parameterized DSL for precise filter and query construction.",
+        "",
+        "## Grammar",
+        "",
+        "```",
+        "symbol{param1=value1, param2=value2}",
+        "```",
+        "",
+        "Values can be:",
+        '- Strings: `"hello"`',
+        "- Numbers: `42`, `3.14`",
+        "- Booleans: `true`, `false`",
+        "- Null: `null`",
+        "- Nested symbols: `symbol{...}`",
+        "- Lists: `[item1, item2, ...]`",
+        "",
+        "## Filter Symbols (used in `filter_dsl` param)",
+        "",
+        "| Symbol | Type |",
+        "|--------|------|",
+        filter_rows,
+        "",
+        "## Query Symbols (used in `query_dsl`/`prefetch_dsl` params)",
+        "",
+        "| Symbol | Type |",
+        "|--------|------|",
+        query_rows,
+        "",
+        "## Examples",
+        "",
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchValue")}{{value="search"}}}}]}}` — Filter by tool_name',
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchAny")}{{any=["send_dynamic_card", "search"]}}}}]}}` — Match any of multiple values',
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="score", range={s("Range")}{{gte=0.5}}}}]}}` — Range filter',
+        "",
+    ]
+
+    return "\n".join(lines)
+
+
+def _generate_qdrant_dsl_params_template(wrapper) -> str:
+    """Generate the Qdrant DSL params reference dynamically from wrapper symbols."""
+    symbols = getattr(wrapper, "symbol_mapping", {})
+
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+
+    lines = [
+        "# Qdrant Search Params Reference",
+        "",
+        "How to use `filter_dsl`, `query_dsl`, and `prefetch_dsl` with the `qdrant_search` tool.",
+        "",
+        "## Parameter Overview",
+        "",
+        "| Param | Purpose | DSL Type |",
+        "|-------|---------|----------|",
+        "| `query` | Natural language search text (semantic) | Plain text |",
+        "| `filter_dsl` | Precise metadata filtering | Filter DSL |",
+        "| `query_dsl` | Advanced query modes (recommend, fusion, order-by) | Query DSL |",
+        "| `prefetch_dsl` | Multi-stage prefetch pipelines | Prefetch DSL |",
+        "| `dry_run` | Parse+build without executing (for validation) | Boolean |",
+        "",
+        "## filter_dsl",
+        "",
+        f"Root symbol: `{s('Filter')}` with `must`, `should`, `must_not` arrays.",
+        "",
+        "### Structure",
+        "```",
+        f"{s('Filter')}{{",
+        f"  must=[",
+        f'    {s("FieldCondition")}{{key="field_name", match={s("MatchValue")}{{value="exact_value"}}}}',
+        f"  ]",
+        f"}}",
+        "```",
+        "",
+        f"### {s('FieldCondition')} Match Types",
+        "",
+        f"| Type | Symbol | Fields | Usage |",
+        f"|------|--------|--------|-------|",
+        f"| Exact match | `{s('MatchValue')}` | `value` | Single value equality |",
+        f"| Any of | `{s('MatchAny')}` | `any` (list) | Match any in list |",
+        f"| Full-text | `{s('MatchText')}` | `text` | Full-text search |",
+        f"| Range | `{s('Range')}` | `gt`, `gte`, `lt`, `lte` | Numeric/date range |",
+        "",
+        "### Common filter patterns",
+        "",
+        f"**Filter by tool_name:**",
+        f"```",
+        f'{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchValue")}{{value="search_gmail_messages"}}}}]}}',
+        f"```",
+        "",
+        f"**Filter by service + date range:**",
+        f"```",
+        f"{s('Filter')}{{must=[",
+        f'  {s("FieldCondition")}{{key="service", match={s("MatchValue")}{{value="gmail"}}}},',
+        f'  {s("FieldCondition")}{{key="timestamp", range={s("Range")}{{gte="2026-03-01"}}}}',
+        f"]}}",
+        "```",
+        "",
+        f"**Match any of multiple tools:**",
+        f"```",
+        f'{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchAny")}{{any=["send_dynamic_card", "compose_dynamic_email"]}}}}]}}',
+        "```",
+        "",
+        "## query_dsl",
+        "",
+        "For advanced query modes beyond simple semantic search.",
+        "",
+        f"| Symbol | Purpose | Key Fields |",
+        f"|--------|---------|------------|",
+        f"| `{s('RecommendQuery', 'RecommendQuery')}` | Find similar to examples | `positive`, `negative` (point ID lists) |",
+        f"| `{s('FusionQuery', 'FusionQuery')}` | Fuse multiple queries | `queries` (list) |",
+        f"| `{s('OrderByQuery', 'OrderByQuery')}` | Sort by field | `order_by` ({s('OrderBy', 'OrderBy')}), `filter` |",
+        "",
+        "## prefetch_dsl",
+        "",
+        f"Multi-stage retrieval using `{s('Prefetch', 'Prefetch')}` chains.",
+        "",
+        "## Tips",
+        "",
+        "1. **Use `dry_run: true`** to validate DSL without executing",
+        "2. **`query` is still used** as semantic text even when `filter_dsl` is set",
+        "3. **Combine modes**: `filter_dsl` + `query` = filtered semantic search",
+        "4. **Point IDs**: Use `positive_point_ids`/`negative_point_ids` for recommend mode without DSL",
+        "",
+    ]
+
+    return "\n".join(lines)
+
+
 def reset_wrapper():
     """Reset the singleton wrapper."""
-    global _wrapper
-    with _wrapper_lock:
-        if _wrapper is not None:
-            logger.info("Resetting qdrant_client.models ModuleWrapper")
-            _wrapper = None
+    from adapters.module_wrapper.wrapper_factory import WrapperRegistry
+
+    WrapperRegistry.reset("qdrant_models")

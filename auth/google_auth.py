@@ -1,11 +1,7 @@
 """Google OAuth 2.0 authentication implementation for FastMCP2."""
 
-import logging
-
-from config.enhanced_logging import setup_logger
-
-logger = setup_logger()
 import json
+import logging
 import os
 import secrets
 from dataclasses import dataclass
@@ -29,7 +25,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 from .context import get_session_context, get_session_data, store_session_data
 from .pkce_utils import pkce_manager
@@ -360,7 +356,10 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
 
         user_key = generate_user_key(normalized_email)
         if user_key:
-            # New key generated — store on credentials so callers can show it
+            # New key generated — store on credentials so callers can show it.
+            # NOTE: mark_key_revealed() is NOT called here — it must only be
+            # called from the success page callback when the key is actually
+            # rendered to the user.
             credentials._user_api_key = user_key
             # Stash in session so linked accounts authed later in the same
             # session can use it for multi-recipient encryption.
@@ -386,7 +385,9 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
             # Key already exists for this email — don't invalidate it.
             # Signal to the success page that a key exists (but can't be shown again).
             credentials._user_api_key_exists = True
-            logger.debug(f"Per-user API key already exists for {normalized_email}")
+            logger.debug(
+                f"Per-user API key already exists for {redact_email(normalized_email)}"
+            )
     except Exception as e:
         logger.warning(f"Could not generate per-user API key: {e}")
 
@@ -530,6 +531,26 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                 oauth_linkage_password=oauth_linkage_password,
             )
 
+            # Save Chat service account JSON if provided via consent screen
+            _chat_sa_json = getattr(credentials, "_chat_sa_json", None)
+            if _chat_sa_json:
+                try:
+                    auth_middleware.save_chat_service_account(
+                        normalized_email,
+                        _chat_sa_json,
+                        per_user_key=per_user_key,
+                        additional_keys=additional_keys if additional_keys else None,
+                        google_sub=google_sub,
+                        oauth_linkage_password=oauth_linkage_password,
+                    )
+                    logger.info(
+                        f"Saved Chat service account for {redact_email(normalized_email)}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Could not save Chat SA for {normalized_email}: {e}"
+                    )
+
             # Cross-add: add this user as a recipient to linked accounts' credential files.
             # This allows the newly-authed user to decrypt linked accounts' credentials.
             if (
@@ -590,7 +611,9 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
 
     # Validate credentials before saving
     if not credentials.token:
-        logger.error(f"Cannot save credentials for {user_email}: Missing access token")
+        logger.error(
+            f"Cannot save credentials for {redact_email(user_email)}: Missing access token"
+        )
         raise GoogleAuthError("Invalid credentials: Missing access token")
 
     if not credentials.refresh_token:
@@ -632,7 +655,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         _update_oauth_session_marker(normalized_email, credentials)
 
     except (IOError, OSError) as e:
-        logger.error(f"Failed to save credentials for {user_email}: {e}")
+        logger.error(f"Failed to save credentials for {redact_email(user_email)}: {e}")
         raise GoogleAuthError(f"Failed to save credentials: {e}")
 
 
@@ -750,7 +773,9 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         )
 
         if not client_id or not client_secret:
-            logger.error(f"Missing OAuth client configuration for {user_email}")
+            logger.error(
+                f"Missing OAuth client configuration for {redact_email(user_email)}"
+            )
             logger.debug(
                 f"Credential file has client_id: {bool(creds_data.get('client_id'))}, "
                 f"client_secret: {bool(creds_data.get('client_secret'))}"
@@ -801,15 +826,21 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
             try:
                 saved_at = datetime.fromisoformat(creds_data["saved_at"])
                 age = datetime.now() - saved_at
-                logger.debug(f"Credentials for {user_email} are {age.days} days old")
+                logger.debug(
+                    f"Credentials for {redact_email(user_email)} are {age.days} days old"
+                )
             except (ValueError, TypeError):
                 pass
 
-        logger.info(f"Successfully loaded credentials for {normalized_email}")
+        logger.info(
+            f"Successfully loaded credentials for {redact_email(normalized_email)}"
+        )
         return credentials
 
     except json.JSONDecodeError as e:
-        logger.error(f"Corrupt credential file for {user_email}: Invalid JSON - {e}")
+        logger.error(
+            f"Corrupt credential file for {redact_email(user_email)}: Invalid JSON - {e}"
+        )
         # Optionally backup the corrupt file
         try:
             backup_path = creds_path.with_suffix(".json.corrupt")
@@ -820,15 +851,21 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         return None
 
     except (KeyError, ValueError) as e:
-        logger.error(f"Invalid credential file structure for {user_email}: {e}")
+        logger.error(
+            f"Invalid credential file structure for {redact_email(user_email)}: {e}"
+        )
         return None
 
     except (IOError, OSError) as e:
-        logger.error(f"Failed to read credential file for {user_email}: {e}")
+        logger.error(
+            f"Failed to read credential file for {redact_email(user_email)}: {e}"
+        )
         return None
 
     except Exception as e:
-        logger.error(f"Unexpected error loading credentials for {user_email}: {e}")
+        logger.error(
+            f"Unexpected error loading credentials for {redact_email(user_email)}: {e}"
+        )
         return None
 
 
@@ -875,6 +912,27 @@ def needs_refresh(credentials: Credentials, buffer_seconds: int = 300) -> bool:
     return needs_refresh_flag
 
 
+def compare_scopes(
+    existing_scopes: list[str] | set[str] | None,
+    requested_scopes: list[str] | set[str],
+) -> tuple[bool, set[str]]:
+    """Compare existing credential scopes against requested scopes.
+
+    Args:
+        existing_scopes: Scopes currently granted on the credentials.
+        requested_scopes: Scopes required for the requested services.
+
+    Returns:
+        (sufficient, missing) — *sufficient* is True when all requested
+        scopes are already granted; *missing* is the set of scopes that
+        would need to be added via a scope-upgrade OAuth flow.
+    """
+    existing = set(existing_scopes or [])
+    requested = set(requested_scopes)
+    missing = requested - existing
+    return (not missing, missing)
+
+
 def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentials:
     """Refresh expired credentials with enhanced error handling."""
     if not credentials.refresh_token:
@@ -886,13 +944,12 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
             f"Please re-authenticate using the start_google_auth tool."
         )
 
-    logger.info(f"Proactively refreshing credentials for {user_email}")
+    logger.info(f"Proactively refreshing credentials for {redact_email(user_email)}")
 
     try:
         # Log token details for debugging
-        logger.debug(f"Token refresh attempt for {user_email}:")
+        logger.debug(f"Token refresh attempt for {redact_email(user_email)}:")
         logger.debug(f"  - Has refresh_token: {bool(credentials.refresh_token)}")
-        logger.debug(f"  - Token URI: {credentials.token_uri}")
         logger.debug(
             f"  - Client ID: {credentials.client_id[:10] if credentials.client_id else 'None'}..."
         )
@@ -909,14 +966,18 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
         # Save the refreshed credentials
         _save_credentials(user_email, credentials)
 
-        logger.info(f"Successfully refreshed credentials for {user_email}")
+        logger.info(
+            f"Successfully refreshed credentials for {redact_email(user_email)}"
+        )
         logger.debug(f"New token expiry: {credentials.expiry}")
 
         return credentials
 
     except RefreshError as e:
         error_str = str(e)
-        logger.error(f"Token refresh failed for {user_email}: {error_str}")
+        logger.error(
+            f"Token refresh failed for {redact_email(user_email)}: {error_str}"
+        )
 
         if "invalid_grant" in error_str.lower():
             raise GoogleAuthError(
@@ -932,7 +993,9 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
             raise GoogleAuthError(f"Failed to refresh credentials: {e}")
 
     except Exception as e:
-        logger.error(f"Unexpected error refreshing credentials for {user_email}: {e}")
+        logger.error(
+            f"Unexpected error refreshing credentials for {redact_email(user_email)}: {e}"
+        )
         raise GoogleAuthError(f"Failed to refresh credentials: {e}")
 
 
@@ -960,7 +1023,9 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
             credentials = _refresh_credentials(credentials, normalized_email)
         except GoogleAuthError:
             # If refresh fails, credentials are invalid
-            logger.error(f"Proactive refresh failed for {normalized_email}")
+            logger.error(
+                f"Proactive refresh failed for {redact_email(normalized_email)}"
+            )
             return None
 
     return credentials
@@ -1013,6 +1078,9 @@ async def initiate_oauth_flow(
     custom_client_id: Optional[str] = None,
     custom_client_secret: Optional[str] = None,
     oauth_linkage_password: str = "",
+    chat_sa_json: Optional[str] = None,
+    privacy_mode: bool = False,
+    sampling_config: Optional[dict] = None,
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1141,6 +1209,9 @@ async def initiate_oauth_flow(
         "custom_client_id": custom_client_id,
         "custom_client_secret": custom_client_secret,
         "oauth_linkage_password": oauth_linkage_password,
+        "chat_sa_json": chat_sa_json,
+        "privacy_mode": privacy_mode,
+        "sampling_config": sampling_config,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1172,7 +1243,9 @@ async def initiate_oauth_flow(
         **pkce_params,  # Add PKCE parameters if enabled
     )
 
-    logger.info(f"Generated OAuth URL for {user_email} (auth_method: {auth_method})")
+    logger.info(
+        f"Generated OAuth URL for {redact_email(user_email)} (auth_method: {auth_method})"
+    )
     return auth_url
 
 
@@ -1248,12 +1321,15 @@ async def handle_service_selection_callback(
         logger.info(f"🔑 Using legacy auth_method: {final_auth_method}")
 
     logger.info(
-        f"🎯 Service selection callback for {user_email} (PKCE: {'enabled' if final_use_pkce else 'disabled'}, auth_method: {final_auth_method})"
+        f"🎯 Service selection callback for {redact_email(user_email)} (PKCE: {'enabled' if final_use_pkce else 'disabled'}, auth_method: {final_auth_method})"
     )
     logger.info(f"📋 Selected services: {selected_services}")
 
     if custom_client_id:
         logger.info(f"🔑 Using custom client credentials: {custom_client_id[:10]}...")
+
+    # Chat service account JSON (optional, from consent screen)
+    chat_sa_json = flow_info.get("chat_sa_json")
 
     # Now call the regular OAuth flow with selected services and custom credentials
     return await initiate_oauth_flow(
@@ -1265,6 +1341,9 @@ async def handle_service_selection_callback(
         custom_client_id=custom_client_id,  # Pass custom client credentials
         custom_client_secret=custom_client_secret,
         oauth_linkage_password=flow_info.get("oauth_linkage_password", ""),
+        chat_sa_json=chat_sa_json,
+        privacy_mode=flow_info.get("privacy_mode", False),
+        sampling_config=flow_info.get("sampling_config"),
     )
 
 
@@ -1327,6 +1406,9 @@ async def handle_oauth_callback(
     auth_method = state_info["auth_method"]
     custom_client_id = state_info.get("custom_client_id")
     custom_client_secret = state_info.get("custom_client_secret")
+    chat_sa_json = state_info.get("chat_sa_json")
+    _privacy_mode = state_info.get("privacy_mode", False)
+    _sampling_config = state_info.get("sampling_config")
 
     # Stash OAuth linkage password in session so _save_credentials can use it
     _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
@@ -1609,7 +1691,31 @@ async def handle_oauth_callback(
             logger.warning(
                 f"⚠️ Email mismatch: expected {user_email}, got {authenticated_email} - using actual email"
             )
+            # Rebind any API key from wrong email to actual authenticated email
+            try:
+                from .user_api_keys import rebind_key_email
+
+                if rebind_key_email(user_email, authenticated_email):
+                    logger.info(
+                        f"🔑 Rebound API key binding from {user_email} to {authenticated_email}"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not rebind API key: {e}")
             user_email = authenticated_email  # Use the actual authenticated email
+
+        # Attach the originally-requested email so the success page can show
+        # match/mismatch accurately (instead of reading stale session data)
+        credentials._requested_email = state_info.get("user_email", "")
+
+        # Attach Chat SA JSON so _save_credentials can persist it
+        if chat_sa_json:
+            credentials._chat_sa_json = chat_sa_json
+
+        # Attach privacy mode and sampling config for the callback to apply
+        if _privacy_mode:
+            credentials._privacy_mode = True
+        if _sampling_config:
+            credentials._sampling_config = _sampling_config
 
         # Conditional storage based on auth_method
         if auth_method == "pkce_memory":
@@ -1621,7 +1727,9 @@ async def handle_oauth_callback(
                 store_session_data(
                     session_id, SessionKey.CREDENTIALS, credentials.to_json()
                 )
-                logger.info(f"Stored credentials in session memory for {user_email}")
+                logger.info(
+                    f"Stored credentials in session memory for {redact_email(user_email)}"
+                )
             else:
                 logger.warning(
                     f"No session context available - falling back to file storage for {user_email}"

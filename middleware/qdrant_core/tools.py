@@ -276,6 +276,30 @@ def setup_enhanced_qdrant_tools(
 
     _dsl_suffix = _get_dsl_description_suffix()
 
+    # Generate skill_resources annotation from Qdrant wrapper (if available)
+    from adapters.module_wrapper.wrapper_factory import get_skill_resources_safe
+
+    _qdrant_w = None
+    try:
+        _qdrant_w = _get_dsl_builder().wrapper
+    except Exception:
+        pass
+
+    _qdrant_skill_resources = get_skill_resources_safe(
+        _qdrant_w,
+        skill_name="qdrant-search",
+        resource_hints={
+            "qdrant-dsl-params.md": {
+                "purpose": "How to structure filter_dsl, query_dsl, and prefetch_dsl with symbol-keyed params",
+                "when_to_read": "BEFORE first DSL call — required for correct filter construction",
+            },
+            "qdrant-dsl-syntax.md": {
+                "purpose": "Qdrant DSL grammar, filter/query symbols, and examples",
+                "when_to_read": "When constructing DSL filter or query strings",
+            },
+        },
+    )
+
     @mcp.tool(
         name="qdrant_search",
         description=(
@@ -305,6 +329,7 @@ def setup_enhanced_qdrant_tools(
             "destructiveHint": False,
             "idempotentHint": True,
             "openWorldHint": True,
+            "skill_resources": _qdrant_skill_resources,  # Dynamic from wrapper
         },
     )
     async def search(

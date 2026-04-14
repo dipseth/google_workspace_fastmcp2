@@ -5,9 +5,9 @@ Coordinates the application of different editing modes (replace_all, insert_at_l
 regex_replace, append) to Google Docs using the Docs API batch update mechanism.
 """
 
-import logging
 from typing import Any, Dict, List, Tuple
 
+from config.enhanced_logging import setup_logger
 from docs.docs_types import EditConfig
 
 from .line_parser import (
@@ -16,9 +16,12 @@ from .line_parser import (
     get_document_end_index,
     parse_document_lines,
 )
-from .regex_operations import apply_regex_replacements, validate_regex_operations
+from .regex_operations import (
+    apply_regex_replacements,
+    validate_regex_operations,
+)
 
-logger = logging.getLogger(__name__)
+logger = setup_logger()
 
 
 async def apply_edit_config(
@@ -57,7 +60,10 @@ async def apply_edit_config(
             requests.append(
                 {
                     "deleteContentRange": {
-                        "range": {"startIndex": 1, "endIndex": end_index - 1}
+                        "range": {
+                            "startIndex": 1,
+                            "endIndex": end_index - 1,
+                        }
                     }
                 }
             )
@@ -157,14 +163,22 @@ async def apply_edit_config(
             requests.append(
                 {
                     "deleteContentRange": {
-                        "range": {"startIndex": 1, "endIndex": end_index - 1}
+                        "range": {
+                            "startIndex": 1,
+                            "endIndex": end_index - 1,
+                        }
                     }
                 }
             )
 
         # Insert modified content
         requests.append(
-            {"insertText": {"location": {"index": 1}, "text": modified_text}}
+            {
+                "insertText": {
+                    "location": {"index": 1},
+                    "text": modified_text,
+                }
+            }
         )
 
         message = f"Applied {len(edit_config.regex_operations)} regex operations ({replacement_count} replacements)"
