@@ -203,7 +203,7 @@ class TagBasedResourceMiddleware(Middleware):
                     "form_responses": {
                         "display_name": "Form Responses",
                         "description": "Responses to Google Forms",
-                        "list_tool": "list_form_responses",
+                        "list_tool": None,  # Requires form_id — use get_form_response with specific IDs
                         "get_tool": "get_form_response",
                         "id_field": "response_id",
                     }
