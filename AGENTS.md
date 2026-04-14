@@ -4,7 +4,7 @@
 
 This project's north star: **any Python module can be wrapped, introspected, indexed, and made callable through MCP tools** — using a compact DSL that LLMs author via natural language. Tiny Recursive Networks (TRM) provide a learned refinement layer that improves search and ranking over time. This is active research — we expect to discover new use cases and patterns along the way.
 
-The proving ground is a Google Workspace MCP server (72+ tools, 9 services), but the module wrapping framework is domain-agnostic.
+The proving ground is a Google Workspace MCP server (96 tools, 9 services), but the module wrapping framework is domain-agnostic.
 
 ## The Pipeline: Module -> DSL -> MCP
 

@@ -4,7 +4,7 @@
 
 ## Project Identity
 
-FastMCP server (`google-workspace-unlimited` v1.11.0) providing 72+ tools across 9 Google Workspace services: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos (+ People API).
+FastMCP server (`google-workspace-unlimited` v2.0.0) providing 96 tools across 9 Google Workspace services: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos (+ People API).
 
 This server is the proving ground for **universal module wrapping** — the Module Wrapper framework and TRM learning layer described in AGENTS.md are built here, tested against real Google APIs, and iterated on in production. The Google Workspace tools are both the product and the test bed.
 
