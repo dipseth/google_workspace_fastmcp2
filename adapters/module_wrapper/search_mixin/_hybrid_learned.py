@@ -30,6 +30,9 @@ def search_hybrid_learned(
     Same prefetch pipeline as search_hybrid_multidim, but replaces
     multiplicative scoring with a trained reranker.
     """
+    if not self._require_qdrant("search_hybrid_learned"):
+        return [], [], []
+
     try:
         import torch
     except ImportError:

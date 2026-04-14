@@ -40,6 +40,10 @@ def search(
     if not self._initialized:
         raise RuntimeError("ModuleWrapper not initialized")
 
+    # In degraded mode, fall back to in-memory component lookup
+    if not self._require_qdrant("search"):
+        return self._direct_component_lookup(query)
+
     try:
         # Try direct lookup first for exact component name matches
         direct_results = self._direct_component_lookup(query)
@@ -193,6 +197,9 @@ def colbert_search(
     """
     if not self._initialized:
         raise RuntimeError("ModuleWrapper not initialized")
+
+    if not self._require_qdrant("colbert_search"):
+        return self._direct_component_lookup(query)
 
     if not self.enable_colbert or not getattr(self, "_colbert_initialized", False):
         logger.warning("ColBERT not enabled, falling back to standard search")
@@ -448,6 +455,13 @@ def query_by_symbol(
     Returns:
         List of matching components
     """
+    # In degraded mode, resolve symbol from in-memory mapping
+    if not self._require_qdrant("query_by_symbol"):
+        component_name = self.reverse_symbol_mapping.get(symbol)
+        if component_name:
+            return self._direct_component_lookup(component_name)
+        return []
+
     from adapters.module_wrapper.qdrant_mixin import _get_qdrant_imports
 
     try:

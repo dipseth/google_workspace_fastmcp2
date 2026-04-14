@@ -368,6 +368,7 @@ class ModuleWrapper(
         self._pipeline_error: Optional[str] = None
         self._post_pipeline_callbacks: List[callable] = []
         self._pipeline_lock = threading.Lock()
+        self._degraded: bool = False
 
         # When domain_config is provided, use it to supply priority_overrides
         # and nl_relationship_patterns if not explicitly given
@@ -411,32 +412,99 @@ class ModuleWrapper(
         if auto_initialize:
             self.initialize()
 
+    @property
+    def is_degraded(self) -> bool:
+        """True when Qdrant/embeddings are unavailable and wrapper runs in-memory only."""
+        return self._degraded
+
     def initialize(self):
-        """Initialize the wrapper and index the module components."""
+        """Initialize the wrapper and index the module components.
+
+        If Qdrant or embeddings are unavailable, enters **degraded mode**:
+        components are introspected in-memory (symbols, DSL parsing work),
+        but vector search returns empty results.  Lazy reconnection is
+        attempted on the next search call.
+        """
+        logger.info(f"Initializing ModuleWrapper for {self.module_name}...")
+
+        # --- Try to connect to Qdrant + embeddings ---
         try:
-            logger.info(f"Initializing ModuleWrapper for {self.module_name}...")
-
-            # Initialize Qdrant client (from QdrantMixin)
             self._initialize_qdrant()
-
-            # Initialize embedding model (from EmbeddingMixin)
             self._initialize_embedder()
+        except Exception as e:
+            logger.warning(
+                f"ModuleWrapper entering DEGRADED mode for {self.module_name}: {e} "
+                f"— in-memory operations (symbols, DSL) will work; "
+                f"vector search will return empty results until services recover"
+            )
+            self._degraded = True
+            self.client = None
+            self.embedder = None
 
-            # Named vectors path: 3 named vectors (components, inputs, relationships)
-            self._initialize_collection()
+        # --- Collection init (needs Qdrant) or fallback to introspection ---
+        if not self._degraded:
+            try:
+                self._initialize_collection()
+            except Exception as e:
+                logger.warning(
+                    f"Collection init failed for {self.module_name}: {e} "
+                    f"— falling back to in-memory introspection"
+                )
+                self._degraded = True
+                self._introspect_module()
+        else:
+            # Degraded: populate components from module introspection only
+            self._introspect_module()
 
-            self._initialized = True
+        self._initialized = True
+
+        if self._degraded:
+            logger.warning(
+                f"ModuleWrapper DEGRADED for {self.module_name}: "
+                f"{len(self.components)} components introspected in-memory"
+            )
+        else:
             logger.info(f"ModuleWrapper initialized for {self.module_name}")
-
             # Optional strict-mode validation
             import os
-
             if os.environ.get("MODULE_WRAPPER_STRICT") == "1":
                 self.validate_dependencies(strict=True)
 
+    def _try_reconnect(self) -> bool:
+        """Attempt to reconnect to Qdrant and embeddings when in degraded mode.
+
+        Called lazily by search methods.  Returns True if reconnection
+        succeeded and the wrapper is no longer degraded.
+        """
+        if not self._degraded:
+            return True
+        try:
+            self._initialize_qdrant()
+            self._initialize_embedder()
+            # Re-run collection init now that services are available
+            self._initialize_collection()
+            self._degraded = False
+            logger.info(
+                f"ModuleWrapper RECOVERED from degraded mode for {self.module_name}"
+            )
+            return True
         except Exception as e:
-            logger.error(f"Failed to initialize ModuleWrapper: {e}", exc_info=True)
-            raise
+            logger.debug(f"Reconnect attempt failed for {self.module_name}: {e}")
+            return False
+
+    @property
+    def service_health(self) -> Dict[str, Any]:
+        """Report wrapper health status for diagnostics."""
+        return {
+            "module": self.module_name,
+            "initialized": self._initialized,
+            "degraded": self._degraded,
+            "components_count": len(self.components) if self.components else 0,
+            "symbols_count": len(self._symbol_mapping) if self._symbol_mapping else 0,
+            "qdrant_available": self.client is not None,
+            "embedder_available": self.embedder is not None,
+            "pipeline_status": self._pipeline_status,
+        }
 
     def _initialize_collection(self):
         """Initialize using 4-vector named-vectors schema via PipelineMixin.

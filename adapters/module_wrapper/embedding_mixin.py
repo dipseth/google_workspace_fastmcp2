@@ -90,16 +90,22 @@ class EmbeddingMixin:
 
     def _initialize_embedder(self):
         """Initialize the MiniLM embedding model via centralized EmbeddingService."""
-        from config.embedding_service import get_embedding_service
+        try:
+            from config.embedding_service import get_embedding_service
 
-        service = get_embedding_service()
-        self.embedder = service.get_model_sync("minilm")
-        self.embedding_dim = service.get_dimension("minilm")
+            service = get_embedding_service()
+            self.embedder = service.get_model_sync("minilm")
+            self.embedding_dim = service.get_dimension("minilm")
 
-        logger.info(
-            f"Embedding model loaded via EmbeddingService: "
-            f"{self.embedding_model_name} (dim: {self.embedding_dim})"
-        )
+            logger.info(
+                f"Embedding model loaded via EmbeddingService: "
+                f"{self.embedding_model_name} (dim: {self.embedding_dim})"
+            )
+        except Exception as e:
+            self.embedder = None
+            self.embedding_dim = 384  # known MiniLM default
+            logger.error(f"Failed to initialize embedder: {e}")
+            raise
 
     def _initialize_colbert_embedder(self):
         """Initialize the ColBERT embedding model via centralized EmbeddingService."""

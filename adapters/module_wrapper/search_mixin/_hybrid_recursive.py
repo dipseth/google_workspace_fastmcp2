@@ -32,6 +32,9 @@ def search_hybrid_recursive(
     Uses RECURSIVE_MAX_CYCLES, RECURSIVE_HALT_MARGIN, RECURSIVE_ALPHA_INIT
     from settings.
     """
+    if not self._require_qdrant("search_hybrid_recursive"):
+        return [], [], []
+
     # Load settings
     max_cycles = 3
     halt_margin = 0.5

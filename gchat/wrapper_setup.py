@@ -533,7 +533,13 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
     wrapper.initialize()
 
     component_count = len(wrapper.components) if wrapper.components else 0
-    logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
+    if wrapper.is_degraded:
+        logger.warning(
+            f"⚠️ Card framework wrapper DEGRADED: {component_count} components "
+            f"(in-memory only — vector search unavailable until Qdrant/embeddings recover)"
+        )
+    else:
+        logger.info(f"✅ Singleton ModuleWrapper ready: {component_count} components")
 
     # Run post-init hooks (in-memory operations)
     wrapper.run_domain_hooks("post_init")

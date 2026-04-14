@@ -47,8 +47,8 @@ def search_hybrid_multidim(
         component_paths: Optional list of component paths for relationship context
         limit: Maximum results per category
         token_ratio: Fraction of ColBERT tokens to use
-        content_feedback: Filter for content_feedback field ("positive", "negative", None)
-        form_feedback: Filter for form_feedback field ("positive", "negative", None)
+        content_feedback: Filter for content_feedback field
+        form_feedback: Filter for form_feedback field
         include_classes: Whether to include class results (default True)
         candidate_pool_size: How many candidates to retrieve per vector (default 20)
         content_text: Actual user content for content vector search (button texts, labels, etc.)

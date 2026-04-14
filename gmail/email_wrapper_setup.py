@@ -486,10 +486,16 @@ def _create_email_wrapper() -> "ModuleWrapper":
         len(wrapper.components) if wrapper.components else 0
     )
     symbol_count = len(wrapper._symbol_mapping)
-    logger.info(
-        f"Email ModuleWrapper ready: {component_count} components, "
-        f"{symbol_count} symbols (filtered from {len(raw_symbols)})"
-    )
+    if wrapper.is_degraded:
+        logger.warning(
+            f"⚠️ Email wrapper DEGRADED: {component_count} components, "
+            f"{symbol_count} symbols (in-memory only — vector search unavailable)"
+        )
+    else:
+        logger.info(
+            f"Email ModuleWrapper ready: {component_count} components, "
+            f"{symbol_count} symbols (filtered from {len(raw_symbols)})"
+        )
 
     wrapper.run_domain_hooks("post_init")
 
