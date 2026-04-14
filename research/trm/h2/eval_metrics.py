@@ -154,12 +154,8 @@ def evaluate_ranked_results(
     for k in k_values:
         p_scores = [precision_at_k(rr, k) for rr in ranked_relevant_lists]
         r_scores = [recall_at_k(rr, k) for rr in ranked_relevant_lists]
-        results[f"precision@{k}"] = (
-            sum(p_scores) / len(p_scores) if p_scores else 0.0
-        )
-        results[f"recall@{k}"] = (
-            sum(r_scores) / len(r_scores) if r_scores else 0.0
-        )
+        results[f"precision@{k}"] = sum(p_scores) / len(p_scores) if p_scores else 0.0
+        results[f"recall@{k}"] = sum(r_scores) / len(r_scores) if r_scores else 0.0
 
     results["mrr"] = mrr(ranked_relevant_lists)
     results["num_queries"] = float(len(ranked_relevant_lists))

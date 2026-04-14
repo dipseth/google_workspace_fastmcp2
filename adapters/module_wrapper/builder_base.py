@@ -83,11 +83,7 @@ class ComponentRegistry:
 
     def components_for_pool(self, pool: str) -> List[str]:
         """List component names that belong to a given pool."""
-        return [
-            name
-            for name, info in self._components.items()
-            if info.pool == pool
-        ]
+        return [name for name, info in self._components.items() if info.pool == pool]
 
     def __len__(self) -> int:
         return len(self._components)

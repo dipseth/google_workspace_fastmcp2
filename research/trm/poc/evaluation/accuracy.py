@@ -87,22 +87,40 @@ def evaluate_accuracy(
         _tally(methods["single_pass"], sp_result, true_move)
 
         # --- Multi-dimensional scoring ---
-        for scoring, key in [("multiplicative", "multi_multiply"), ("harmonic", "multi_harmonic")]:
+        for scoring, key in [
+            ("multiplicative", "multi_multiply"),
+            ("harmonic", "multi_harmonic"),
+        ]:
             md_result = multi_dimensional_search(
-                embedder.client, collection_name, z_H, z_L, x,
-                top_k=top_k, candidate_pool=20, scoring=scoring,
+                embedder.client,
+                collection_name,
+                z_H,
+                z_L,
+                x,
+                top_k=top_k,
+                candidate_pool=20,
+                scoring=scoring,
             )
             _tally(methods[key], md_result, true_move)
 
         # --- Recursive strategies ---
         for strat in strategies:
             rec_result = recursive_search(
-                embedder.client, collection_name,
-                z_H.copy(), z_L.copy(), x.copy(),
-                max_cycles=max_cycles, alpha=alpha, beta=beta,
-                ema_decay=ema_decay, top_k=top_k, strategy=strat,
+                embedder.client,
+                collection_name,
+                z_H.copy(),
+                z_L.copy(),
+                x.copy(),
+                max_cycles=max_cycles,
+                alpha=alpha,
+                beta=beta,
+                ema_decay=ema_decay,
+                top_k=top_k,
+                strategy=strat,
             )
-            _tally(methods[f"rec_{strat}"], rec_result, true_move, rec_result.cycles_used)
+            _tally(
+                methods[f"rec_{strat}"], rec_result, true_move, rec_result.cycles_used
+            )
 
         total += 1
 
@@ -182,9 +200,7 @@ def main():
     logger.info(f"Generated {len(all_states)} states in {time.time() - t0:.1f}s")
 
     if len(all_states) < args.train_size + args.test_size:
-        logger.warning(
-            f"Only {len(all_states)} states available, adjusting split"
-        )
+        logger.warning(f"Only {len(all_states)} states available, adjusting split")
         split = int(len(all_states) * 0.8)
     else:
         split = args.train_size
@@ -231,11 +247,17 @@ def main():
 
     baseline_acc = results["methods"]["single_pass"]["top1_accuracy"]
 
-    print(f"\n{'Method':<20} {'Top-1':>8} {'Top-1%':>8} {'Top-3':>8} {'Top-3%':>8} {'Cycles':>8} {'Delta':>8}")
+    print(
+        f"\n{'Method':<20} {'Top-1':>8} {'Top-1%':>8} {'Top-3':>8} {'Top-3%':>8} {'Cycles':>8} {'Delta':>8}"
+    )
     print("-" * 80)
     for name, m in results["methods"].items():
-        delta_str = "baseline" if name == "single_pass" else f"{m['top1_accuracy'] - baseline_acc:>+7.1%}"
-        cyc_str = f"{m['mean_cycles']:.1f}" if m['mean_cycles'] > 1 else "1"
+        delta_str = (
+            "baseline"
+            if name == "single_pass"
+            else f"{m['top1_accuracy'] - baseline_acc:>+7.1%}"
+        )
+        cyc_str = f"{m['mean_cycles']:.1f}" if m["mean_cycles"] > 1 else "1"
         print(
             f"{name:<20} "
             f"{m['top1_correct']:>5}/{results['total']:>2} "

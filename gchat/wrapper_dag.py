@@ -47,6 +47,7 @@ _DAG_WARMSTART_RECIPES = [
     {"root": "Carousel", "required": [], "desc": "Carousel of cards"},
 ]
 
+
 def _warm_start_with_dag_patterns(wrapper, count_per_recipe: int = 2) -> int:
     """
     Generate DAG-based instance patterns and store them in the collection.

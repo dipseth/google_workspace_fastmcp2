@@ -38,7 +38,9 @@ _hmac_key_cache: Optional[bytes] = None
 # One-time-use token tracking (Redis-backed with in-memory fallback).
 from middleware.token_store import ConsumedTokenStore
 
-_consumed_tokens = ConsumedTokenStore("email-feedback", default_ttl_seconds=30 * 24 * 3600)
+_consumed_tokens = ConsumedTokenStore(
+    "email-feedback", default_ttl_seconds=30 * 24 * 3600
+)
 
 # Default TTL: 30 days
 DEFAULT_TTL_SECONDS = 30 * 24 * 3600

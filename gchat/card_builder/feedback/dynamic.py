@@ -14,6 +14,7 @@ from gchat.card_builder.feedback.prompts import (
 
 logger = setup_logger()
 
+
 class DynamicFeedbackBuilder:
     """
     Builds feedback widgets dynamically using ModuleWrapper's DAG and variation system.
@@ -629,8 +630,10 @@ class DynamicFeedbackBuilder:
             logger.warning(f"Failed to store feedback pattern: {e}")
             return None
 
+
 # Global instance for convenience
 _dynamic_feedback_builder: Optional[DynamicFeedbackBuilder] = None
+
 
 def get_dynamic_feedback_builder() -> DynamicFeedbackBuilder:
     """Get the singleton DynamicFeedbackBuilder instance."""
@@ -638,6 +641,7 @@ def get_dynamic_feedback_builder() -> DynamicFeedbackBuilder:
     if _dynamic_feedback_builder is None:
         _dynamic_feedback_builder = DynamicFeedbackBuilder()
     return _dynamic_feedback_builder
+
 
 __all__ = [
     "DynamicFeedbackBuilder",

@@ -127,6 +127,7 @@ THIRD_PARTY_PREFIXES = [
 # INDEXING MIXIN
 # =============================================================================
 
+
 class IndexingMixin:
     """
     Mixin providing component extraction and indexing functionality.
@@ -955,6 +956,7 @@ class IndexingMixin:
         except Exception as e:
             logger.error(f"Failed to index components with ColBERT: {e}", exc_info=True)
             raise
+
 
 # Export for convenience
 __all__ = [

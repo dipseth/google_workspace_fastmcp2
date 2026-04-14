@@ -206,8 +206,10 @@ class SmartCardBuilderV2:
         from gchat.card_builder.search import get_cached_pattern
 
         return get_cached_pattern(
-            cache_key, self._pattern_cache,
-            self._pattern_cache_timestamps, self._pattern_cache_ttl,
+            cache_key,
+            self._pattern_cache,
+            self._pattern_cache_timestamps,
+            self._pattern_cache_ttl,
         )
 
     def _cache_pattern(self, cache_key: str, pattern: Optional[Dict[str, Any]]) -> None:
@@ -215,8 +217,11 @@ class SmartCardBuilderV2:
         from gchat.card_builder.search import cache_pattern
 
         cache_pattern(
-            cache_key, pattern, self._pattern_cache,
-            self._pattern_cache_timestamps, self._pattern_cache_max_size,
+            cache_key,
+            pattern,
+            self._pattern_cache,
+            self._pattern_cache_timestamps,
+            self._pattern_cache_max_size,
         )
 
     def _get_dsl_parser(self):
@@ -311,7 +316,8 @@ class SmartCardBuilderV2:
         from gchat.card_builder.search import query_qdrant_patterns
 
         return query_qdrant_patterns(
-            description, card_params,
+            description,
+            card_params,
             pattern_cache=self._pattern_cache,
             pattern_cache_timestamps=self._pattern_cache_timestamps,
             pattern_cache_ttl=self._pattern_cache_ttl,
@@ -698,13 +704,33 @@ class SmartCardBuilderV2:
         """
         demands: Dict[str, int] = {}
         for comp in parsed_components:
-            name = comp.get("name", "") if isinstance(comp, dict) else getattr(comp, "component", "")
-            mult = comp.get("multiplier", 1) if isinstance(comp, dict) else getattr(comp, "multiplier", 1)
-            children = comp.get("children", []) if isinstance(comp, dict) else getattr(comp, "children", [])
+            name = (
+                comp.get("name", "")
+                if isinstance(comp, dict)
+                else getattr(comp, "component", "")
+            )
+            mult = (
+                comp.get("multiplier", 1)
+                if isinstance(comp, dict)
+                else getattr(comp, "multiplier", 1)
+            )
+            children = (
+                comp.get("children", [])
+                if isinstance(comp, dict)
+                else getattr(comp, "children", [])
+            )
 
             # Only count leaf-ish components that consume from context
             # (not containers like Section, ButtonList, Grid, Carousel, Columns)
-            if name not in ("Section", "ButtonList", "ChipList", "Grid", "Carousel", "Columns", "Column"):
+            if name not in (
+                "Section",
+                "ButtonList",
+                "ChipList",
+                "Grid",
+                "Carousel",
+                "Columns",
+                "Column",
+            ):
                 demands[name] = demands.get(name, 0) + mult
 
             if children:
@@ -805,9 +831,7 @@ class SmartCardBuilderV2:
             corrections = {}
             if wrapper and hasattr(wrapper, "detect_param_mismatches"):
                 demands = self._extract_demands(parsed)
-                mismatch_result = wrapper.detect_param_mismatches(
-                    demands, supply_map
-                )
+                mismatch_result = wrapper.detect_param_mismatches(demands, supply_map)
                 corrections = mismatch_result.get("corrections", {})
                 for warning in mismatch_result.get("warnings", []):
                     logger.info(f"🔧 {warning}")
@@ -815,6 +839,7 @@ class SmartCardBuilderV2:
             # Phase 8: Neural content-to-slot reassignment
             try:
                 from gchat.card_builder.slot_assignment import reassign_supply_map
+
                 reassigned = reassign_supply_map(supply_map, demands, wrapper)
                 if reassigned is not supply_map:
                     supply_map = reassigned
@@ -842,8 +867,10 @@ class SmartCardBuilderV2:
                 "_grid_item_index": 0,
                 "_text_index": 0,
                 "_mapping_report": InputMappingReport(
-                    supplies={k: len(v) if isinstance(v, list) else (1 if v else 0)
-                              for k, v in supply_map.items()},
+                    supplies={
+                        k: len(v) if isinstance(v, list) else (1 if v else 0)
+                        for k, v in supply_map.items()
+                    },
                     demands=demands,
                     corrections=corrections,
                 ),
@@ -932,7 +959,10 @@ class SmartCardBuilderV2:
 
     def _get_component_builder(self):
         """Get or create a ComponentBuilder instance."""
-        if not hasattr(self, "_component_builder_instance") or self._component_builder_instance is None:
+        if (
+            not hasattr(self, "_component_builder_instance")
+            or self._component_builder_instance is None
+        ):
             from gchat.card_builder.component_builder import ComponentBuilder
 
             self._component_builder_instance = ComponentBuilder(
@@ -1092,7 +1122,9 @@ class SmartCardBuilderV2:
         from gchat.card_builder.rendering import build_child_widget
 
         return build_child_widget(
-            self._get_wrapper(), child_name, params,
+            self._get_wrapper(),
+            child_name,
+            params,
             build_component_fn=self._build_component,
         )
 
@@ -1344,9 +1376,14 @@ class SmartCardBuilderV2:
         from gchat.card_builder.feedback.widgets import build_clickable_item
 
         return build_clickable_item(
-            self, component_name, label, url,
-            icon=icon, icon_url=icon_url,
-            material_icon=material_icon, button_type=button_type,
+            self,
+            component_name,
+            label,
+            url,
+            icon=icon,
+            icon_url=icon_url,
+            material_icon=material_icon,
+            button_type=button_type,
         )
 
     @staticmethod
@@ -1374,8 +1411,13 @@ class SmartCardBuilderV2:
         from gchat.card_builder.feedback.widgets import build_feedback_button_item
 
         return build_feedback_button_item(
-            self, text, url, icon=icon, icon_url=icon_url,
-            material_icon=material_icon, button_type=button_type,
+            self,
+            text,
+            url,
+            icon=icon,
+            icon_url=icon_url,
+            material_icon=material_icon,
+            button_type=button_type,
         )
 
     def _build_feedback_chip_item(self, label: str, url: str) -> Dict[str, Any]:
@@ -1935,9 +1977,11 @@ class SmartCardBuilderV2:
         # V2 initializes lazily, this is a no-op for compatibility
         pass
 
+
 # =============================================================================
 # DSL SUGGESTION - Suggest DSL based on card_params
 # =============================================================================
+
 
 def suggest_dsl_for_params(
     card_params: Dict[str, Any], symbols: Dict[str, str]
@@ -1957,11 +2001,13 @@ def suggest_dsl_for_params(
 
     return _suggest_dsl(card_params, symbols)
 
+
 # =============================================================================
 # SINGLETON AND CONVENIENCE FUNCTIONS
 # =============================================================================
 
 _builder: Optional[SmartCardBuilderV2] = None
+
 
 def get_smart_card_builder() -> SmartCardBuilderV2:
     """Get the global SmartCardBuilderV2 instance (v1 compatible)."""
@@ -1970,10 +2016,12 @@ def get_smart_card_builder() -> SmartCardBuilderV2:
         _builder = SmartCardBuilderV2()
     return _builder
 
+
 def reset_builder():
     """Reset the singleton builder."""
     global _builder
     _builder = None
+
 
 def build_card(
     description: str,
@@ -1986,6 +2034,7 @@ def build_card(
     return builder.build(
         description=description, title=title, subtitle=subtitle, **kwargs
     )
+
 
 # Backwards compatibility alias
 SmartCardBuilder = SmartCardBuilderV2

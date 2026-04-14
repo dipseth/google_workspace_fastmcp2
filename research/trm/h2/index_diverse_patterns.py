@@ -23,6 +23,7 @@ _project_root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_project_root))
 try:
     import certifi
+
     if not os.environ.get("SSL_CERT_FILE"):
         os.environ["SSL_CERT_FILE"] = certifi.where()
 except ImportError:
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Systematic DSL templates covering the combinatorial space
 # ---------------------------------------------------------------------------
 
+
 def build_diverse_recipes():
     """Build recipes that cover all useful multiplier combinations."""
     recipes = []
@@ -43,126 +45,198 @@ def build_diverse_recipes():
     # --- Button variations: 1-8 buttons ---
     for n in range(1, 9):
         mult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"§[δ, Ƀ[ᵬ{mult}]]",
-            "description": f"Card with text and {n} button{'s' if n > 1 else ''}",
-            "components": ["Section", "DecoratedText", "ButtonList"] + ["Button"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[δ, Ƀ[ᵬ{mult}]]",
+                "description": f"Card with text and {n} button{'s' if n > 1 else ''}",
+                "components": ["Section", "DecoratedText", "ButtonList"]
+                + ["Button"] * n,
+            }
+        )
 
     # --- Decorated text variations: 1-6 items ---
     for n in range(1, 7):
         mult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"§[δ{mult}]",
-            "description": f"Card with {n} text item{'s' if n > 1 else ''}",
-            "components": ["Section"] + ["DecoratedText"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[δ{mult}]",
+                "description": f"Card with {n} text item{'s' if n > 1 else ''}",
+                "components": ["Section"] + ["DecoratedText"] * n,
+            }
+        )
 
     # --- Text + buttons combos ---
     for nt in range(1, 5):
         for nb in range(1, 6):
             tmult = f"×{nt}" if nt > 1 else ""
             bmult = f"×{nb}" if nb > 1 else ""
-            recipes.append({
-                "dsl": f"§[δ{tmult}, Ƀ[ᵬ{bmult}]]",
-                "description": f"Card with {nt} text{'s' if nt > 1 else ''} and {nb} button{'s' if nb > 1 else ''}",
-                "components": ["Section"] + ["DecoratedText"] * nt + ["ButtonList"] + ["Button"] * nb,
-            })
+            recipes.append(
+                {
+                    "dsl": f"§[δ{tmult}, Ƀ[ᵬ{bmult}]]",
+                    "description": f"Card with {nt} text{'s' if nt > 1 else ''} and {nb} button{'s' if nb > 1 else ''}",
+                    "components": ["Section"]
+                    + ["DecoratedText"] * nt
+                    + ["ButtonList"]
+                    + ["Button"] * nb,
+                }
+            )
 
     # --- Grid variations: 1-8 items ---
     for n in range(1, 9):
         mult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"§[ℊ[ǵ{mult}]]",
-            "description": f"Grid with {n} item{'s' if n > 1 else ''}",
-            "components": ["Section", "Grid"] + ["GridItem"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[ℊ[ǵ{mult}]]",
+                "description": f"Grid with {n} item{'s' if n > 1 else ''}",
+                "components": ["Section", "Grid"] + ["GridItem"] * n,
+            }
+        )
 
     # --- Carousel variations: 1-5 cards ---
     for n in range(1, 6):
         mult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"◦[▼{mult}]",
-            "description": f"Carousel with {n} card{'s' if n > 1 else ''}",
-            "components": ["Carousel"] + ["CarouselCard"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"◦[▼{mult}]",
+                "description": f"Carousel with {n} card{'s' if n > 1 else ''}",
+                "components": ["Carousel"] + ["CarouselCard"] * n,
+            }
+        )
 
     # --- Chip variations: 1-6 chips ---
     for n in range(1, 7):
         mult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"§[δ, ȼ[ℂ{mult}]]",
-            "description": f"Card with text and {n} chip{'s' if n > 1 else ''}",
-            "components": ["Section", "DecoratedText", "ChipList"] + ["Chip"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[δ, ȼ[ℂ{mult}]]",
+                "description": f"Card with text and {n} chip{'s' if n > 1 else ''}",
+                "components": ["Section", "DecoratedText", "ChipList"] + ["Chip"] * n,
+            }
+        )
 
     # --- Column variations: 2-4 columns ---
     for n in range(2, 5):
-        recipes.append({
-            "dsl": f"§[¢[ç×{n}]]",
-            "description": f"Card with {n}-column layout",
-            "components": ["Section", "Columns"] + ["Column"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[¢[ç×{n}]]",
+                "description": f"Card with {n}-column layout",
+                "components": ["Section", "Columns"] + ["Column"] * n,
+            }
+        )
 
     # --- Rich combos: text + divider + buttons ---
     for nb in range(1, 6):
         bmult = f"×{nb}" if nb > 1 else ""
-        recipes.append({
-            "dsl": f"§[δ, Đ, Ƀ[ᵬ{bmult}]]",
-            "description": f"Card with text, divider, and {nb} button{'s' if nb > 1 else ''}",
-            "components": ["Section", "DecoratedText", "Divider", "ButtonList"] + ["Button"] * nb,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[δ, Đ, Ƀ[ᵬ{bmult}]]",
+                "description": f"Card with text, divider, and {nb} button{'s' if nb > 1 else ''}",
+                "components": ["Section", "DecoratedText", "Divider", "ButtonList"]
+                + ["Button"] * nb,
+            }
+        )
 
     # --- Image cards ---
-    recipes.append({
-        "dsl": "§[ǐ, δ, Ƀ[ᵬ]]",
-        "description": "Image card with text and button",
-        "components": ["Section", "Image", "DecoratedText", "ButtonList", "Button"],
-    })
-    recipes.append({
-        "dsl": "§[ǐ, δ×2, Ƀ[ᵬ×2]]",
-        "description": "Image card with 2 texts and 2 buttons",
-        "components": ["Section", "Image", "DecoratedText", "DecoratedText", "ButtonList", "Button", "Button"],
-    })
+    recipes.append(
+        {
+            "dsl": "§[ǐ, δ, Ƀ[ᵬ]]",
+            "description": "Image card with text and button",
+            "components": ["Section", "Image", "DecoratedText", "ButtonList", "Button"],
+        }
+    )
+    recipes.append(
+        {
+            "dsl": "§[ǐ, δ×2, Ƀ[ᵬ×2]]",
+            "description": "Image card with 2 texts and 2 buttons",
+            "components": [
+                "Section",
+                "Image",
+                "DecoratedText",
+                "DecoratedText",
+                "ButtonList",
+                "Button",
+                "Button",
+            ],
+        }
+    )
     for n in range(1, 4):
         bmult = f"×{n}" if n > 1 else ""
-        recipes.append({
-            "dsl": f"§[ǐ, δ, Ƀ[ᵬ{bmult}]]",
-            "description": f"Hero image card with text and {n} button{'s' if n > 1 else ''}",
-            "components": ["Section", "Image", "DecoratedText", "ButtonList"] + ["Button"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[ǐ, δ, Ƀ[ᵬ{bmult}]]",
+                "description": f"Hero image card with text and {n} button{'s' if n > 1 else ''}",
+                "components": ["Section", "Image", "DecoratedText", "ButtonList"]
+                + ["Button"] * n,
+            }
+        )
 
     # --- Multi-section cards ---
-    recipes.append({
-        "dsl": "§[δ×3] | §[Ƀ[ᵬ×2]]",
-        "description": "Two sections: 3 texts then 2 buttons",
-        "components": ["Section", "DecoratedText", "DecoratedText", "DecoratedText", "Section", "ButtonList", "Button", "Button"],
-    })
-    recipes.append({
-        "dsl": "§[δ×2, Đ, Ƀ[ᵬ×3]]",
-        "description": "Status dashboard with 2 indicators, divider, and 3 actions",
-        "components": ["Section", "DecoratedText", "DecoratedText", "Divider", "ButtonList", "Button", "Button", "Button"],
-    })
+    recipes.append(
+        {
+            "dsl": "§[δ×3] | §[Ƀ[ᵬ×2]]",
+            "description": "Two sections: 3 texts then 2 buttons",
+            "components": [
+                "Section",
+                "DecoratedText",
+                "DecoratedText",
+                "DecoratedText",
+                "Section",
+                "ButtonList",
+                "Button",
+                "Button",
+            ],
+        }
+    )
+    recipes.append(
+        {
+            "dsl": "§[δ×2, Đ, Ƀ[ᵬ×3]]",
+            "description": "Status dashboard with 2 indicators, divider, and 3 actions",
+            "components": [
+                "Section",
+                "DecoratedText",
+                "DecoratedText",
+                "Divider",
+                "ButtonList",
+                "Button",
+                "Button",
+                "Button",
+            ],
+        }
+    )
 
     # --- Form-like cards ---
-    recipes.append({
-        "dsl": "§[τ, ▲, Ƀ[ᵬ×2]]",
-        "description": "Form with text input, selection, and submit/cancel buttons",
-        "components": ["Section", "TextInput", "SelectionInput", "ButtonList", "Button", "Button"],
-    })
-    recipes.append({
-        "dsl": "§[τ×2, Ƀ[ᵬ]]",
-        "description": "Form with 2 text inputs and a submit button",
-        "components": ["Section", "TextInput", "TextInput", "ButtonList", "Button"],
-    })
+    recipes.append(
+        {
+            "dsl": "§[τ, ▲, Ƀ[ᵬ×2]]",
+            "description": "Form with text input, selection, and submit/cancel buttons",
+            "components": [
+                "Section",
+                "TextInput",
+                "SelectionInput",
+                "ButtonList",
+                "Button",
+                "Button",
+            ],
+        }
+    )
+    recipes.append(
+        {
+            "dsl": "§[τ×2, Ƀ[ᵬ]]",
+            "description": "Form with 2 text inputs and a submit button",
+            "components": ["Section", "TextInput", "TextInput", "ButtonList", "Button"],
+        }
+    )
 
     # --- Specific user scenarios ---
     for n in [3, 4, 5, 6]:
-        recipes.append({
-            "dsl": f"§[δ, Ƀ[ᵬ×{n}]]",
-            "description": f"Status dashboard with {n} action buttons",
-            "components": ["Section", "DecoratedText", "ButtonList"] + ["Button"] * n,
-        })
+        recipes.append(
+            {
+                "dsl": f"§[δ, Ƀ[ᵬ×{n}]]",
+                "description": f"Status dashboard with {n} action buttons",
+                "components": ["Section", "DecoratedText", "ButtonList"]
+                + ["Button"] * n,
+            }
+        )
 
     # Deduplicate by DSL
     seen = set()
@@ -180,6 +254,7 @@ def index_patterns():
     # Force wrapper initialization
     from gchat.card_framework_wrapper import get_card_framework_wrapper
     from gchat.feedback_loop import get_feedback_loop
+
     wrapper = get_card_framework_wrapper()
     logger.info(f"Wrapper ready")
 
@@ -197,8 +272,7 @@ def index_patterns():
 
         try:
             component_paths = [
-                f"card_framework.v2.{c}" if "." not in c else c
-                for c in components
+                f"card_framework.v2.{c}" if "." not in c else c for c in components
             ]
 
             # Store DSL in both structure_description and card_description
@@ -230,9 +304,13 @@ def index_patterns():
             skipped += 1
 
         if (i + 1) % 25 == 0:
-            logger.info(f"Progress: {i + 1}/{len(recipes)} ({stored} stored, {skipped} skipped)")
+            logger.info(
+                f"Progress: {i + 1}/{len(recipes)} ({stored} stored, {skipped} skipped)"
+            )
 
-    logger.info(f"\nIndexing complete: {stored} stored, {skipped} skipped out of {len(recipes)} recipes")
+    logger.info(
+        f"\nIndexing complete: {stored} stored, {skipped} skipped out of {len(recipes)} recipes"
+    )
 
     # Show coverage summary
     button_counts = set()
@@ -242,9 +320,12 @@ def index_patterns():
         nb = r["components"].count("Button")
         ng = r["components"].count("GridItem")
         nt = r["components"].count("DecoratedText")
-        if nb: button_counts.add(nb)
-        if ng: grid_counts.add(ng)
-        if nt: text_counts.add(nt)
+        if nb:
+            button_counts.add(nb)
+        if ng:
+            grid_counts.add(ng)
+        if nt:
+            text_counts.add(nt)
 
     logger.info(f"\nCoverage:")
     logger.info(f"  Button counts: {sorted(button_counts)}")

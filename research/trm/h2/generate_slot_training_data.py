@@ -114,37 +114,43 @@ def generate_synthetic_pairs(
             pool_id = POOL_VOCAB[pool_key]
 
             # Positive pair
-            pairs.append({
-                "content_text": item_text,
-                "slot_type": pool_key,
-                "slot_type_id": pool_id,
-                "label": 1.0,
-                "source": "synthetic",
-            })
+            pairs.append(
+                {
+                    "content_text": item_text,
+                    "slot_type": pool_key,
+                    "slot_type_id": pool_id,
+                    "label": 1.0,
+                    "source": "synthetic",
+                }
+            )
 
             # Hard negative: same content, random different pool
             neg_pools = [p for p in all_pools if p != pool_key]
             neg_pool = rng.choice(neg_pools)
-            pairs.append({
-                "content_text": item_text,
-                "slot_type": neg_pool,
-                "slot_type_id": POOL_VOCAB[neg_pool],
-                "label": 0.0,
-                "source": "synthetic_neg",
-            })
+            pairs.append(
+                {
+                    "content_text": item_text,
+                    "slot_type": neg_pool,
+                    "slot_type_id": POOL_VOCAB[neg_pool],
+                    "label": 0.0,
+                    "source": "synthetic_neg",
+                }
+            )
 
     # Add cross-pool confusion pairs (harder negatives) from domain config
     domain = _slot_domain or get_domain_or_default()
     confusion_pairs = list(domain.confusion_pairs) if domain.confusion_pairs else []
     for text, wrong_pool in confusion_pairs:
         for _ in range(augment_factor * 2):  # Extra weight on confusion
-            pairs.append({
-                "content_text": text,
-                "slot_type": wrong_pool,
-                "slot_type_id": POOL_VOCAB[wrong_pool],
-                "label": 0.0,
-                "source": "confusion_neg",
-            })
+            pairs.append(
+                {
+                    "content_text": text,
+                    "slot_type": wrong_pool,
+                    "slot_type_id": POOL_VOCAB[wrong_pool],
+                    "label": 0.0,
+                    "source": "confusion_neg",
+                }
+            )
 
     return pairs
 
@@ -178,7 +184,11 @@ def generate_qdrant_pairs(
         result = client.scroll(
             collection_name=collection,
             scroll_filter=Filter(
-                must=[FieldCondition(key="type", match=MatchValue(value="instance_pattern"))]
+                must=[
+                    FieldCondition(
+                        key="type", match=MatchValue(value="instance_pattern")
+                    )
+                ]
             ),
             limit=100,
             offset=offset,
@@ -224,23 +234,27 @@ def generate_qdrant_pairs(
                 continue
 
             # Positive pair
-            pairs.append({
-                "content_text": item_text,
-                "slot_type": pool_key,
-                "slot_type_id": POOL_VOCAB[pool_key],
-                "label": 1.0,
-                "source": "qdrant",
-            })
+            pairs.append(
+                {
+                    "content_text": item_text,
+                    "slot_type": pool_key,
+                    "slot_type_id": POOL_VOCAB[pool_key],
+                    "label": 1.0,
+                    "source": "qdrant",
+                }
+            )
 
             # Negative pair
             neg_pool = random.choice([p for p in all_pools if p != pool_key])
-            pairs.append({
-                "content_text": item_text,
-                "slot_type": neg_pool,
-                "slot_type_id": POOL_VOCAB[neg_pool],
-                "label": 0.0,
-                "source": "qdrant_neg",
-            })
+            pairs.append(
+                {
+                    "content_text": item_text,
+                    "slot_type": neg_pool,
+                    "slot_type_id": POOL_VOCAB[neg_pool],
+                    "label": 0.0,
+                    "source": "qdrant_neg",
+                }
+            )
 
     return pairs
 
@@ -291,26 +305,46 @@ def embed_pairs(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate SlotAffinityNet training data")
+    parser = argparse.ArgumentParser(
+        description="Generate SlotAffinityNet training data"
+    )
     parser.add_argument("--output", type=str, required=True, help="Output JSON path")
-    parser.add_argument("--augment-factor", type=int, default=3,
-                        help="Augmentation factor for synthetic pairs")
-    parser.add_argument("--include-qdrant", action="store_true",
-                        help="Include real builds from Qdrant")
-    parser.add_argument("--collection", type=str, default=None,
-                        help="Qdrant collection for real data (auto-detected per domain)")
-    parser.add_argument("--domain", type=str, default="gchat",
-                        help="Domain ID from registry (e.g., 'gchat', 'email')")
+    parser.add_argument(
+        "--augment-factor",
+        type=int,
+        default=3,
+        help="Augmentation factor for synthetic pairs",
+    )
+    parser.add_argument(
+        "--include-qdrant", action="store_true", help="Include real builds from Qdrant"
+    )
+    parser.add_argument(
+        "--collection",
+        type=str,
+        default=None,
+        help="Qdrant collection for real data (auto-detected per domain)",
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        default="gchat",
+        help="Domain ID from registry (e.g., 'gchat', 'email')",
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--skip-embeddings", action="store_true",
-                        help="Skip embedding generation (for testing)")
+    parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Skip embedding generation (for testing)",
+    )
     args = parser.parse_args()
 
     # Initialize domain
     _init_slot_domain(args.domain)
 
     if args.collection is None:
-        args.collection = "email_blocks" if args.domain == "email" else "mcp_gchat_cards_v8"
+        args.collection = (
+            "email_blocks" if args.domain == "email" else "mcp_gchat_cards_v8"
+        )
 
     rng = random.Random(args.seed)
 

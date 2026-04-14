@@ -98,17 +98,14 @@ def _build_system_prompt() -> str:
     # Anthropic requires minimum 1024 tokens (~4096 chars) for caching.
     # Pad if our real docs are too short.
     if len(prompt) < 5000:
-        padding = (
-            "\n\n## Extended Reference\n"
-            + "\n".join(
-                [
-                    f"- Rule {i}: Validate that component hierarchy follows "
-                    f"strict parent-child relationships for element type {i}. "
-                    f"Ensure all required attributes are present and correctly typed. "
-                    f"Check for duplicate keys and missing required fields."
-                    for i in range(1, 80)
-                ]
-            )
+        padding = "\n\n## Extended Reference\n" + "\n".join(
+            [
+                f"- Rule {i}: Validate that component hierarchy follows "
+                f"strict parent-child relationships for element type {i}. "
+                f"Ensure all required attributes are present and correctly typed. "
+                f"Check for duplicate keys and missing required fields."
+                for i in range(1, 80)
+            ]
         )
         prompt += padding
 
@@ -131,9 +128,9 @@ async def verify_cache(model: str, delay: float = 2.0) -> bool:
     prompt_chars = len(system_prompt)
     estimated_tokens = prompt_chars // 4
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Anthropic Prompt Cache Verification")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Model:            {model}")
     print(f"System prompt:    {prompt_chars:,} chars (~{estimated_tokens:,} tokens)")
     print(f"Min for caching:  1,024 tokens")
@@ -186,16 +183,22 @@ async def verify_cache(model: str, delay: float = 2.0) -> bool:
     cache_read = usage2.get("cache_read_input_tokens", 0)
     cache_hit = cached_tokens > 0 or cache_read > 0
 
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     if cache_hit:
         tokens_cached = cached_tokens or cache_read
-        savings_pct = (tokens_cached / usage2["prompt_tokens"] * 100) if usage2["prompt_tokens"] else 0
+        savings_pct = (
+            (tokens_cached / usage2["prompt_tokens"] * 100)
+            if usage2["prompt_tokens"]
+            else 0
+        )
         print(f"CACHE VERIFIED WORKING")
         print(f"  Cached tokens on call 2:  {tokens_cached:,}")
         print(f"  Cache coverage:           {savings_pct:.1f}% of input tokens")
         print(f"  Latency improvement:      {elapsed1:.2f}s -> {elapsed2:.2f}s")
         if elapsed1 > 0:
-            print(f"  Speed improvement:        {((elapsed1 - elapsed2) / elapsed1 * 100):.1f}%")
+            print(
+                f"  Speed improvement:        {((elapsed1 - elapsed2) / elapsed1 * 100):.1f}%"
+            )
     else:
         print(f"CACHE NOT DETECTED")
         print(f"  No cached_tokens in call 2 response.")
@@ -203,7 +206,7 @@ async def verify_cache(model: str, delay: float = 2.0) -> bool:
         print(f"    - System prompt too short (<1024 tokens)")
         print(f"    - Model doesn't support caching")
         print(f"    - cache_control_injection_points not honored")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # --- Optional: Call 3 to show the keepalive pattern ---
     if cache_hit:
@@ -260,7 +263,9 @@ def main():
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
-        print("Set it and re-run: ANTHROPIC_API_KEY=sk-ant-... uv run python scripts/verify_cache_keepalive.py")
+        print(
+            "Set it and re-run: ANTHROPIC_API_KEY=sk-ant-... uv run python scripts/verify_cache_keepalive.py"
+        )
         sys.exit(1)
 
     success = asyncio.run(verify_cache(model=args.model, delay=args.delay))

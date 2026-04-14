@@ -114,6 +114,7 @@ class TestDomainRegistry:
         assert get_domain("test_custom_xyz") is custom
         # Cleanup
         from research.trm.h2.domain_config import _DOMAIN_REGISTRY
+
         del _DOMAIN_REGISTRY["test_custom_xyz"]
 
 
@@ -123,10 +124,24 @@ class TestDomainFromCheckpoint:
     def test_from_checkpoint_with_full_metadata(self):
         ckpt = {
             "domain_id": "gchat",
-            "pool_vocab": {"buttons": 0, "content_texts": 1, "grid_items": 2,
-                           "chips": 3, "carousel_cards": 4},
-            "component_to_pool": {"Button": "buttons", "DecoratedText": "content_texts"},
-            "specificity_order": ["chips", "grid_items", "carousel_cards", "buttons", "content_texts"],
+            "pool_vocab": {
+                "buttons": 0,
+                "content_texts": 1,
+                "grid_items": 2,
+                "chips": 3,
+                "carousel_cards": 4,
+            },
+            "component_to_pool": {
+                "Button": "buttons",
+                "DecoratedText": "content_texts",
+            },
+            "specificity_order": [
+                "chips",
+                "grid_items",
+                "carousel_cards",
+                "buttons",
+                "content_texts",
+            ],
         }
         config = DomainConfig.from_checkpoint(ckpt)
         assert config is not None
@@ -223,7 +238,9 @@ class TestDomainRewrap:
         """Should try text, title, label, subtitle, styled in order."""
         assert GCHAT_DOMAIN.rewrap_item({"title": "T"}, "a", "buttons")["text"] == "T"
         assert GCHAT_DOMAIN.rewrap_item({"label": "L"}, "a", "buttons")["text"] == "L"
-        assert GCHAT_DOMAIN.rewrap_item({"subtitle": "S"}, "a", "buttons")["text"] == "S"
+        assert (
+            GCHAT_DOMAIN.rewrap_item({"subtitle": "S"}, "a", "buttons")["text"] == "S"
+        )
 
     def test_rewrap_empty_dict_gets_empty_text(self):
         result = GCHAT_DOMAIN.rewrap_item({}, "a", "buttons")
@@ -324,22 +341,26 @@ class TestSlotAssignment:
 
     def test_extract_item_text_string(self):
         from gchat.card_builder.slot_assignment import _extract_item_text
+
         assert _extract_item_text("hello") == "hello"
 
     def test_extract_item_text_dict_priority(self):
         """text field should take priority over title, label, etc."""
         from gchat.card_builder.slot_assignment import _extract_item_text
+
         item = {"text": "primary", "title": "secondary", "label": "tertiary"}
         assert _extract_item_text(item) == "primary"
 
     def test_extract_item_text_fallback_order(self):
         from gchat.card_builder.slot_assignment import _extract_item_text
+
         assert _extract_item_text({"title": "T"}) == "T"
         assert _extract_item_text({"label": "L"}) == "L"
         assert _extract_item_text({"subtitle": "S"}) == "S"
 
     def test_extract_item_text_empty(self):
         from gchat.card_builder.slot_assignment import _extract_item_text
+
         assert _extract_item_text({}) == ""
         assert _extract_item_text(42) == ""
         assert _extract_item_text(None) == ""
@@ -347,12 +368,14 @@ class TestSlotAssignment:
     def test_rewrap_uses_domain_config(self):
         """Rewrap should use the loaded DomainConfig, not hardcoded rules."""
         from gchat.card_builder.slot_assignment import _rewrap_item
+
         result = _rewrap_item({"text": "Test"}, "content_texts", "chips")
         assert result["label"] == "Test"
         assert "url" in result
 
     def test_get_constants_returns_domain_values(self):
         from gchat.card_builder.slot_assignment import _get_constants
+
         vocab, comp_to_pool, spec_order = _get_constants()
         assert isinstance(vocab, dict)
         assert len(vocab) > 0
@@ -567,8 +590,12 @@ class TestSlotAssignmentWithDomainConfig:
         }
         demands = {"Button": 1, "DecoratedText": 1}
 
-        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
-            result = reassign_supply_map(supply_map, demands, domain_config=GCHAT_DOMAIN)
+        with patch(
+            "gchat.card_builder.slot_assignment._load_slot_model", return_value=None
+        ):
+            result = reassign_supply_map(
+                supply_map, demands, domain_config=GCHAT_DOMAIN
+            )
             assert isinstance(result, dict)
             assert "buttons" in result
             assert "content_texts" in result
@@ -588,8 +615,12 @@ class TestSlotAssignmentWithDomainConfig:
         }
         demands = {"TextBlock": 1}
 
-        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
-            result = reassign_supply_map(supply_map, demands, domain_config=EMAIL_DOMAIN)
+        with patch(
+            "gchat.card_builder.slot_assignment._load_slot_model", return_value=None
+        ):
+            result = reassign_supply_map(
+                supply_map, demands, domain_config=EMAIL_DOMAIN
+            )
             assert isinstance(result, dict)
             assert "content" in result
 
@@ -608,13 +639,17 @@ class TestSlotAssignmentWithDomainConfig:
         }
         demands = {}
 
-        with patch("gchat.card_builder.slot_assignment._load_slot_model", return_value=None):
+        with patch(
+            "gchat.card_builder.slot_assignment._load_slot_model", return_value=None
+        ):
             result = reassign_supply_map(supply_map, demands, domain_config=None)
             assert isinstance(result, dict)
 
     def test_email_domain_pools_differ_from_gchat(self):
         """Email and gchat domains have different pool vocabularies."""
-        assert set(EMAIL_DOMAIN.pool_vocab.keys()) != set(GCHAT_DOMAIN.pool_vocab.keys())
+        assert set(EMAIL_DOMAIN.pool_vocab.keys()) != set(
+            GCHAT_DOMAIN.pool_vocab.keys()
+        )
         assert "content" in EMAIL_DOMAIN.pool_vocab
         assert "buttons" in GCHAT_DOMAIN.pool_vocab
 

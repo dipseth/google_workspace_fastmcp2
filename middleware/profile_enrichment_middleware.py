@@ -88,9 +88,9 @@ class ProfileEnrichmentMiddleware(Middleware):
         self._enable_caching = enable_caching
         self._cache_ttl = cache_ttl_seconds
         self._max_cache_entries = max_cache_entries
-        self._profile_cache: OrderedDict[
-            str, Dict[str, Any]
-        ] = OrderedDict()  # LRU-bounded in-memory cache
+        self._profile_cache: OrderedDict[str, Dict[str, Any]] = (
+            OrderedDict()
+        )  # LRU-bounded in-memory cache
         self._cache_timestamps: Dict[str, float] = {}
 
         # Optional Qdrant integration for persistent caching
@@ -347,7 +347,9 @@ class ProfileEnrichmentMiddleware(Middleware):
         This bypasses get_service() to avoid service type registration issues.
         """
         try:
-            logger.info(f"👤 Attempting to create People API service for {redact_email(user_email)}")
+            logger.info(
+                f"👤 Attempting to create People API service for {redact_email(user_email)}"
+            )
 
             # Get AuthMiddleware to load credentials
             auth_middleware = get_auth_middleware()
@@ -360,7 +362,9 @@ class ProfileEnrichmentMiddleware(Middleware):
             # Load credentials using middleware's storage system
             credentials = auth_middleware.load_credentials(user_email)
             if not credentials:
-                logger.warning(f"👤 No credentials found for {redact_email(user_email)}")
+                logger.warning(
+                    f"👤 No credentials found for {redact_email(user_email)}"
+                )
                 return None
 
             logger.info(
@@ -372,7 +376,9 @@ class ProfileEnrichmentMiddleware(Middleware):
                 build, "people", "v1", credentials=credentials
             )
 
-            logger.info(f"✅ Successfully created People API service for {redact_email(user_email)}")
+            logger.info(
+                f"✅ Successfully created People API service for {redact_email(user_email)}"
+            )
             return people_service
 
         except Exception as e:
@@ -404,7 +410,9 @@ class ProfileEnrichmentMiddleware(Middleware):
                     # Check if cache is still valid
                     cache_age = current_time - self._cache_timestamps.get(user_id, 0)
                     if cache_age < self._cache_ttl:
-                        self._profile_cache.move_to_end(user_id)  # LRU: mark as recently used
+                        self._profile_cache.move_to_end(
+                            user_id
+                        )  # LRU: mark as recently used
                         profiles[user_id] = self._profile_cache[user_id]
                         user_ids.remove(user_id)
                         logger.debug(f"📦 Cache hit for user {user_id}")
@@ -477,7 +485,9 @@ class ProfileEnrichmentMiddleware(Middleware):
             emails = person.get("emailAddresses", [])
             email = emails[0].get("value") if emails else None
 
-            logger.info(f"👤 Extracted email: {redact_email(email)} from {len(emails)} email entries")
+            logger.info(
+                f"👤 Extracted email: {redact_email(email)} from {len(emails)} email entries"
+            )
 
             if display_name or email:
                 logger.info(

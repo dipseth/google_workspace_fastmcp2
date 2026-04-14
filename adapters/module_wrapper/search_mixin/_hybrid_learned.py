@@ -38,17 +38,21 @@ def search_hybrid_learned(
     except ImportError:
         logger.warning("torch not installed, falling back to multidim")
         return self.search_hybrid_multidim(
-            description=description, component_paths=component_paths,
-            limit=limit, token_ratio=token_ratio,
-            content_feedback=content_feedback, form_feedback=form_feedback,
-            include_classes=include_classes, candidate_pool_size=candidate_pool_size,
+            description=description,
+            component_paths=component_paths,
+            limit=limit,
+            token_ratio=token_ratio,
+            content_feedback=content_feedback,
+            form_feedback=form_feedback,
+            include_classes=include_classes,
+            candidate_pool_size=candidate_pool_size,
             content_text=content_text,
         )
 
     # Load model with domain awareness
     wrapper_domain = getattr(
-        getattr(self, 'domain_config', None), 'domain_label', None
-    ) or getattr(self, '_domain_id', None)
+        getattr(self, "domain_config", None), "domain_label", None
+    ) or getattr(self, "_domain_id", None)
     model = self._load_learned_model(domain=wrapper_domain)
     if model is None:
         logger.warning("Learned scorer not available, falling back to multidim")
@@ -105,7 +109,9 @@ def search_hybrid_learned(
 
         # --- Step 2: Grouped prefetch + query Qdrant ---
         points = self._query_grouped_candidates(
-            query_colbert, query_minilm, candidate_pool_size,
+            query_colbert,
+            query_minilm,
+            candidate_pool_size,
             content_feedback=content_feedback,
             form_feedback=form_feedback,
             group_size=candidate_pool_size,
@@ -122,7 +128,10 @@ def search_hybrid_learned(
 
         # --- Step 3: Compute features + scoring ---
         features_list, points_list = self._compute_learned_features(
-            points, query_colbert, query_minilm, component_paths,
+            points,
+            query_colbert,
+            query_minilm,
+            component_paths,
             query_content_minilm=query_content_minilm,
         )
 
@@ -134,7 +143,9 @@ def search_hybrid_learned(
             if is_unified:
                 # UnifiedTRN: split features into structural(17D) + content(384D)
                 # Content embedding = query MiniLM, broadcast to all candidates
-                content_emb = query_content_minilm if query_content_minilm else query_minilm
+                content_emb = (
+                    query_content_minilm if query_content_minilm else query_minilm
+                )
                 content_tensor = torch.tensor(
                     [content_emb] * len(features_list), dtype=torch.float32
                 )
@@ -145,6 +156,7 @@ def search_hybrid_learned(
                 alpha = 1.0 if not content_text else 0.6
                 try:
                     from config.settings import Settings as _S
+
                     alpha = _S().dual_head_form_weight
                 except Exception:
                     pass
@@ -160,6 +172,7 @@ def search_hybrid_learned(
                 alpha = 1.0 if not content_text else 0.6
                 try:
                     from config.settings import Settings as _S
+
                     alpha = _S().dual_head_form_weight
                 except Exception:
                     pass
@@ -196,27 +209,38 @@ def search_hybrid_learned(
         # --- Step 3b: Per-candidate score logging (shadow A/B) ---
         try:
             from config.settings import Settings as _S
+
             if _S().search_shadow_scoring:
                 import hashlib
+
                 _qh = hashlib.md5(description.encode()).hexdigest()[:12]
                 _top20 = [
-                    {"rank": i + 1, "name": (p.payload or {}).get("name", "?"),
-                     "score": round(sc, 4), "sim_c": round(s_c, 4)}
+                    {
+                        "rank": i + 1,
+                        "name": (p.payload or {}).get("name", "?"),
+                        "score": round(sc, 4),
+                        "sim_c": round(s_c, 4),
+                    }
                     for i, (sc, s_c, _sr, _si, _sct, p) in enumerate(scored[:20])
                 ]
-                logger.info("Learned scorer candidates | query=%s | top20=%s", _qh, _top20)
+                logger.info(
+                    "Learned scorer candidates | query=%s | top20=%s", _qh, _top20
+                )
         except Exception:
             pass
 
         # --- Step 4: Categorize and return ---
-        class_results, pattern_results, relationship_results = \
+        class_results, pattern_results, relationship_results = (
             self._categorize_scored_results(scored, limit)
+        )
 
         logger.info(
             "Learned search (%s): %d classes, %d patterns, %d relationships (from %d candidates)",
             self._learned_model_type,
-            len(class_results), len(pattern_results),
-            len(relationship_results), len(points),
+            len(class_results),
+            len(pattern_results),
+            len(relationship_results),
+            len(points),
         )
 
         return class_results, pattern_results, relationship_results

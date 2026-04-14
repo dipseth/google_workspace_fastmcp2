@@ -57,9 +57,7 @@ def _get_skill_name(module_name: str) -> str:
     Returns:
         Skill directory name (e.g., "gchat-cards")
     """
-    return SKILL_NAMES.get(
-        module_name, module_name.replace("_", "-")
-    )
+    return SKILL_NAMES.get(module_name, module_name.replace("_", "-"))
 
 
 def _get_skill_title(module_name: str) -> str:
@@ -72,9 +70,7 @@ def _get_skill_title(module_name: str) -> str:
     Returns:
         Human-readable skill title
     """
-    return SKILL_TITLES.get(
-        module_name, module_name.replace("_", " ").title()
-    )
+    return SKILL_TITLES.get(module_name, module_name.replace("_", " ").title())
 
 
 def setup_skills_provider(
@@ -132,9 +128,7 @@ def setup_skills_provider(
     skills_root = Path(skills_root).expanduser().resolve()
     skills_root.mkdir(parents=True, exist_ok=True)
 
-    enabled = enabled_modules or [
-        "card_framework"
-    ]  # Currently only gchat
+    enabled = enabled_modules or ["card_framework"]  # Currently only gchat
     skills_generated = False
 
     for wrapper in wrappers:
@@ -151,9 +145,7 @@ def setup_skills_provider(
 
         # Check if we need to regenerate
         if skill_dir.exists() and not auto_regenerate:
-            logger.info(
-                f"Skills directory exists, skipping: {skill_dir}"
-            )
+            logger.info(f"Skills directory exists, skipping: {skill_dir}")
             skills_generated = True
             continue
 
@@ -171,14 +163,10 @@ def setup_skills_provider(
             wrapper.export_skills_to_directory(skill_dir, config)
             skills_generated = True
 
-            logger.info(
-                f"Generated skills for {module_name} -> {skill_dir}"
-            )
+            logger.info(f"Generated skills for {module_name} -> {skill_dir}")
 
         except Exception as e:
-            logger.error(
-                f"Failed to generate skills for {module_name}: {e}"
-            )
+            logger.error(f"Failed to generate skills for {module_name}: {e}")
             continue
 
     # Generate cross-module server skill (combines card + email symbol maps)
@@ -186,20 +174,11 @@ def setup_skills_provider(
         from skills.server_skill_generator import write_server_skill
 
         card_w = next(
-            (
-                w
-                for w in wrappers
-                if "card_framework"
-                in getattr(w, "module_name", "")
-            ),
+            (w for w in wrappers if "card_framework" in getattr(w, "module_name", "")),
             None,
         )
         email_w = next(
-            (
-                w
-                for w in wrappers
-                if "mjml" in getattr(w, "module_name", "")
-            ),
+            (w for w in wrappers if "mjml" in getattr(w, "module_name", "")),
             None,
         )
         if card_w and email_w:
@@ -269,14 +248,10 @@ def regenerate_skills(
         )
 
         wrapper.export_skills_to_directory(skill_dir, config)
-        logger.info(
-            f"Regenerated skills for {module_name} -> {skill_dir}"
-        )
+        logger.info(f"Regenerated skills for {module_name} -> {skill_dir}")
 
         return skill_dir
 
     except Exception as e:
-        logger.error(
-            f"Failed to regenerate skills for {module_name}: {e}"
-        )
+        logger.error(f"Failed to regenerate skills for {module_name}: {e}")
         return None

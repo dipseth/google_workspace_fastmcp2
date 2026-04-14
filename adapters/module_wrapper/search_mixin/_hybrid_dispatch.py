@@ -39,6 +39,7 @@ def search_hybrid_dispatch(
     settings = None
     try:
         from config.settings import Settings
+
         settings = Settings()
         search_mode = settings.search_mode
         # Backwards compat: ENABLE_MULTIDIM_SEARCH overrides if search_mode is default
@@ -49,6 +50,7 @@ def search_hybrid_dispatch(
 
     try:
         from middleware.langfuse_integration import set_sampling_trace_context
+
         set_sampling_trace_context(search_mode=search_mode)
     except ImportError:
         pass

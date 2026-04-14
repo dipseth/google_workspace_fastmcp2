@@ -53,9 +53,7 @@ def get_component_by_path(self, path: str) -> Optional[Any]:
             try:
                 obj = getattr(obj, part)
             except AttributeError:
-                module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(
-                    "."
-                )
+                module_candidate = f"{getattr(obj, '__name__', '')}.{part}".lstrip(".")
                 try:
                     obj = importlib.import_module(module_candidate)
                 except (ImportError, ModuleNotFoundError):

@@ -4,9 +4,7 @@ import math
 from typing import List
 
 
-def _maxsim(
-    query_vecs: List[List[float]], doc_vecs: List[List[float]]
-) -> float:
+def _maxsim(query_vecs: List[List[float]], doc_vecs: List[List[float]]) -> float:
     """ColBERT MaxSim: for each query token, find max cosine sim to any doc token.
 
     This implements ColBERT's "late interaction" scoring. The final score is

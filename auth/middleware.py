@@ -38,6 +38,7 @@ from .types import AuthProvenance, SessionKey
 
 logger = setup_logger()
 
+
 class CredentialStorageMode(Enum):
     """Credential storage modes."""
 
@@ -45,6 +46,7 @@ class CredentialStorageMode(Enum):
     FILE_ENCRYPTED = "file_encrypted"  # New: Encrypted JSON files
     MEMORY_ONLY = "memory_only"  # New: In-memory only (no persistence)
     MEMORY_WITH_BACKUP = "memory_with_backup"  # New: Memory + encrypted backup
+
 
 class AuthMiddleware(Middleware):
     """Enhanced middleware for secure credential management, session context, service injection, and FastMCP GoogleProvider integration."""
@@ -374,10 +376,9 @@ class AuthMiddleware(Middleware):
             try:
                 _safe = user_email.replace("@", "_at_").replace(".", "_")
                 _creds_dir = Path(settings.credentials_dir)
-                _has_creds = (
-                    (_creds_dir / f"{_safe}_credentials.json").exists()
-                    or (_creds_dir / f"{_safe}_credentials.enc").exists()
-                )
+                _has_creds = (_creds_dir / f"{_safe}_credentials.json").exists() or (
+                    _creds_dir / f"{_safe}_credentials.enc"
+                ).exists()
                 if not _has_creds:
                     _oauth_email = self._load_oauth_authentication_data()
                     if _oauth_email and _oauth_email.lower() != user_email.lower():
@@ -445,12 +446,13 @@ class AuthMiddleware(Middleware):
                         # Google accounts.
                         _auto_registered = False
                         try:
-                            _safe = effective_email.replace("@", "_at_").replace(".", "_")
+                            _safe = effective_email.replace("@", "_at_").replace(
+                                ".", "_"
+                            )
                             _creds_dir = Path(settings.credentials_dir)
-                            if (
-                                (_creds_dir / f"{_safe}_credentials.json").exists()
-                                or (_creds_dir / f"{_safe}_credentials.enc").exists()
-                            ):
+                            if (_creds_dir / f"{_safe}_credentials.json").exists() or (
+                                _creds_dir / f"{_safe}_credentials.enc"
+                            ).exists():
                                 owned_accounts.add(effective_email)
                                 if session_id:
                                     store_session_data(
@@ -831,7 +833,9 @@ class AuthMiddleware(Middleware):
                 version = service_data["version"]
                 cache_enabled = service_data["cache_enabled"]
 
-                logger.debug(f"Creating {service_type} service for {redact_email(user_email)}")
+                logger.debug(
+                    f"Creating {service_type} service for {redact_email(user_email)}"
+                )
 
                 # Create the Google service using the new credential management
                 service = await get_google_service(
@@ -2594,7 +2598,9 @@ class AuthMiddleware(Middleware):
 
             except Exception as e:
                 results[user_email] = f"❌ Migration failed: {str(e)}"
-                logger.error(f"Failed to migrate credentials for {redact_email(user_email)}: {e}")
+                logger.error(
+                    f"Failed to migrate credentials for {redact_email(user_email)}: {e}"
+                )
 
         # Update to target mode
         self._storage_mode = target_mode
@@ -2716,10 +2722,14 @@ class AuthMiddleware(Middleware):
                         f"✅ Successfully bridged credentials for {redact_email(user_email)}"
                     )
                 else:
-                    logger.debug(f"⚠️ Could not bridge credentials for {redact_email(user_email)}")
+                    logger.debug(
+                        f"⚠️ Could not bridge credentials for {redact_email(user_email)}"
+                    )
 
         except Exception as e:
-            logger.warning(f"⚠️ Could not bridge credentials for {redact_email(user_email)}: {e}")
+            logger.warning(
+                f"⚠️ Could not bridge credentials for {redact_email(user_email)}: {e}"
+            )
 
     # CodeMode meta-tools use strict Pydantic schemas — skip user_google_email injection.
     # Actual tool names: tags, search, get_schema, execute
@@ -2777,9 +2787,8 @@ class AuthMiddleware(Middleware):
                         _safe = final_email.replace("@", "_at_").replace(".", "_")
                         _creds_dir = Path(settings.credentials_dir)
                         _has_creds = (
-                            (_creds_dir / f"{_safe}_credentials.json").exists()
-                            or (_creds_dir / f"{_safe}_credentials.enc").exists()
-                        )
+                            _creds_dir / f"{_safe}_credentials.json"
+                        ).exists() or (_creds_dir / f"{_safe}_credentials.enc").exists()
                         if not _has_creds:
                             _fallback = self._load_oauth_authentication_data()
                             if _fallback and _fallback.lower() != final_email.lower():
@@ -3092,7 +3101,9 @@ class AuthMiddleware(Middleware):
         except Exception:
             return None
 
-    def _extract_user_from_github_token(self, session_id: Optional[str] = None) -> Optional[str]:
+    def _extract_user_from_github_token(
+        self, session_id: Optional[str] = None
+    ) -> Optional[str]:
         """Extract user identity from GitHub OAuth token claims.
 
         GitHub tokens carry login, email, and user data in claims set by
@@ -3130,9 +3141,7 @@ class AuthMiddleware(Middleware):
                     store_session_data(
                         session_id, SessionKey.GITHUB_EMAIL, github_email
                     )
-                store_session_data(
-                    session_id, SessionKey.GITHUB_STARRED_REPO, True
-                )
+                store_session_data(session_id, SessionKey.GITHUB_STARRED_REPO, True)
 
             # Use GitHub email if available, otherwise construct one from login
             user_email = github_email or f"{github_login}@github"
@@ -3199,6 +3208,7 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             logger.debug(f"Could not load OAuth authentication data: {e}")
             return None
+
 
 def setup_oauth_coordination(mcp, google_auth_provider):
     """
@@ -3277,6 +3287,7 @@ def setup_oauth_coordination(mcp, google_auth_provider):
     else:
         logger.info("🔄 No GoogleProvider - using full legacy OAuth system")
 
+
 def log_oauth_transition_status(google_auth_provider):
     """Log the current OAuth transition status."""
 
@@ -3292,6 +3303,7 @@ def log_oauth_transition_status(google_auth_provider):
         logger.info("  🔧 Architecture: Custom OAuth proxy and endpoints")
         logger.info("  📁 Credentials: File-based storage")
         logger.info("  📋 Scope Management: Manual ScopeRegistry integration")
+
 
 def create_enhanced_auth_middleware(
     storage_mode: CredentialStorageMode = CredentialStorageMode.FILE_PLAINTEXT,

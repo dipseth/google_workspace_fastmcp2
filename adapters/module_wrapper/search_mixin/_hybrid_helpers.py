@@ -31,11 +31,16 @@ def _build_prefetch_list(
     # Prefetch 1: Components (classes)
     comp_filter = (
         Filter(must=[FieldCondition(key="type", match=MatchValue(value="class"))])
-        if include_classes else None
+        if include_classes
+        else None
     )
     prefetch_list.append(
-        Prefetch(query=query_colbert, using="components",
-                 limit=candidate_pool_size, filter=comp_filter)
+        Prefetch(
+            query=query_colbert,
+            using="components",
+            limit=candidate_pool_size,
+            filter=comp_filter,
+        )
     )
 
     # Prefetch 2: Inputs (instance patterns + content feedback filter)
@@ -44,11 +49,17 @@ def _build_prefetch_list(
     ]
     if content_feedback:
         inp_conditions.append(
-            FieldCondition(key="content_feedback", match=MatchValue(value=content_feedback))
+            FieldCondition(
+                key="content_feedback", match=MatchValue(value=content_feedback)
+            )
         )
     prefetch_list.append(
-        Prefetch(query=query_colbert, using="inputs",
-                 limit=candidate_pool_size, filter=Filter(must=inp_conditions))
+        Prefetch(
+            query=query_colbert,
+            using="inputs",
+            limit=candidate_pool_size,
+            filter=Filter(must=inp_conditions),
+        )
     )
 
     # Prefetch 3: Relationships (form feedback filter)
@@ -60,16 +71,18 @@ def _build_prefetch_list(
             FieldCondition(key="form_feedback", match=MatchValue(value=form_feedback))
         )
     prefetch_list.append(
-        Prefetch(query=query_minilm, using="relationships",
-                 limit=candidate_pool_size, filter=Filter(must=rel_conditions))
+        Prefetch(
+            query=query_minilm,
+            using="relationships",
+            limit=candidate_pool_size,
+            filter=Filter(must=rel_conditions),
+        )
     )
 
     # Prefetch 4: Content (instance patterns with actual content vectors)
     if query_content_minilm:
         content_conditions = [
-            FieldCondition(
-                key="type", match=MatchValue(value="instance_pattern")
-            ),
+            FieldCondition(key="type", match=MatchValue(value="instance_pattern")),
         ]
         prefetch_list.append(
             Prefetch(
@@ -111,7 +124,9 @@ def _query_grouped_candidates(
     )
 
     prefetch_list = self._build_prefetch_list(
-        query_colbert, query_minilm, candidate_pool_size,
+        query_colbert,
+        query_minilm,
+        candidate_pool_size,
         include_classes=True,
         content_feedback=content_feedback,
         form_feedback=form_feedback,
@@ -124,7 +139,7 @@ def _query_grouped_candidates(
             group_by="type",
             prefetch=prefetch_list,
             query=FusionQuery(fusion=Fusion.RRF),
-            limit=5,               # up to 5 type groups (class, instance_pattern, function, etc.)
+            limit=5,  # up to 5 type groups (class, instance_pattern, function, etc.)
             group_size=group_size,  # points per group
             with_payload=True,
             with_vectors=True,
@@ -141,15 +156,21 @@ def _query_grouped_candidates(
 
         logger.info(
             "Grouped query: %d points across %d groups: %s",
-            len(points), len(group_counts), group_counts,
+            len(points),
+            len(group_counts),
+            group_counts,
         )
         return points
 
     except Exception as e:
         # Fallback: query_points_groups may not be available on older Qdrant
-        logger.warning("query_points_groups failed (%s), falling back to query_points", e)
+        logger.warning(
+            "query_points_groups failed (%s), falling back to query_points", e
+        )
         prefetch_list = self._build_prefetch_list(
-            query_colbert, query_minilm, candidate_pool_size,
+            query_colbert,
+            query_minilm,
+            candidate_pool_size,
             include_classes=True,
             content_feedback=content_feedback,
             form_feedback=form_feedback,
@@ -187,13 +208,16 @@ def _infer_component_paths(self, points) -> Optional[List[str]]:
     if paths:
         logger.info(
             "Inferred component_paths from %d pattern entries: %s",
-            sum(comp_counts.values()), paths[:10],
+            sum(comp_counts.values()),
+            paths[:10],
         )
     return paths or None
 
 
 def _compute_structural_features(
-    self, cand_name: str, query_components: set,
+    self,
+    cand_name: str,
+    query_components: set,
 ) -> tuple:
     """Compute 5 structural DAG features for a candidate.
 
@@ -214,7 +238,9 @@ def _compute_structural_features(
             break
 
     max_depth = max(self._learned_dag_depth.values()) if self._learned_dag_depth else 1
-    depth_ratio = self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
+    depth_ratio = (
+        self._learned_dag_depth.get(cand_name, 0) / max_depth if max_depth > 0 else 0.0
+    )
 
     def _ancestors(name):
         anc = set()
@@ -249,8 +275,13 @@ def _compute_content_density(point) -> float:
         return 0.0
 
     content_keys = [
-        "title", "subtitle", "buttons", "items",
-        "content_texts", "chips", "text",
+        "title",
+        "subtitle",
+        "buttons",
+        "items",
+        "content_texts",
+        "chips",
+        "text",
     ]
     populated = 0
     for key in content_keys:
@@ -299,11 +330,23 @@ def _compute_learned_features(
         sim_content = 0.0
 
         if comp_vec and query_colbert:
-            sim_c = self._maxsim(query_colbert, comp_vec) if isinstance(comp_vec[0], list) else self._cosine_similarity(query_colbert[0], comp_vec)
+            sim_c = (
+                self._maxsim(query_colbert, comp_vec)
+                if isinstance(comp_vec[0], list)
+                else self._cosine_similarity(query_colbert[0], comp_vec)
+            )
         if inp_vec and query_colbert:
-            sim_i = self._maxsim(query_colbert, inp_vec) if isinstance(inp_vec[0], list) else self._cosine_similarity(query_colbert[0], inp_vec)
+            sim_i = (
+                self._maxsim(query_colbert, inp_vec)
+                if isinstance(inp_vec[0], list)
+                else self._cosine_similarity(query_colbert[0], inp_vec)
+            )
         if rel_vec and query_minilm:
-            if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
+            if (
+                isinstance(rel_vec, list)
+                and rel_vec
+                and not isinstance(rel_vec[0], list)
+            ):
                 sim_r = self._cosine_similarity(query_minilm, rel_vec)
         if content_vec and query_content_minilm:
             is_dense = (
@@ -312,25 +355,38 @@ def _compute_learned_features(
                 and not isinstance(content_vec[0], list)
             )
             if is_dense:
-                sim_content = self._cosine_similarity(
-                    query_content_minilm, content_vec
-                )
+                sim_content = self._cosine_similarity(query_content_minilm, content_vec)
 
         if self._learned_feature_version >= 5:
             # V5: dual-head (17D) = V4 + content_density + content_form_alignment
             cand_name = (point.payload or {}).get("name", "")
-            is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+            is_parent, is_child, is_sibling, depth_ratio, n_shared = (
                 self._compute_structural_features(cand_name, query_components)
+            )
 
             if comp_vec and query_colbert and isinstance(comp_vec[0], list):
-                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(
+                    query_colbert, comp_vec
+                )
             else:
-                sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+                sc_m, sc_x, sc_s, sc_cv = (
+                    sim_c,
+                    sim_c,
+                    0.0,
+                    (1.0 if sim_c > 0.4 else 0.0),
+                )
 
             if inp_vec and query_colbert and isinstance(inp_vec[0], list):
-                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(
+                    query_colbert, inp_vec
+                )
             else:
-                si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+                si_m, si_x, si_s, si_cv = (
+                    sim_i,
+                    sim_i,
+                    0.0,
+                    (1.0 if sim_i > 0.4 else 0.0),
+                )
 
             # Content density: ratio of non-empty content fields
             content_density = self._compute_content_density(point)
@@ -348,69 +404,147 @@ def _compute_learned_features(
                         query_content_minilm, rel_vec
                     )
 
-            features_list.append([
-                sc_m, sc_x, sc_s, sc_cv,
-                si_m, si_x, si_s, si_cv,
-                sim_r,
-                is_parent, is_child, is_sibling, depth_ratio, n_shared,
-                sim_content,
-                content_density,
-                content_form_alignment,
-            ])
+            features_list.append(
+                [
+                    sc_m,
+                    sc_x,
+                    sc_s,
+                    sc_cv,
+                    si_m,
+                    si_x,
+                    si_s,
+                    si_cv,
+                    sim_r,
+                    is_parent,
+                    is_child,
+                    is_sibling,
+                    depth_ratio,
+                    n_shared,
+                    sim_content,
+                    content_density,
+                    content_form_alignment,
+                ]
+            )
 
         elif self._learned_feature_version == 4:
             # V4: V3 + content similarity (15D)
             cand_name = (point.payload or {}).get("name", "")
-            is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+            is_parent, is_child, is_sibling, depth_ratio, n_shared = (
                 self._compute_structural_features(cand_name, query_components)
+            )
 
             if comp_vec and query_colbert and isinstance(comp_vec[0], list):
-                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(
+                    query_colbert, comp_vec
+                )
             else:
-                sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+                sc_m, sc_x, sc_s, sc_cv = (
+                    sim_c,
+                    sim_c,
+                    0.0,
+                    (1.0 if sim_c > 0.4 else 0.0),
+                )
 
             if inp_vec and query_colbert and isinstance(inp_vec[0], list):
-                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(
+                    query_colbert, inp_vec
+                )
             else:
-                si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+                si_m, si_x, si_s, si_cv = (
+                    sim_i,
+                    sim_i,
+                    0.0,
+                    (1.0 if sim_i > 0.4 else 0.0),
+                )
 
-            features_list.append([
-                sc_m, sc_x, sc_s, sc_cv,
-                si_m, si_x, si_s, si_cv,
-                sim_r,
-                is_parent, is_child, is_sibling, depth_ratio, n_shared,
-                sim_content,
-            ])
+            features_list.append(
+                [
+                    sc_m,
+                    sc_x,
+                    sc_s,
+                    sc_cv,
+                    si_m,
+                    si_x,
+                    si_s,
+                    si_cv,
+                    sim_r,
+                    is_parent,
+                    is_child,
+                    is_sibling,
+                    depth_ratio,
+                    n_shared,
+                    sim_content,
+                ]
+            )
 
         elif self._learned_feature_version == 3:
             # V3: decomposed MaxSim + structural (14D)
             cand_name = (point.payload or {}).get("name", "")
-            is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+            is_parent, is_child, is_sibling, depth_ratio, n_shared = (
                 self._compute_structural_features(cand_name, query_components)
+            )
 
             if comp_vec and query_colbert and isinstance(comp_vec[0], list):
-                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(query_colbert, comp_vec)
+                sc_m, sc_x, sc_s, sc_cv = self._maxsim_decomposed(
+                    query_colbert, comp_vec
+                )
             else:
-                sc_m, sc_x, sc_s, sc_cv = sim_c, sim_c, 0.0, (1.0 if sim_c > 0.4 else 0.0)
+                sc_m, sc_x, sc_s, sc_cv = (
+                    sim_c,
+                    sim_c,
+                    0.0,
+                    (1.0 if sim_c > 0.4 else 0.0),
+                )
 
             if inp_vec and query_colbert and isinstance(inp_vec[0], list):
-                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(query_colbert, inp_vec)
+                si_m, si_x, si_s, si_cv = self._maxsim_decomposed(
+                    query_colbert, inp_vec
+                )
             else:
-                si_m, si_x, si_s, si_cv = sim_i, sim_i, 0.0, (1.0 if sim_i > 0.4 else 0.0)
+                si_m, si_x, si_s, si_cv = (
+                    sim_i,
+                    sim_i,
+                    0.0,
+                    (1.0 if sim_i > 0.4 else 0.0),
+                )
 
-            features_list.append([
-                sc_m, sc_x, sc_s, sc_cv,
-                si_m, si_x, si_s, si_cv,
-                sim_r,
-                is_parent, is_child, is_sibling, depth_ratio, n_shared,
-            ])
+            features_list.append(
+                [
+                    sc_m,
+                    sc_x,
+                    sc_s,
+                    sc_cv,
+                    si_m,
+                    si_x,
+                    si_s,
+                    si_cv,
+                    sim_r,
+                    is_parent,
+                    is_child,
+                    is_sibling,
+                    depth_ratio,
+                    n_shared,
+                ]
+            )
 
         elif self._learned_feature_version == 2:
             # V2: scalar MaxSim + structural
             cand_name = (point.payload or {}).get("name", "")
-            is_parent, is_child, is_sibling, depth_ratio, n_shared = \
+            is_parent, is_child, is_sibling, depth_ratio, n_shared = (
                 self._compute_structural_features(cand_name, query_components)
-            features_list.append([sim_c, sim_i, sim_r, is_parent, is_child, is_sibling, depth_ratio, n_shared])
+            )
+            features_list.append(
+                [
+                    sim_c,
+                    sim_i,
+                    sim_r,
+                    is_parent,
+                    is_child,
+                    is_sibling,
+                    depth_ratio,
+                    n_shared,
+                ]
+            )
 
         else:
             # V1: norm features (legacy)
@@ -425,12 +559,19 @@ def _compute_learned_features(
                     flat = v
                 return math.sqrt(sum(x * x for x in flat))
 
-            features_list.append([
-                sim_c, sim_i, sim_r,
-                _vec_norm(query_colbert), _vec_norm(query_colbert),
-                _vec_norm(query_minilm) if query_minilm else 0.0,
-                _vec_norm(comp_vec), _vec_norm(inp_vec), _vec_norm(rel_vec),
-            ])
+            features_list.append(
+                [
+                    sim_c,
+                    sim_i,
+                    sim_r,
+                    _vec_norm(query_colbert),
+                    _vec_norm(query_colbert),
+                    _vec_norm(query_minilm) if query_minilm else 0.0,
+                    _vec_norm(comp_vec),
+                    _vec_norm(inp_vec),
+                    _vec_norm(rel_vec),
+                ]
+            )
 
         points_data.append((sim_c, sim_r, sim_i, sim_content, point))
 
@@ -498,7 +639,10 @@ def _categorize_scored_results(
             if payload.get("form_feedback") == "positive":
                 relationship_results.append(result)
             if result not in pattern_results:
-                if payload.get("content_feedback") != "positive" and payload.get("form_feedback") != "positive":
+                if (
+                    payload.get("content_feedback") != "positive"
+                    and payload.get("form_feedback") != "positive"
+                ):
                     pattern_results.append(result)
         else:
             class_results.append(result)

@@ -43,6 +43,7 @@ logger = setup_logger()
 # enabled regardless of the routing provider.
 _ANTHROPIC_MODEL_STEMS = ("claude-",)
 
+
 def is_anthropic_model(model: str) -> bool:
     """Return True if *model* is an Anthropic Claude model.
 
@@ -53,6 +54,7 @@ def is_anthropic_model(model: str) -> bool:
     # Strip the provider prefix (e.g. "anthropic/", "openai/")
     bare = model.split("/", 1)[-1] if "/" in model else model
     return any(bare.startswith(stem) for stem in _ANTHROPIC_MODEL_STEMS)
+
 
 class LiteLLMSamplingHandler:
     """FastMCP sampling handler that routes through LiteLLM.
@@ -205,9 +207,9 @@ class LiteLLMSamplingHandler:
                 if span_ctx.is_valid:
                     _parent_obs_id = format(span_ctx.span_id, "016x")
                     # Also forward OTel span as parent (for future LiteLLM support)
-                    kwargs.setdefault("metadata", {})[
-                        "litellm_parent_otel_span"
-                    ] = current_span
+                    kwargs.setdefault("metadata", {})["litellm_parent_otel_span"] = (
+                        current_span
+                    )
             except Exception:
                 pass
 

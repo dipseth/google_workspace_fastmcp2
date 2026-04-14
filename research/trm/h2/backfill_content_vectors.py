@@ -22,6 +22,7 @@ import numpy as np
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"))
 except ImportError:
     pass  # dotenv not available in research venv; env vars set externally
@@ -149,7 +150,9 @@ def backfill(collection: str, dry_run: bool = True):
 
     # Show what we'd backfill
     for item in needs_backfill[:10]:
-        print(f"  {str(item['id'])[:8]} | {item['title'][:40]} | {item['content_text'][:60]}")
+        print(
+            f"  {str(item['id'])[:8]} | {item['title'][:40]} | {item['content_text'][:60]}"
+        )
     if len(needs_backfill) > 10:
         print(f"  ... and {len(needs_backfill) - 10} more")
 

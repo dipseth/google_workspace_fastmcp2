@@ -209,7 +209,9 @@ class TestDashboardCacheMiddlewareStoreToRedis:
         mod._redis_store = mock_store
 
         try:
-            await mod.DashboardCacheMiddleware._store_to_redis("my_tool", {"key": "val"})
+            await mod.DashboardCacheMiddleware._store_to_redis(
+                "my_tool", {"key": "val"}
+            )
             mock_store.put.assert_called_once()
             call_args = mock_store.put.call_args
             assert call_args[0][0] == "dashboard:my_tool"

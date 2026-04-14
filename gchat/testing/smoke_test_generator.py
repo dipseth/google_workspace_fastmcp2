@@ -137,6 +137,7 @@ SAMPLE_IMAGES = [
     "https://picsum.photos/id/237/200/200",  # Dog
 ]
 
+
 @dataclass
 class SmokeTestConfig:
     """Configuration for smoke test generation."""
@@ -148,6 +149,7 @@ class SmokeTestConfig:
     include_image: bool = False
     include_divider: bool = True
     test_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+
 
 @dataclass
 class SmokeTestResult:
@@ -162,6 +164,7 @@ class SmokeTestResult:
     success: bool = False
     error: Optional[str] = None
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
 
 class SmokeTestGenerator:
     """
@@ -936,9 +939,11 @@ class SmokeTestGenerator:
 
         return len(errors) == 0, errors
 
+
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
+
 
 def generate_smoke_test_card(
     webhook_url: Optional[str] = None,
@@ -958,6 +963,7 @@ def generate_smoke_test_card(
     config = SmokeTestConfig(webhook_url=webhook_url)
     return generator.generate_variant_card(config, variant)
 
+
 async def run_smoke_tests(
     webhook_url: str,
     num_iterations: int = 1,
@@ -976,6 +982,7 @@ async def run_smoke_tests(
     """
     generator = SmokeTestGenerator()
     return await generator.run_smoke_test(webhook_url, num_iterations, variants)
+
 
 # =============================================================================
 # CLI ENTRY POINT

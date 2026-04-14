@@ -60,9 +60,7 @@ def apply_regex_replacements(
             match_count = len(matches)
 
             # Apply replacement
-            modified_content = pattern.sub(
-                operation.replacement, modified_content
-            )
+            modified_content = pattern.sub(operation.replacement, modified_content)
 
             total_replacements += match_count
             logger.info(
@@ -72,9 +70,7 @@ def apply_regex_replacements(
             )
 
         except Exception as e:
-            logger.error(
-                f"[apply_regex_replacements] Error in operation {i + 1}: {e}"
-            )
+            logger.error(f"[apply_regex_replacements] Error in operation {i + 1}: {e}")
             raise
 
     logger.info(

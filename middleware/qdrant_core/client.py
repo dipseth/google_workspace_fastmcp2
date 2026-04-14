@@ -285,7 +285,9 @@ class QdrantClientManager:
                 self.embedder = await service.get_model("minilm")
                 self.embedding_dim = service.get_dimension("minilm")
 
-                logger.info(f"✅ FastEmbed model loaded via EmbeddingService (dim: {self.embedding_dim})")
+                logger.info(
+                    f"✅ FastEmbed model loaded via EmbeddingService (dim: {self.embedding_dim})"
+                )
 
             except Exception as e:
                 logger.error(f"❌ Failed to load FastEmbed model: {e}")

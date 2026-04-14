@@ -83,13 +83,17 @@ class UnifiedSearchDataset(Dataset):
                 feats.append(f)
             feat_tensor = torch.tensor(feats, dtype=torch.float32)
             if pad > 0:
-                feat_tensor = torch.cat([feat_tensor, torch.zeros(pad, len(FEATURE_NAMES_V5))])
+                feat_tensor = torch.cat(
+                    [feat_tensor, torch.zeros(pad, len(FEATURE_NAMES_V5))]
+                )
 
             # Labels
             form_labels = [c.get("form_label", 0.0) for c in cands]
             content_labels = [c.get("content_label", 0.0) for c in cands]
             form_tensor = torch.tensor(form_labels + [0.0] * pad, dtype=torch.float32)
-            content_tensor = torch.tensor(content_labels + [0.0] * pad, dtype=torch.float32)
+            content_tensor = torch.tensor(
+                content_labels + [0.0] * pad, dtype=torch.float32
+            )
 
             # Content embedding (384D, same for all candidates in group)
             content_emb = g.get("content_embedding")
@@ -128,7 +132,10 @@ class UnifiedSearchDataset(Dataset):
                 feats[:, drop_idx] = 0.0
 
             # Structural masking
-            if self.structural_mask_prob > 0 and torch.rand(1).item() < self.structural_mask_prob:
+            if (
+                self.structural_mask_prob > 0
+                and torch.rand(1).item() < self.structural_mask_prob
+            ):
                 feats[:, self._structural_indices] = 0.0
 
             # Candidate shuffle
@@ -146,11 +153,11 @@ class UnifiedSearchDataset(Dataset):
         content_emb_broadcast = content_emb.unsqueeze(0).expand(K, -1)
 
         return {
-            "structural_features": feats,             # [K, 17]
-            "content_embedding": content_emb_broadcast, # [K, 384]
-            "form_labels": form_labels,                # [K]
-            "content_labels": content_labels,          # [K]
-            "mask": mask,                              # [K]
+            "structural_features": feats,  # [K, 17]
+            "content_embedding": content_emb_broadcast,  # [K, 384]
+            "form_labels": form_labels,  # [K]
+            "content_labels": content_labels,  # [K]
+            "mask": mask,  # [K]
         }
 
 
@@ -177,10 +184,12 @@ class UnifiedBuildDataset(Dataset):
         if self.noise_std > 0:
             content_emb = content_emb + torch.randn_like(content_emb) * self.noise_std
         pool_id = torch.tensor(s["slot_type_id"], dtype=torch.long)
-        structural = torch.zeros(len(FEATURE_NAMES_V5))  # No structural context in build mode
+        structural = torch.zeros(
+            len(FEATURE_NAMES_V5)
+        )  # No structural context in build mode
         return {
             "structural_features": structural,  # [17]
-            "content_embedding": content_emb,   # [384]
+            "content_embedding": content_emb,  # [384]
             "pool_id": pool_id,
         }
 
@@ -225,11 +234,11 @@ def _head_metrics(scores, labels, device):
 
 def compute_search_loss(model, batch, device, weights):
     """Search-mode loss: form + content listwise CE + halt BCE."""
-    structural = batch["structural_features"].to(device)   # [B, K, 17]
-    content_emb = batch["content_embedding"].to(device)    # [B, K, 384]
-    form_labels = batch["form_labels"].to(device)          # [B, K]
-    content_labels = batch["content_labels"].to(device)    # [B, K]
-    mask = batch["mask"].to(device)                        # [B, K]
+    structural = batch["structural_features"].to(device)  # [B, K, 17]
+    content_emb = batch["content_embedding"].to(device)  # [B, K, 384]
+    form_labels = batch["form_labels"].to(device)  # [B, K]
+    content_labels = batch["content_labels"].to(device)  # [B, K]
+    mask = batch["mask"].to(device)  # [B, K]
 
     B, K, Fs = structural.shape
 
@@ -310,8 +319,8 @@ def compute_search_loss(model, batch, device, weights):
 def compute_build_loss(model, batch, device):
     """Build-mode loss: softmax CE for pool classification."""
     structural = batch["structural_features"].to(device)  # [B, 17]
-    content_emb = batch["content_embedding"].to(device)   # [B, 384]
-    pool_targets = batch["pool_id"].to(device)             # [B]
+    content_emb = batch["content_embedding"].to(device)  # [B, 384]
+    pool_targets = batch["pool_id"].to(device)  # [B]
 
     out = model(structural, content_emb, mode="build")
     pool_logits = out["pool_logits"]  # [B, 5]
@@ -372,10 +381,18 @@ def get_device():
 
 def main():
     parser = argparse.ArgumentParser(description="Train UnifiedTRN")
-    parser.add_argument("--search-data", type=str, required=True,
-                        help="MWQueryGroups JSON or unified JSON")
-    parser.add_argument("--build-data", type=str, default=None,
-                        help="Slot training data JSON (optional if unified format)")
+    parser.add_argument(
+        "--search-data",
+        type=str,
+        required=True,
+        help="MWQueryGroups JSON or unified JSON",
+    )
+    parser.add_argument(
+        "--build-data",
+        type=str,
+        default=None,
+        help="Slot training data JSON (optional if unified format)",
+    )
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -389,10 +406,15 @@ def main():
     parser.add_argument("--w-content", type=float, default=0.2)
     parser.add_argument("--w-pool", type=float, default=0.3)
     parser.add_argument("--w-halt", type=float, default=0.1)
-    parser.add_argument("--checkpoint-dir", type=str,
-                        default=str(Path(__file__).parent / "checkpoints"))
-    parser.add_argument("--domain", type=str, default="gchat",
-                        help="Domain ID for pool vocab (gchat, email, etc.)")
+    parser.add_argument(
+        "--checkpoint-dir", type=str, default=str(Path(__file__).parent / "checkpoints")
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        default="gchat",
+        help="Domain ID for pool vocab (gchat, email, etc.)",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -419,7 +441,9 @@ def main():
         # Unified format
         search_groups = raw["search_groups"]
         build_pairs = raw.get("build_pairs", [])
-        logger.info(f"Unified format: {len(search_groups)} search, {len(build_pairs)} build")
+        logger.info(
+            f"Unified format: {len(search_groups)} search, {len(build_pairs)} build"
+        )
     else:
         # Separate files
         search_groups = raw
@@ -427,7 +451,9 @@ def main():
         if args.build_data:
             with open(args.build_data) as f:
                 build_pairs = json.load(f)
-        logger.info(f"Separate files: {len(search_groups)} search, {len(build_pairs)} build")
+        logger.info(
+            f"Separate files: {len(search_groups)} search, {len(build_pairs)} build"
+        )
 
     # Train/val split (search)
     random.shuffle(search_groups)
@@ -450,34 +476,53 @@ def main():
 
     # Create datasets
     train_search_ds = UnifiedSearchDataset(
-        train_search, noise_std=args.noise_std,
-        feature_dropout=0.1, structural_mask_prob=0.0, training=True,
+        train_search,
+        noise_std=args.noise_std,
+        feature_dropout=0.1,
+        structural_mask_prob=0.0,
+        training=True,
     )
     val_search_ds = UnifiedSearchDataset(val_search, training=False)
 
-    train_search_loader = DataLoader(train_search_ds, batch_size=args.batch_size, shuffle=True)
-    val_search_loader = DataLoader(val_search_ds, batch_size=args.batch_size, shuffle=False)
+    train_search_loader = DataLoader(
+        train_search_ds, batch_size=args.batch_size, shuffle=True
+    )
+    val_search_loader = DataLoader(
+        val_search_ds, batch_size=args.batch_size, shuffle=False
+    )
 
     if has_build:
-        train_build_ds = UnifiedBuildDataset(train_build_pairs, noise_std=args.noise_std)
+        train_build_ds = UnifiedBuildDataset(
+            train_build_pairs, noise_std=args.noise_std
+        )
         val_build_ds = UnifiedBuildDataset(val_build_pairs, noise_std=0.0)
         # Guard against empty datasets after dedup/filtering (small domains)
         if len(train_build_ds) == 0:
-            logger.warning("Build dataset empty after dedup — pool_head will not be trained")
+            logger.warning(
+                "Build dataset empty after dedup — pool_head will not be trained"
+            )
             has_build = False
             train_build_loader = None
             val_build_loader = DataLoader([], batch_size=1)
         else:
-            train_build_loader = DataLoader(train_build_ds, batch_size=args.batch_size * 4, shuffle=True)
-            val_build_loader = DataLoader(val_build_ds, batch_size=args.batch_size * 4, shuffle=False)
+            train_build_loader = DataLoader(
+                train_build_ds, batch_size=args.batch_size * 4, shuffle=True
+            )
+            val_build_loader = DataLoader(
+                val_build_ds, batch_size=args.batch_size * 4, shuffle=False
+            )
     else:
         train_build_loader = None
         val_build_loader = DataLoader([], batch_size=1)
 
-    logger.info(f"Train: {len(train_search_ds)} search groups, "
-                f"{len(train_build_ds) if has_build else 0} build items")
-    logger.info(f"Val: {len(val_search_ds)} search groups, "
-                f"{len(val_build_ds) if has_build else 0} build items")
+    logger.info(
+        f"Train: {len(train_search_ds)} search groups, "
+        f"{len(train_build_ds) if has_build else 0} build items"
+    )
+    logger.info(
+        f"Val: {len(val_search_ds)} search groups, "
+        f"{len(val_build_ds) if has_build else 0} build items"
+    )
 
     # Build model — resolve pool count from domain config
     domain = get_domain_or_default(args.domain)
@@ -522,7 +567,9 @@ def main():
 
         for search_batch in search_iter:
             # Search step
-            search_loss, s_metrics = compute_search_loss(model, search_batch, device, weights)
+            search_loss, s_metrics = compute_search_loss(
+                model, search_batch, device, weights
+            )
             epoch_search_loss += s_metrics["form_loss"]
             epoch_form_top1 += s_metrics["form_top1"]
             n_search_batches += 1
@@ -555,7 +602,9 @@ def main():
         avg_pool_acc = epoch_pool_acc / max(n_build_batches, 1)
 
         # Validate
-        val_metrics = evaluate(model, val_search_loader, val_build_loader, device, weights)
+        val_metrics = evaluate(
+            model, val_search_loader, val_build_loader, device, weights
+        )
         val_form_top1 = val_metrics.get("form_top1", 0)
         val_content_top1 = val_metrics.get("content_top1", 0)
         val_pool_acc = val_metrics.get("pool_acc", 0)
@@ -613,8 +662,10 @@ def main():
                 "val_accs": val_accs[:],
             }
             torch.save(checkpoint, checkpoint_path)
-            logger.info(f"  → Saved checkpoint (val_form={val_form_top1:.1%}, "
-                        f"val_pool={val_pool_acc:.1%})")
+            logger.info(
+                f"  → Saved checkpoint (val_form={val_form_top1:.1%}, "
+                f"val_pool={val_pool_acc:.1%})"
+            )
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
@@ -629,11 +680,13 @@ def main():
         saved["train_accs"] = train_accs
         saved["val_accs"] = val_accs
         torch.save(saved, checkpoint_path)
-        logger.info(f"Updated checkpoint with full loss history ({len(train_losses)} epochs)")
+        logger.info(
+            f"Updated checkpoint with full loss history ({len(train_losses)} epochs)"
+        )
 
     # Final summary
     best = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"Best epoch: {best['epoch']}")
     logger.info(f"  form_top1:     {best['val_form_top1']:.1%}")
     logger.info(f"  content_top1:  {best['val_content_top1']:.1%}")

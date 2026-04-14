@@ -46,9 +46,7 @@ def _merge_results_rrf(
                 result_by_id[result_id] = result
 
     # Sort by RRF score descending
-    sorted_ids = sorted(
-        rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True
-    )
+    sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
 
     # Build final results
     merged = []

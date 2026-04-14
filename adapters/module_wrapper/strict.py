@@ -24,6 +24,7 @@ CARD_BUILDER_STRICT: bool = os.environ.get("CARD_BUILDER_STRICT", "").lower() in
     "yes",
 )
 
+
 def warn_strict(message: str) -> None:
     """Log a WARNING with traceback when strict mode is enabled."""
     if CARD_BUILDER_STRICT:

@@ -1,4 +1,5 @@
 """ML evaluation endpoints for the learned scorer MLP diagnostic dashboard."""
+
 import json
 import math
 from pathlib import Path
@@ -23,23 +24,43 @@ _SYNTHETIC_GROUPS_V3 = _H2_DIR / "mw_synthetic_groups_v3.json"
 _SYNTHETIC_GROUPS_V5 = _H2_DIR / "mw_synthetic_groups_v5.json"
 
 FEATURE_NAMES_V1 = [
-    "sim_components", "sim_inputs", "sim_relationships",
-    "q_comp_norm", "q_inp_norm", "q_rel_norm",
-    "c_comp_norm", "c_inp_norm", "c_rel_norm",
+    "sim_components",
+    "sim_inputs",
+    "sim_relationships",
+    "q_comp_norm",
+    "q_inp_norm",
+    "q_rel_norm",
+    "c_comp_norm",
+    "c_inp_norm",
+    "c_rel_norm",
 ]
 
 FEATURE_NAMES_V2 = [
-    "sim_components", "sim_inputs", "sim_relationships",
-    "is_parent", "is_child", "is_sibling",
-    "depth_ratio", "n_shared_ancestors",
+    "sim_components",
+    "sim_inputs",
+    "sim_relationships",
+    "is_parent",
+    "is_child",
+    "is_sibling",
+    "depth_ratio",
+    "n_shared_ancestors",
 ]
 
 FEATURE_NAMES_V3 = [
-    "sim_c_mean", "sim_c_max", "sim_c_std", "sim_c_coverage",
-    "sim_i_mean", "sim_i_max", "sim_i_std", "sim_i_coverage",
+    "sim_c_mean",
+    "sim_c_max",
+    "sim_c_std",
+    "sim_c_coverage",
+    "sim_i_mean",
+    "sim_i_max",
+    "sim_i_std",
+    "sim_i_coverage",
     "sim_relationships",
-    "is_parent", "is_child", "is_sibling",
-    "depth_ratio", "n_shared_ancestors",
+    "is_parent",
+    "is_child",
+    "is_sibling",
+    "depth_ratio",
+    "n_shared_ancestors",
 ]
 
 FEATURE_NAMES_V5 = FEATURE_NAMES_V3 + [
@@ -65,6 +86,7 @@ _all_groups = None
 def _load_torch():
     """Import torch lazily."""
     import torch
+
     return torch
 
 
@@ -77,9 +99,7 @@ def _load_model():
     torch = _load_torch()
     import torch.nn as nn
 
-    ckpt = torch.load(
-        str(_CHECKPOINT_PATH), map_location="cpu", weights_only=False
-    )
+    ckpt = torch.load(str(_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
     hidden = ckpt.get("hidden_dim", 32)
     dropout = ckpt.get("dropout", 0.15)
     input_dim = ckpt.get("input_dim", 9)
@@ -103,9 +123,11 @@ def _load_model():
                 super().__init__()
                 self.backbone = nn.Sequential(
                     nn.Linear(input_dim, hidden),
-                    nn.SiLU(), nn.Dropout(dropout),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
                     nn.Linear(hidden, hidden),
-                    nn.SiLU(), nn.Dropout(dropout),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
                 )
                 self.form_head = nn.Sequential(
                     nn.Linear(hidden, head_dim),
@@ -117,6 +139,7 @@ def _load_model():
                     nn.SiLU(),
                     nn.Linear(head_dim, 1),
                 )
+
             def forward(self, x):
                 shared = self.backbone(x)
                 return self.form_head(shared), self.content_head(shared)
@@ -181,8 +204,14 @@ def _load_groups():
                 qdrant = json.load(f)
             for g in qdrant:
                 for c in g.get("candidates", []):
-                    for norm_key in ["q_comp_norm", "q_inp_norm", "q_rel_norm",
-                                     "c_comp_norm", "c_inp_norm", "c_rel_norm"]:
+                    for norm_key in [
+                        "q_comp_norm",
+                        "q_inp_norm",
+                        "q_rel_norm",
+                        "c_comp_norm",
+                        "c_inp_norm",
+                        "c_rel_norm",
+                    ]:
                         c.setdefault(norm_key, 0.0)
                 all_groups.append(g)
 
@@ -241,10 +270,7 @@ def _score_candidates_dual(
             form_s, content_s = model(x)
             form_list = form_s.squeeze(-1).tolist()
             content_list = content_s.squeeze(-1).tolist()
-            combined = [
-                0.6 * f + 0.4 * c
-                for f, c in zip(form_list, content_list)
-            ]
+            combined = [0.6 * f + 0.4 * c for f, c in zip(form_list, content_list)]
             return form_list, content_list, combined
         scores = model(x).squeeze(-1).tolist()
         return scores, [0.0] * len(scores), scores
@@ -366,7 +392,10 @@ _FEATURE_GROUPS_V5 = {
     "sim_i": {"indices": [4, 5, 6, 7], "label": "Inputs ColBERT (sim_i_*)"},
     "sim_r": {"indices": [8], "label": "Relationships MiniLM (sim_r)"},
     "structural": {"indices": [9, 10, 11, 12, 13], "label": "Structural DAG"},
-    "content": {"indices": [14, 15, 16], "label": "Content (sim_content, density, alignment)"},
+    "content": {
+        "indices": [14, 15, 16],
+        "label": "Content (sim_content, density, alignment)",
+    },
 }
 
 _FEATURE_GROUPS_V2 = {
@@ -427,14 +456,16 @@ async def group_ablation():
     single_results = []
     for name, info in groups.items():
         acc = compute_accuracy_masked(info["indices"])
-        single_results.append({
-            "group": name,
-            "label": info["label"],
-            "indices": info["indices"],
-            "features_zeroed": [FEATURE_NAMES[i] for i in info["indices"]],
-            "accuracy": round(acc, 4),
-            "accuracy_drop": round(baseline - acc, 4),
-        })
+        single_results.append(
+            {
+                "group": name,
+                "label": info["label"],
+                "indices": info["indices"],
+                "features_zeroed": [FEATURE_NAMES[i] for i in info["indices"]],
+                "accuracy": round(acc, 4),
+                "accuracy_drop": round(baseline - acc, 4),
+            }
+        )
 
     # Pairwise group ablation
     group_names = list(groups.keys())
@@ -444,13 +475,15 @@ async def group_ablation():
             g1, g2 = group_names[i], group_names[j]
             combined = groups[g1]["indices"] + groups[g2]["indices"]
             acc = compute_accuracy_masked(combined)
-            pairwise_results.append({
-                "groups": [g1, g2],
-                "labels": [groups[g1]["label"], groups[g2]["label"]],
-                "indices": combined,
-                "accuracy": round(acc, 4),
-                "accuracy_drop": round(baseline - acc, 4),
-            })
+            pairwise_results.append(
+                {
+                    "groups": [g1, g2],
+                    "labels": [groups[g1]["label"], groups[g2]["label"]],
+                    "indices": combined,
+                    "accuracy": round(acc, 4),
+                    "accuracy_drop": round(baseline - acc, 4),
+                }
+            )
 
     # "Only this group" ablation — zero everything EXCEPT this group
     only_results = []
@@ -459,11 +492,13 @@ async def group_ablation():
         keep = set(info["indices"])
         mask = [i for i in all_indices if i not in keep]
         acc = compute_accuracy_masked(mask)
-        only_results.append({
-            "group": name,
-            "label": info["label"],
-            "accuracy_with_only_this_group": round(acc, 4),
-        })
+        only_results.append(
+            {
+                "group": name,
+                "label": info["label"],
+                "accuracy_with_only_this_group": round(acc, 4),
+            }
+        )
 
     return {
         "feature_version": _feature_version,
@@ -509,7 +544,9 @@ async def per_group_performance():
         labels = [c.get("form_label", c.get("label", 0.0)) for c in candidates]
 
         # Find rank of first correct candidate
-        sorted_indices = sorted(range(len(score_list)), key=lambda i: score_list[i], reverse=True)
+        sorted_indices = sorted(
+            range(len(score_list)), key=lambda i: score_list[i], reverse=True
+        )
         predicted_rank = None
         for rank, idx in enumerate(sorted_indices, 1):
             if labels[idx] > 0.5:
@@ -522,7 +559,9 @@ async def per_group_performance():
         # Score margin: gap between highest positive and highest negative
         pos_scores = [s for s, lb in zip(score_list, labels) if lb > 0.5]
         neg_scores = [s for s, lb in zip(score_list, labels) if lb <= 0.5]
-        margin = (max(pos_scores) - max(neg_scores)) if pos_scores and neg_scores else 0.0
+        margin = (
+            (max(pos_scores) - max(neg_scores)) if pos_scores and neg_scores else 0.0
+        )
 
         is_correct = predicted_rank == 1
         if is_correct:
@@ -533,18 +572,27 @@ async def per_group_performance():
         group_name = group.get("query_name") or group.get("query_id", "unknown")
         n_positive = sum(1 for lb in labels if lb > 0.5)
 
-        groups_detail.append({
-            "group_name": group_name,
-            "query_dsl": group.get("query_dsl", ""),
-            "n_candidates": len(candidates),
-            "n_positive": n_positive,
-            "predicted_rank": predicted_rank,
-            "score_margin": round(margin, 4),
-            "correct": is_correct,
-            "top_predicted": candidates[sorted_indices[0]].get("name", "?"),
-            "expected": next((c.get("name", "?") for c in candidates if c.get("form_label", c.get("label", 0)) > 0.5), "?"),
-            "top_score": round(score_list[sorted_indices[0]], 4),
-        })
+        groups_detail.append(
+            {
+                "group_name": group_name,
+                "query_dsl": group.get("query_dsl", ""),
+                "n_candidates": len(candidates),
+                "n_positive": n_positive,
+                "predicted_rank": predicted_rank,
+                "score_margin": round(margin, 4),
+                "correct": is_correct,
+                "top_predicted": candidates[sorted_indices[0]].get("name", "?"),
+                "expected": next(
+                    (
+                        c.get("name", "?")
+                        for c in candidates
+                        if c.get("form_label", c.get("label", 0)) > 0.5
+                    ),
+                    "?",
+                ),
+                "top_score": round(score_list[sorted_indices[0]], 4),
+            }
+        )
 
     return {
         "groups": groups_detail,
@@ -552,7 +600,11 @@ async def per_group_performance():
         "correct_count": correct_count,
         "failure_count": total_count - correct_count,
         "accuracy": round(correct_count / total_count, 4) if total_count else 0,
-        "mean_rank": round(sum(g["predicted_rank"] for g in groups_detail) / len(groups_detail), 3) if groups_detail else 0,
+        "mean_rank": round(
+            sum(g["predicted_rank"] for g in groups_detail) / len(groups_detail), 3
+        )
+        if groups_detail
+        else 0,
         "mean_margin": round(float(np.mean(all_margins)), 4) if all_margins else 0,
     }
 
@@ -580,7 +632,12 @@ async def weight_visualization():
         head_specs = [
             (f"form_head.layer1 ({hidden}→{head_dim})", "form_head.0", None, head_dim),
             (f"form_head.output ({head_dim}→1)", "form_head.2", None, 1),
-            (f"content_head.layer1 ({hidden}→{head_dim})", "content_head.0", None, head_dim),
+            (
+                f"content_head.layer1 ({hidden}→{head_dim})",
+                "content_head.0",
+                None,
+                head_dim,
+            ),
             (f"content_head.output ({head_dim}→1)", "content_head.2", None, 1),
         ]
         layer_specs = backbone_specs + head_specs
@@ -596,13 +653,15 @@ async def weight_visualization():
     for name, prefix, input_names, out_dim in layer_specs:
         w = _state_dict[f"{prefix}.weight"]
         b = _state_dict[f"{prefix}.bias"]
-        layers.append({
-            "name": name,
-            "weight": [[round(float(v), 5) for v in row] for row in w.tolist()],
-            "bias": [round(float(v), 5) for v in b.tolist()],
-            "input_names": input_names,
-            "shape": list(w.shape),
-        })
+        layers.append(
+            {
+                "name": name,
+                "weight": [[round(float(v), 5) for v in row] for row in w.tolist()],
+                "bias": [round(float(v), 5) for v in b.tolist()],
+                "input_names": input_names,
+                "shape": list(w.shape),
+            }
+        )
 
     return {
         "layers": layers,
@@ -627,6 +686,7 @@ async def inference_inspector(req: InferenceRequest):
     # Run search through the wrapper
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
         class_results, content_patterns, form_patterns = wrapper.search_hybrid_dispatch(
@@ -639,7 +699,11 @@ async def inference_inspector(req: InferenceRequest):
             include_classes=True,
         )
 
-        all_results = list(class_results or []) + list(content_patterns or []) + list(form_patterns or [])
+        all_results = (
+            list(class_results or [])
+            + list(content_patterns or [])
+            + list(form_patterns or [])
+        )
 
         # Deduplicate by id
         seen = set()
@@ -657,7 +721,7 @@ async def inference_inspector(req: InferenceRequest):
     # Search results carry sim_components/sim_inputs/sim_relationships plus
     # any structural or decomposed fields the search pipeline exposes.
     candidates_out = []
-    for r in deduped[:req.limit]:
+    for r in deduped[: req.limit]:
         features = {f: r.get(f, 0.0) for f in FEATURE_NAMES}
         # Fallback: map V3 decomposed names to scalar search results
         if _feature_version == 3:
@@ -680,34 +744,42 @@ async def inference_inspector(req: InferenceRequest):
         with torch.no_grad():
             if _model_type == "dual_head":
                 # Backbone
-                h1_pre = model.backbone[0](x)       # Linear in→hidden
+                h1_pre = model.backbone[0](x)  # Linear in→hidden
                 h1_post = model.backbone[1](h1_pre)  # SiLU
                 # skip dropout [2] in eval mode
                 h2_pre = model.backbone[3](h1_post)  # Linear hidden→hidden
                 h2_post = model.backbone[4](h2_pre)  # SiLU
                 # Form head
-                fh1 = model.form_head[0](h2_post)    # Linear hidden→head_dim
-                fh2 = model.form_head[1](fh1)        # SiLU
-                form_out = model.form_head[2](fh2)    # Linear head_dim→1
+                fh1 = model.form_head[0](h2_post)  # Linear hidden→head_dim
+                fh2 = model.form_head[1](fh1)  # SiLU
+                form_out = model.form_head[2](fh2)  # Linear head_dim→1
                 # Content head
                 ch1 = model.content_head[0](h2_post)  # Linear hidden→head_dim
-                ch2 = model.content_head[1](ch1)      # SiLU
+                ch2 = model.content_head[1](ch1)  # SiLU
                 content_out = model.content_head[2](ch2)  # Linear head_dim→1
                 # Combined
                 output = 0.6 * form_out + 0.4 * content_out
                 extra_activations = {
-                    "form_head_hidden": [round(float(v), 4) for v in fh2.squeeze().tolist()] if fh2.dim() > 1 else [round(float(fh2.item()), 4)],
+                    "form_head_hidden": [
+                        round(float(v), 4) for v in fh2.squeeze().tolist()
+                    ]
+                    if fh2.dim() > 1
+                    else [round(float(fh2.item()), 4)],
                     "form_score": round(float(form_out.item()), 4),
-                    "content_head_hidden": [round(float(v), 4) for v in ch2.squeeze().tolist()] if ch2.dim() > 1 else [round(float(ch2.item()), 4)],
+                    "content_head_hidden": [
+                        round(float(v), 4) for v in ch2.squeeze().tolist()
+                    ]
+                    if ch2.dim() > 1
+                    else [round(float(ch2.item()), 4)],
                     "content_score": round(float(content_out.item()), 4),
                 }
             else:
-                h1_pre = model[0](x)          # Linear in→hidden
-                h1_post = model[1](h1_pre)    # SiLU
+                h1_pre = model[0](x)  # Linear in→hidden
+                h1_post = model[1](h1_pre)  # SiLU
                 # skip dropout [2] in eval mode
-                h2_pre = model[3](h1_post)    # Linear hidden→hidden
-                h2_post = model[4](h2_pre)    # SiLU
-                output = model[6](h2_post)    # Linear hidden→1
+                h2_pre = model[3](h1_post)  # Linear hidden→hidden
+                h2_post = model[4](h2_pre)  # SiLU
+                output = model[6](h2_post)  # Linear hidden→1
                 extra_activations = {}
 
         activations = {
@@ -719,14 +791,16 @@ async def inference_inspector(req: InferenceRequest):
             **extra_activations,
         }
 
-        candidates_out.append({
-            "name": r.get("name", "?"),
-            "type": r.get("type", "?"),
-            "symbol": r.get("symbol", "?"),
-            "score": round(float(output.item()), 4),
-            "features": {k: round(float(v), 4) for k, v in features.items()},
-            "activations": activations,
-        })
+        candidates_out.append(
+            {
+                "name": r.get("name", "?"),
+                "type": r.get("type", "?"),
+                "symbol": r.get("symbol", "?"),
+                "score": round(float(output.item()), 4),
+                "features": {k: round(float(v), 4) for k, v in features.items()},
+                "activations": activations,
+            }
+        )
 
     # Sort by score descending
     candidates_out.sort(key=lambda c: c["score"], reverse=True)
@@ -747,10 +821,7 @@ async def model_info():
     _load_model()
     torch = _load_torch()
 
-    n_params = sum(
-        p.numel()
-        for p in _model.parameters()
-    )
+    n_params = sum(p.numel() for p in _model.parameters())
 
     ckpt_meta = {}
     if _CHECKPOINT_PATH.exists():
@@ -760,11 +831,19 @@ async def model_info():
             weights_only=False,
         )
         for k in (
-            "model_type", "feature_version", "input_dim",
-            "hidden_dim", "head_dim", "dropout",
-            "epoch", "val_accuracy", "domain",
-            "form_weight", "content_weight",
-            "val_form_top1", "val_content_top1",
+            "model_type",
+            "feature_version",
+            "input_dim",
+            "hidden_dim",
+            "head_dim",
+            "dropout",
+            "epoch",
+            "val_accuracy",
+            "domain",
+            "form_weight",
+            "content_weight",
+            "val_form_top1",
+            "val_content_top1",
         ):
             if k in ckpt:
                 ckpt_meta[k] = ckpt[k]
@@ -803,6 +882,7 @@ async def dual_score_breakdown(req: DualScoreRequest):
 
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
         results = wrapper.search_hybrid_dispatch(
@@ -836,43 +916,27 @@ async def dual_score_breakdown(req: DualScoreRequest):
         return {"error": f"Search failed: {e}", "candidates": []}
 
     candidates_out = []
-    for r in deduped[:req.limit]:
+    for r in deduped[: req.limit]:
         entry = {
             "name": r.get("name", "?"),
             "type": r.get("type", "?"),
             "symbol": r.get("symbol", ""),
             "combined_score": round(r.get("score", 0.0), 4),
-            "sim_components": round(
-                r.get("sim_components", 0.0), 4
-            ),
-            "sim_relationships": round(
-                r.get("sim_relationships", 0.0), 4
-            ),
-            "sim_inputs": round(
-                r.get("sim_inputs", 0.0), 4
-            ),
-            "sim_content": round(
-                r.get("sim_content", 0.0), 4
-            ),
+            "sim_components": round(r.get("sim_components", 0.0), 4),
+            "sim_relationships": round(r.get("sim_relationships", 0.0), 4),
+            "sim_inputs": round(r.get("sim_inputs", 0.0), 4),
+            "sim_content": round(r.get("sim_content", 0.0), 4),
         }
 
         # If dual-head, compute per-head scores
         if _model_type == "dual_head":
-            feat_vec = [
-                r.get(f, 0.0) for f in FEATURE_NAMES
-            ]
+            feat_vec = [r.get(f, 0.0) for f in FEATURE_NAMES]
             x = torch.tensor([feat_vec], dtype=torch.float32)
             with torch.no_grad():
                 form_s, content_s = model(x)
-            entry["form_score"] = round(
-                float(form_s.item()), 4
-            )
-            entry["content_score"] = round(
-                float(content_s.item()), 4
-            )
-            entry["content_drives_form"] = (
-                entry["content_score"] > entry["form_score"]
-            )
+            entry["form_score"] = round(float(form_s.item()), 4)
+            entry["content_score"] = round(float(content_s.item()), 4)
+            entry["content_drives_form"] = entry["content_score"] > entry["form_score"]
         else:
             entry["form_score"] = entry["combined_score"]
             entry["content_score"] = 0.0
@@ -881,9 +945,7 @@ async def dual_score_breakdown(req: DualScoreRequest):
         candidates_out.append(entry)
 
     # Sort by combined score
-    candidates_out.sort(
-        key=lambda c: c["combined_score"], reverse=True
-    )
+    candidates_out.sort(key=lambda c: c["combined_score"], reverse=True)
 
     # Compute rank correlation between form and content heads
     form_ranks = sorted(
@@ -911,13 +973,9 @@ async def dual_score_breakdown(req: DualScoreRequest):
         "n_results": len(candidates_out),
         "diagnostics": {
             "top3_form_content_overlap": top3_overlap,
-            "form_top1": (
-                candidates_out[form_ranks[0]]["name"]
-                if form_ranks else "?"
-            ),
+            "form_top1": (candidates_out[form_ranks[0]]["name"] if form_ranks else "?"),
             "content_top1": (
-                candidates_out[content_ranks[0]]["name"]
-                if content_ranks else "?"
+                candidates_out[content_ranks[0]]["name"] if content_ranks else "?"
             ),
             "heads_agree_on_top1": (
                 form_ranks[0] == content_ranks[0]
@@ -962,20 +1020,26 @@ async def content_form_matrix():
         content_list = content_s.squeeze(-1).tolist()
 
         for c, fs, cs in zip(candidates, form_list, content_list):
-            matrix_data.append({
-                "name": c.get("name", "?"),
-                "form_label": c.get("form_label", c.get("label", 0)),
-                "content_label": c.get("content_label", 0),
-                "form_score": round(fs, 4),
-                "content_score": round(cs, 4),
-            })
+            matrix_data.append(
+                {
+                    "name": c.get("name", "?"),
+                    "form_label": c.get("form_label", c.get("label", 0)),
+                    "content_label": c.get("content_label", 0),
+                    "form_score": round(fs, 4),
+                    "content_score": round(cs, 4),
+                }
+            )
 
     # Aggregate by component name
     from collections import defaultdict
+
     by_component = defaultdict(
         lambda: {
-            "form_scores": [], "content_scores": [],
-            "form_correct": 0, "content_correct": 0, "total": 0,
+            "form_scores": [],
+            "content_scores": [],
+            "form_correct": 0,
+            "content_correct": 0,
+            "total": 0,
         }
     )
     for d in matrix_data:
@@ -992,18 +1056,18 @@ async def content_form_matrix():
     for name, data in sorted(by_component.items()):
         fs = data["form_scores"]
         cs = data["content_scores"]
-        summary.append({
-            "component": name,
-            "mean_form_score": round(np.mean(fs), 4),
-            "mean_content_score": round(np.mean(cs), 4),
-            "form_accuracy": round(
-                data["form_correct"] / max(data["total"], 1), 3
-            ),
-            "content_accuracy": round(
-                data["content_correct"] / max(data["total"], 1), 3
-            ),
-            "n_samples": data["total"],
-        })
+        summary.append(
+            {
+                "component": name,
+                "mean_form_score": round(np.mean(fs), 4),
+                "mean_content_score": round(np.mean(cs), 4),
+                "form_accuracy": round(data["form_correct"] / max(data["total"], 1), 3),
+                "content_accuracy": round(
+                    data["content_correct"] / max(data["total"], 1), 3
+                ),
+                "n_samples": data["total"],
+            }
+        )
 
     return {
         "model_type": _model_type,
@@ -1114,12 +1178,14 @@ async def alpha_sweep():
             form_s, content_s = model(x)
         form_labels = [c.get("form_label", c.get("label", 0.0)) for c in candidates]
         content_labels = [c.get("content_label", 0.0) for c in candidates]
-        group_data.append({
-            "form_scores": form_s.squeeze(-1),
-            "content_scores": content_s.squeeze(-1),
-            "form_labels": form_labels,
-            "content_labels": content_labels,
-        })
+        group_data.append(
+            {
+                "form_scores": form_s.squeeze(-1),
+                "content_scores": content_s.squeeze(-1),
+                "form_labels": form_labels,
+                "content_labels": content_labels,
+            }
+        )
 
     alphas = [round(a * 0.05, 2) for a in range(21)]  # 0.0..1.0
     combined_accs = []
@@ -1134,7 +1200,8 @@ async def alpha_sweep():
 
     # Form-only and content-only accuracy (constant across alpha)
     form_correct = sum(
-        1 for gd in group_data
+        1
+        for gd in group_data
         if gd["form_labels"][gd["form_scores"].argmax().item()] > 0.5
     )
     content_total = 0
@@ -1227,10 +1294,12 @@ async def head_confusion():
                 content_total += 1
 
     def build_matrix(confusion_dict):
-        labels = sorted(set(
-            list(confusion_dict.keys())
-            + [e for row in confusion_dict.values() for e in row.keys()]
-        ))
+        labels = sorted(
+            set(
+                list(confusion_dict.keys())
+                + [e for row in confusion_dict.values() for e in row.keys()]
+            )
+        )
         label_idx = {lb: i for i, lb in enumerate(labels)}
         matrix = [[0] * len(labels) for _ in labels]
         for predicted, expecteds in confusion_dict.items():
@@ -1291,9 +1360,15 @@ async def content_accuracy_detail():
         content_labels = [c.get("content_label", 0.0) for c in candidates]
 
         # Form rank of first positive
-        form_sorted = sorted(range(len(form_scores)), key=lambda i: form_scores[i], reverse=True)
+        form_sorted = sorted(
+            range(len(form_scores)), key=lambda i: form_scores[i], reverse=True
+        )
         form_rank = next(
-            (rank + 1 for rank, idx in enumerate(form_sorted) if form_labels[idx] > 0.5),
+            (
+                rank + 1
+                for rank, idx in enumerate(form_sorted)
+                if form_labels[idx] > 0.5
+            ),
             len(candidates),
         )
         form_margin = 0.0
@@ -1308,27 +1383,41 @@ async def content_accuracy_detail():
         content_rank = 0
         content_margin = 0.0
         if has_content:
-            content_sorted = sorted(range(len(content_scores)), key=lambda i: content_scores[i], reverse=True)
+            content_sorted = sorted(
+                range(len(content_scores)),
+                key=lambda i: content_scores[i],
+                reverse=True,
+            )
             content_rank = next(
-                (rank + 1 for rank, idx in enumerate(content_sorted) if content_labels[idx] > 0.5),
+                (
+                    rank + 1
+                    for rank, idx in enumerate(content_sorted)
+                    if content_labels[idx] > 0.5
+                ),
                 len(candidates),
             )
-            content_pos = [s for s, lb in zip(content_scores, content_labels) if lb > 0.5]
-            content_neg = [s for s, lb in zip(content_scores, content_labels) if lb <= 0.5]
+            content_pos = [
+                s for s, lb in zip(content_scores, content_labels) if lb > 0.5
+            ]
+            content_neg = [
+                s for s, lb in zip(content_scores, content_labels) if lb <= 0.5
+            ]
             if content_pos and content_neg:
                 content_margin = max(content_pos) - max(content_neg)
             content_ranks.append(content_rank)
 
         group_name = group.get("query_name") or group.get("query_id", "unknown")
-        groups_out.append({
-            "name": group_name,
-            "form_rank": form_rank,
-            "form_margin": round(form_margin, 4),
-            "content_rank": content_rank if has_content else None,
-            "content_margin": round(content_margin, 4) if has_content else None,
-            "has_content_labels": has_content,
-            "n_candidates": len(candidates),
-        })
+        groups_out.append(
+            {
+                "name": group_name,
+                "form_rank": form_rank,
+                "form_margin": round(form_margin, 4),
+                "content_rank": content_rank if has_content else None,
+                "content_margin": round(content_margin, 4) if has_content else None,
+                "has_content_labels": has_content,
+                "n_candidates": len(candidates),
+            }
+        )
 
     # Build rank histograms (rank 1..max)
     max_rank = max(max(form_ranks, default=1), max(content_ranks, default=1))
@@ -1347,8 +1436,12 @@ async def content_accuracy_detail():
         "groups": groups_out,
         "form_rank_histogram": form_hist,
         "content_rank_histogram": content_hist,
-        "form_top1": round(sum(1 for r in form_ranks if r == 1) / max(len(form_ranks), 1), 4),
-        "content_top1": round(sum(1 for r in content_ranks if r == 1) / max(len(content_ranks), 1), 4),
+        "form_top1": round(
+            sum(1 for r in form_ranks if r == 1) / max(len(form_ranks), 1), 4
+        ),
+        "content_top1": round(
+            sum(1 for r in content_ranks if r == 1) / max(len(content_ranks), 1), 4
+        ),
         "form_mrr": round(form_mrr, 4),
         "content_mrr": round(content_mrr, 4),
         "n_groups": len(groups_out),
@@ -1443,9 +1536,12 @@ async def slot_assigner_info():
         "val_per_pool": ckpt.get("val_per_type", {}),
         "train_loss": ckpt.get("train_loss", 0.0),
         "train_acc": ckpt.get("train_acc", 0.0),
-        "n_params": sum(p.numel() for p in torch.load(
-            str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True
-        )["model_state_dict"].values()),
+        "n_params": sum(
+            p.numel()
+            for p in torch.load(
+                str(_SLOT_CHECKPOINT_PATH), map_location="cpu", weights_only=True
+            )["model_state_dict"].values()
+        ),
     }
 
     # Data stats
@@ -1527,12 +1623,18 @@ async def slot_assigner_confusion():
     for p, pred_id in zip(unique_positive, preds.numpy()):
         target_id = p["slot_type_id"]
         if int(pred_id) != target_id:
-            misclassified.append({
-                "content_text": p["content_text"],
-                "expected": pool_names[target_id] if target_id < n_pools else f"id_{target_id}",
-                "predicted": pool_names[int(pred_id)] if int(pred_id) < n_pools else f"id_{pred_id}",
-                "source": p.get("source", "unknown"),
-            })
+            misclassified.append(
+                {
+                    "content_text": p["content_text"],
+                    "expected": pool_names[target_id]
+                    if target_id < n_pools
+                    else f"id_{target_id}",
+                    "predicted": pool_names[int(pred_id)]
+                    if int(pred_id) < n_pools
+                    else f"id_{pred_id}",
+                    "source": p.get("source", "unknown"),
+                }
+            )
 
     return {
         "labels": pool_names,
@@ -1554,6 +1656,7 @@ class SlotRoutingRequest(BaseModel):
 async def slot_routing_test(req: SlotRoutingRequest):
     """Test slot routing on arbitrary content items. Shows predicted pool + scores."""
     from research.trm.h2.domain_config import get_domain_or_default
+
     domain_config = get_domain_or_default(req.domain)
 
     torch = _load_torch()
@@ -1569,6 +1672,7 @@ async def slot_routing_test(req: SlotRoutingRequest):
     # Embed content items
     try:
         from fastembed import TextEmbedding
+
         embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
         embeddings = list(embedder.embed(req.content_items))
         emb_tensor = torch.tensor(np.array(embeddings), dtype=torch.float32)
@@ -1586,12 +1690,16 @@ async def slot_routing_test(req: SlotRoutingRequest):
         for j, name in enumerate(pool_names):
             scores[name] = round(probs[i, j].item(), 4)
         pred_id = logits[i].argmax().item()
-        items_out.append({
-            "content_text": text,
-            "predicted_pool": pool_names[pred_id] if pred_id < len(pool_names) else f"id_{pred_id}",
-            "confidence": round(probs[i, pred_id].item(), 4),
-            "pool_scores": scores,
-        })
+        items_out.append(
+            {
+                "content_text": text,
+                "predicted_pool": pool_names[pred_id]
+                if pred_id < len(pool_names)
+                else f"id_{pred_id}",
+                "confidence": round(probs[i, pred_id].item(), 4),
+                "pool_scores": scores,
+            }
+        )
 
     return {
         "items": items_out,
@@ -1620,7 +1728,9 @@ def _load_unified_model():
     if not _UNIFIED_CHECKPOINT_PATH.exists():
         return None
 
-    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+    ckpt = torch.load(
+        str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False
+    )
     structural_dim = ckpt.get("structural_dim", 17)
     content_dim = ckpt.get("content_dim", 384)
     hidden = ckpt.get("hidden", 64)
@@ -1632,15 +1742,34 @@ def _load_unified_model():
     class _UnifiedTRN(nn.Module):
         def __init__(self):
             super().__init__()
-            self.structural_enc = nn.Sequential(nn.Linear(structural_dim, enc_dim), nn.SiLU())
+            self.structural_enc = nn.Sequential(
+                nn.Linear(structural_dim, enc_dim), nn.SiLU()
+            )
             self.content_enc = nn.Sequential(nn.Linear(content_dim, enc_dim), nn.SiLU())
             self.backbone = nn.Sequential(
-                nn.Linear(enc_dim * 2, hidden), nn.SiLU(), nn.Dropout(dropout),
-                nn.Linear(hidden, hidden), nn.SiLU(), nn.Dropout(dropout))
-            self.form_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1))
-            self.content_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1))
-            self.pool_head = nn.Sequential(nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, n_pools))
-            self.halt_head = nn.Sequential(nn.Linear(hidden, 16), nn.SiLU(), nn.Linear(16, 1), nn.LayerNorm(1), nn.Sigmoid())
+                nn.Linear(enc_dim * 2, hidden),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden, hidden),
+                nn.SiLU(),
+                nn.Dropout(dropout),
+            )
+            self.form_head = nn.Sequential(
+                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1)
+            )
+            self.content_head = nn.Sequential(
+                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1)
+            )
+            self.pool_head = nn.Sequential(
+                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, n_pools)
+            )
+            self.halt_head = nn.Sequential(
+                nn.Linear(hidden, 16),
+                nn.SiLU(),
+                nn.Linear(16, 1),
+                nn.LayerNorm(1),
+                nn.Sigmoid(),
+            )
 
         def forward(self, structural, content_emb, mode="search"):
             s = self.structural_enc(structural)
@@ -1672,14 +1801,18 @@ async def unified_model_info():
     if not _UNIFIED_CHECKPOINT_PATH.exists():
         return {"error": "No unified checkpoint found"}
 
-    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+    ckpt = torch.load(
+        str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False
+    )
 
     # Count params per component
     sd = ckpt["model_state_dict"]
     component_params = {}
     for key, tensor in sd.items():
         component = key.split(".")[0]  # e.g., "structural_enc", "backbone", "form_head"
-        component_params[component] = component_params.get(component, 0) + tensor.numel()
+        component_params[component] = (
+            component_params.get(component, 0) + tensor.numel()
+        )
 
     total_params = sum(component_params.values())
 
@@ -1739,6 +1872,7 @@ async def unified_halt_analysis():
 
     # Use the same val split as training (seed=42, 20%)
     import random as rng
+
     groups_copy = list(search_groups)
     rng.seed(42)
     rng.shuffle(groups_copy)
@@ -1813,21 +1947,27 @@ async def unified_halt_analysis():
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         accuracy = (tp + tn) / max(tp + fp + fn + tn, 1)
-        threshold_results.append({
-            "threshold": round(t, 2),
-            "precision": round(precision, 4),
-            "recall": round(recall, 4),
-            "accuracy": round(accuracy, 4),
-            "would_halt": tp + fp,
-            "would_continue": fn + tn,
-        })
+        threshold_results.append(
+            {
+                "threshold": round(t, 2),
+                "precision": round(precision, 4),
+                "recall": round(recall, 4),
+                "accuracy": round(accuracy, 4),
+                "would_halt": tp + fp,
+                "would_continue": fn + tn,
+            }
+        )
 
     return {
         "n_groups": len(val_groups),
         "n_correct": len(halt_probs_correct),
         "n_wrong": len(halt_probs_wrong),
-        "mean_halt_correct": round(np.mean(halt_probs_correct).item(), 4) if halt_probs_correct else 0,
-        "mean_halt_wrong": round(np.mean(halt_probs_wrong).item(), 4) if halt_probs_wrong else 0,
+        "mean_halt_correct": round(np.mean(halt_probs_correct).item(), 4)
+        if halt_probs_correct
+        else 0,
+        "mean_halt_wrong": round(np.mean(halt_probs_wrong).item(), 4)
+        if halt_probs_wrong
+        else 0,
         "correct_histogram": correct_hist,
         "wrong_histogram": wrong_hist,
         "bin_edges": [round(b, 2) for b in bins],
@@ -1844,6 +1984,7 @@ class UnifiedRoutingRequest(BaseModel):
 async def unified_routing_test(req: UnifiedRoutingRequest):
     """Test UnifiedTRN pool routing on arbitrary content items (build mode)."""
     from research.trm.h2.domain_config import get_domain_or_default
+
     domain_config = get_domain_or_default(req.domain)
 
     torch = _load_torch()
@@ -1852,7 +1993,9 @@ async def unified_routing_test(req: UnifiedRoutingRequest):
     if model is None:
         return {"error": "No unified model loaded"}
 
-    ckpt = torch.load(str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False)
+    ckpt = torch.load(
+        str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False
+    )
     pool_vocab = ckpt.get("pool_vocab", domain_config.pool_vocab)
     pool_names = sorted(pool_vocab.keys(), key=lambda k: pool_vocab[k])
     structural_dim = ckpt.get("structural_dim", 17)
@@ -1860,6 +2003,7 @@ async def unified_routing_test(req: UnifiedRoutingRequest):
     # Embed
     try:
         from fastembed import TextEmbedding
+
         embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
         embeddings = list(embedder.embed(req.content_items))
         emb_tensor = torch.tensor(np.array(embeddings), dtype=torch.float32)
@@ -1879,12 +2023,16 @@ async def unified_routing_test(req: UnifiedRoutingRequest):
         for j, name in enumerate(pool_names):
             scores[name] = round(probs[i, j].item(), 4)
         pred_id = logits[i].argmax().item()
-        items_out.append({
-            "content_text": text,
-            "predicted_pool": pool_names[pred_id] if pred_id < len(pool_names) else f"id_{pred_id}",
-            "confidence": round(probs[i, pred_id].item(), 4),
-            "pool_scores": scores,
-        })
+        items_out.append(
+            {
+                "content_text": text,
+                "predicted_pool": pool_names[pred_id]
+                if pred_id < len(pool_names)
+                else f"id_{pred_id}",
+                "confidence": round(probs[i, pred_id].item(), 4),
+                "pool_scores": scores,
+            }
+        )
 
     return {
         "items": items_out,
@@ -1939,13 +2087,15 @@ async def search_evaluation():
         rr = reciprocal_rank(ranked_relevant)
         query_name = group.get("query_name", group.get("query_id", ""))
 
-        per_group.append({
-            "query_name": query_name,
-            "n_candidates": len(candidates),
-            "n_positive": sum(1 for v in labels if v > 0.5),
-            "reciprocal_rank": round(rr, 4),
-            "top_is_correct": ranked_relevant[0] if ranked_relevant else False,
-        })
+        per_group.append(
+            {
+                "query_name": query_name,
+                "n_candidates": len(candidates),
+                "n_positive": sum(1 for v in labels if v > 0.5),
+                "reciprocal_rank": round(rr, 4),
+                "top_is_correct": ranked_relevant[0] if ranked_relevant else False,
+            }
+        )
 
     metrics = evaluate_ranked_results(ranked_lists, k_values=[1, 3, 5, 10])
 
@@ -1960,11 +2110,17 @@ async def search_evaluation():
 
     # Determine which data file was used
     if _feature_version >= 5:
-        eval_data_file = _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+        eval_data_file = (
+            _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+        )
     elif _feature_version == 3:
-        eval_data_file = _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+        eval_data_file = (
+            _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+        )
     elif _feature_version == 2:
-        eval_data_file = _SYNTHETIC_GROUPS_V2.name if _SYNTHETIC_GROUPS_V2.exists() else "unknown"
+        eval_data_file = (
+            _SYNTHETIC_GROUPS_V2.name if _SYNTHETIC_GROUPS_V2.exists() else "unknown"
+        )
     else:
         eval_data_file = "mw_groups.json + mw_synthetic_groups.json"
 
@@ -2067,13 +2223,17 @@ async def model_comparison():
 
                 with torch.no_grad():
                     structural_feats = x  # 17D structural features
-                    content_zeros = torch.zeros(x.shape[0], ckpt.get("content_dim", 384))
+                    content_zeros = torch.zeros(
+                        x.shape[0], ckpt.get("content_dim", 384)
+                    )
                     out = unified_model(structural_feats, content_zeros, mode="search")
                     form_s = out["form_score"].squeeze(-1)
                     content_s = out["content_score"].squeeze(-1)
                     scores = (0.6 * form_s + 0.4 * content_s).tolist()
 
-                sorted_pairs = sorted(zip(scores, labels), key=lambda x: x[0], reverse=True)
+                sorted_pairs = sorted(
+                    zip(scores, labels), key=lambda x: x[0], reverse=True
+                )
                 ranked_rel = [lab > 0.5 for _, lab in sorted_pairs]
                 if ranked_rel and ranked_rel[0]:
                     uni_correct += 1
@@ -2085,7 +2245,9 @@ async def model_comparison():
                 "mrr": round(sum(uni_rrs) / max(len(uni_rrs), 1), 4),
                 "n_groups": n_groups,
                 "epoch": ckpt.get("epoch", 0),
-                "pool_acc": round(ckpt.get("best_pool_acc", ckpt.get("val_pool_acc", 0)), 4),
+                "pool_acc": round(
+                    ckpt.get("best_pool_acc", ckpt.get("val_pool_acc", 0)), 4
+                ),
                 "halt_acc": round(ckpt.get("val_halt_acc", 0), 4),
                 "total_params": sum(p.numel() for p in unified_model.parameters()),
                 "checkpoint_file": unified_path.name,
@@ -2106,9 +2268,13 @@ async def model_comparison():
     n_pos = sum(1 for v in all_labels if v > 0.5)
 
     if _feature_version >= 5:
-        eval_data_file = _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+        eval_data_file = (
+            _SYNTHETIC_GROUPS_V5.name if _SYNTHETIC_GROUPS_V5.exists() else "unknown"
+        )
     elif _feature_version == 3:
-        eval_data_file = _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+        eval_data_file = (
+            _SYNTHETIC_GROUPS_V3.name if _SYNTHETIC_GROUPS_V3.exists() else "unknown"
+        )
     else:
         eval_data_file = "unknown"
 
@@ -2320,14 +2486,17 @@ async def available_domains():
     """List available domain configurations."""
     try:
         from research.trm.h2.domain_config import get_domain, list_domains
+
         domains = []
         for domain_id in list_domains():
             d = get_domain(domain_id)
-            domains.append({
-                "id": d.domain_id,
-                "n_pools": d.n_pools,
-                "pools": list(d.pool_vocab.keys()),
-            })
+            domains.append(
+                {
+                    "id": d.domain_id,
+                    "n_pools": d.n_pools,
+                    "pools": list(d.pool_vocab.keys()),
+                }
+            )
         return {"domains": domains}
     except Exception as e:
         return {"error": str(e), "domains": []}

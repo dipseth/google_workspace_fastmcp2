@@ -3,6 +3,7 @@
 Provides real-time collection composition data (point type distribution,
 feedback breakdown, etc.) without scrolling through all points.
 """
+
 import logging
 from typing import Optional
 
@@ -16,14 +17,18 @@ def _get_wrapper(domain: str = "card"):
     """Get the appropriate module wrapper for the domain."""
     if domain == "email":
         from gmail.email_wrapper_setup import get_email_wrapper
+
         return get_email_wrapper()
     else:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         return get_card_framework_wrapper()
 
 
 @router.get("/collection/stats")
-async def collection_stats(domain: str = Query("card", description="Domain: card or email")):
+async def collection_stats(
+    domain: str = Query("card", description="Domain: card or email"),
+):
     """Get collection composition using Qdrant facet API.
 
     Returns distribution of point types, feedback values, and other
@@ -48,8 +53,7 @@ async def collection_stats(domain: str = Query("card", description="Domain: card
                     key=field,
                 )
                 facets[field] = [
-                    {"value": hit.value, "count": hit.count}
-                    for hit in result.hits
+                    {"value": hit.value, "count": hit.count} for hit in result.hits
                 ]
             except Exception as e:
                 logger.debug("Facet on '%s' failed: %s", field, e)
@@ -68,7 +72,9 @@ async def collection_stats(domain: str = Query("card", description="Domain: card
 
 
 @router.get("/collection/type-distribution")
-async def type_distribution(domain: str = Query("card", description="Domain: card or email")):
+async def type_distribution(
+    domain: str = Query("card", description="Domain: card or email"),
+):
     """Focused endpoint: just the type distribution for charts."""
     try:
         wrapper = _get_wrapper(domain)

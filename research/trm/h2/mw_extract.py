@@ -41,7 +41,9 @@ class MWPoint:
     comp_vectors: np.ndarray | None  # ColBERT multi-vector [N, 128]
     inp_vectors: np.ndarray | None  # ColBERT multi-vector [M, 128]
     rel_vector: np.ndarray | None  # MiniLM dense [384]
-    content_vector: np.ndarray | None = None  # MiniLM dense [384] (content embedding, V5+)
+    content_vector: np.ndarray | None = (
+        None  # MiniLM dense [384] (content embedding, V5+)
+    )
 
     # Feedback (instance patterns only)
     content_feedback: str | None = None  # "positive", "negative", None
@@ -117,10 +119,20 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
             rel_raw = vectors.get("relationships")
             content_raw = vectors.get("content")
 
-            comp_vec = np.array(comp_raw, dtype=np.float32) if comp_raw is not None else None
-            inp_vec = np.array(inp_raw, dtype=np.float32) if inp_raw is not None else None
-            rel_vec = np.array(rel_raw, dtype=np.float32) if rel_raw is not None else None
-            content_vec = np.array(content_raw, dtype=np.float32) if content_raw is not None else None
+            comp_vec = (
+                np.array(comp_raw, dtype=np.float32) if comp_raw is not None else None
+            )
+            inp_vec = (
+                np.array(inp_raw, dtype=np.float32) if inp_raw is not None else None
+            )
+            rel_vec = (
+                np.array(rel_raw, dtype=np.float32) if rel_raw is not None else None
+            )
+            content_vec = (
+                np.array(content_raw, dtype=np.float32)
+                if content_raw is not None
+                else None
+            )
 
             # Ensure comp/inp are 2D (multi-vector)
             if comp_vec is not None and comp_vec.ndim == 1:
@@ -129,30 +141,33 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
                 inp_vec = inp_vec.reshape(1, -1)
 
             # Detect non-zero content vector
-            has_content = (
-                payload.get("has_content_vector", False)
-                or (content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6)
+            has_content = payload.get("has_content_vector", False) or (
+                content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6
             )
 
-            points.append(MWPoint(
-                point_id=str(p.id),
-                point_type=payload.get("type", "unknown"),
-                name=payload.get("name", ""),
-                full_path=payload.get("full_path", ""),
-                symbol=payload.get("symbol", ""),
-                comp_vectors=comp_vec,
-                inp_vectors=inp_vec,
-                rel_vector=rel_vec,
-                content_vector=content_vec,
-                content_feedback=payload.get("content_feedback"),
-                form_feedback=payload.get("form_feedback"),
-                docstring=payload.get("docstring", "")[:200],
-                parent_paths=payload.get("parent_paths", []),
-                card_description=payload.get("card_description", ""),
-                dsl_notation=payload.get("relationship_text", payload.get("dsl_notation", "")),
-                instance_params=payload.get("instance_params", {}),
-                has_content_vector=has_content,
-            ))
+            points.append(
+                MWPoint(
+                    point_id=str(p.id),
+                    point_type=payload.get("type", "unknown"),
+                    name=payload.get("name", ""),
+                    full_path=payload.get("full_path", ""),
+                    symbol=payload.get("symbol", ""),
+                    comp_vectors=comp_vec,
+                    inp_vectors=inp_vec,
+                    rel_vector=rel_vec,
+                    content_vector=content_vec,
+                    content_feedback=payload.get("content_feedback"),
+                    form_feedback=payload.get("form_feedback"),
+                    docstring=payload.get("docstring", "")[:200],
+                    parent_paths=payload.get("parent_paths", []),
+                    card_description=payload.get("card_description", ""),
+                    dsl_notation=payload.get(
+                        "relationship_text", payload.get("dsl_notation", "")
+                    ),
+                    instance_params=payload.get("instance_params", {}),
+                    has_content_vector=has_content,
+                )
+            )
 
         if next_offset is None or len(points) >= limit:
             break
@@ -168,9 +183,19 @@ def extract_all_points(client, collection: str, limit: int = 500) -> list[MWPoin
     for t, n in sorted(types.items()):
         feedback_info = ""
         if t == "instance_pattern":
-            pos = sum(1 for p in points if p.point_type == t and p.content_feedback == "positive")
-            neg = sum(1 for p in points if p.point_type == t and p.content_feedback == "negative")
-            t_content = sum(1 for p in points if p.point_type == t and p.has_content_vector)
+            pos = sum(
+                1
+                for p in points
+                if p.point_type == t and p.content_feedback == "positive"
+            )
+            neg = sum(
+                1
+                for p in points
+                if p.point_type == t and p.content_feedback == "negative"
+            )
+            t_content = sum(
+                1 for p in points if p.point_type == t and p.has_content_vector
+            )
             feedback_info = f" (content: {pos}+ / {neg}-, content_vec: {t_content})"
         logger.info(f"  {t}: {n}{feedback_info}")
     logger.info(f"  Points with content vector: {n_with_content}/{len(points)}")
@@ -220,10 +245,18 @@ def build_query_groups(
     For class points: candidates are other class points, label = same full_path
     For instance patterns: candidates are class points, label = path in parent_paths
     """
-    class_points = [p for p in points if p.point_type == "class" and p.comp_vectors is not None]
-    pattern_points = [p for p in points if p.point_type == "instance_pattern" and p.comp_vectors is not None]
+    class_points = [
+        p for p in points if p.point_type == "class" and p.comp_vectors is not None
+    ]
+    pattern_points = [
+        p
+        for p in points
+        if p.point_type == "instance_pattern" and p.comp_vectors is not None
+    ]
 
-    logger.info(f"Building groups: {len(class_points)} classes, {len(pattern_points)} patterns")
+    logger.info(
+        f"Building groups: {len(class_points)} classes, {len(pattern_points)} patterns"
+    )
 
     groups = []
 
@@ -256,7 +289,9 @@ def build_query_groups(
                 labels.append(0.0)
 
         if has_positive and len(candidates) >= 2:
-            groups.append(MWQueryGroup(query=query, candidates=candidates, labels=labels))
+            groups.append(
+                MWQueryGroup(query=query, candidates=candidates, labels=labels)
+            )
 
     # Strategy 2: Class points as queries, other class points as candidates
     # Label: same component name (for augmentation)
@@ -275,12 +310,16 @@ def build_query_groups(
         has_positive = any(v == 1.0 for v in labels)
 
         if has_positive and len(candidates) >= 2:
-            groups.append(MWQueryGroup(query=query, candidates=candidates, labels=labels))
+            groups.append(
+                MWQueryGroup(query=query, candidates=candidates, labels=labels)
+            )
 
     logger.info(f"Built {len(groups)} query groups")
     pos_rates = [sum(g.labels) / len(g.labels) for g in groups]
     if pos_rates:
-        logger.info(f"  Positive rate: mean={np.mean(pos_rates):.3f}, median={np.median(pos_rates):.3f}")
+        logger.info(
+            f"  Positive rate: mean={np.mean(pos_rates):.3f}, median={np.median(pos_rates):.3f}"
+        )
 
     return groups
 
@@ -300,18 +339,49 @@ def compute_similarity_features(query: MWPoint, candidate: MWPoint) -> np.ndarra
     sim_r = cosine_sim(query.rel_vector, candidate.rel_vector)
 
     # Norms
-    q_comp_norm = float(np.linalg.norm(query.comp_vectors)) if query.comp_vectors is not None else 0.0
-    q_inp_norm = float(np.linalg.norm(query.inp_vectors)) if query.inp_vectors is not None else 0.0
-    q_rel_norm = float(np.linalg.norm(query.rel_vector)) if query.rel_vector is not None else 0.0
-    c_comp_norm = float(np.linalg.norm(candidate.comp_vectors)) if candidate.comp_vectors is not None else 0.0
-    c_inp_norm = float(np.linalg.norm(candidate.inp_vectors)) if candidate.inp_vectors is not None else 0.0
-    c_rel_norm = float(np.linalg.norm(candidate.rel_vector)) if candidate.rel_vector is not None else 0.0
+    q_comp_norm = (
+        float(np.linalg.norm(query.comp_vectors))
+        if query.comp_vectors is not None
+        else 0.0
+    )
+    q_inp_norm = (
+        float(np.linalg.norm(query.inp_vectors))
+        if query.inp_vectors is not None
+        else 0.0
+    )
+    q_rel_norm = (
+        float(np.linalg.norm(query.rel_vector)) if query.rel_vector is not None else 0.0
+    )
+    c_comp_norm = (
+        float(np.linalg.norm(candidate.comp_vectors))
+        if candidate.comp_vectors is not None
+        else 0.0
+    )
+    c_inp_norm = (
+        float(np.linalg.norm(candidate.inp_vectors))
+        if candidate.inp_vectors is not None
+        else 0.0
+    )
+    c_rel_norm = (
+        float(np.linalg.norm(candidate.rel_vector))
+        if candidate.rel_vector is not None
+        else 0.0
+    )
 
-    return np.array([
-        sim_c, sim_i, sim_r,
-        q_comp_norm, q_inp_norm, q_rel_norm,
-        c_comp_norm, c_inp_norm, c_rel_norm,
-    ], dtype=np.float32)
+    return np.array(
+        [
+            sim_c,
+            sim_i,
+            sim_r,
+            q_comp_norm,
+            q_inp_norm,
+            q_rel_norm,
+            c_comp_norm,
+            c_inp_norm,
+            c_rel_norm,
+        ],
+        dtype=np.float32,
+    )
 
 
 def groups_to_json(groups: list[MWQueryGroup], output_path: str):
@@ -321,24 +391,28 @@ def groups_to_json(groups: list[MWQueryGroup], output_path: str):
         cands = []
         for c, label in zip(g.candidates, g.labels):
             feats = compute_similarity_features(g.query, c)
-            cands.append({
-                "name": c.name,
-                "full_path": c.full_path,
-                "symbol": c.symbol,
-                "label": label,
-                "sim_components": round(float(feats[0]), 4),
-                "sim_inputs": round(float(feats[1]), 4),
-                "sim_relationships": round(float(feats[2]), 4),
-            })
-        data.append({
-            "query_name": g.query.name,
-            "query_type": g.query.point_type,
-            "query_path": g.query.full_path,
-            "query_dsl": g.query.dsl_notation[:100] if g.query.dsl_notation else "",
-            "n_candidates": len(cands),
-            "n_positive": sum(1 for c in cands if c["label"] == 1.0),
-            "candidates": cands,
-        })
+            cands.append(
+                {
+                    "name": c.name,
+                    "full_path": c.full_path,
+                    "symbol": c.symbol,
+                    "label": label,
+                    "sim_components": round(float(feats[0]), 4),
+                    "sim_inputs": round(float(feats[1]), 4),
+                    "sim_relationships": round(float(feats[2]), 4),
+                }
+            )
+        data.append(
+            {
+                "query_name": g.query.name,
+                "query_type": g.query.point_type,
+                "query_path": g.query.full_path,
+                "query_dsl": g.query.dsl_notation[:100] if g.query.dsl_notation else "",
+                "n_candidates": len(cands),
+                "n_positive": sum(1 for c in cands if c["label"] == 1.0),
+                "candidates": cands,
+            }
+        )
 
     Path(output_path).write_text(json.dumps(data, indent=2))
     logger.info(f"Saved {len(data)} groups to {output_path}")
@@ -349,7 +423,9 @@ def main():
     parser.add_argument("--collection", default="mcp_gchat_cards")
     parser.add_argument("--limit", type=int, default=500, help="Max points to extract")
     parser.add_argument("--top-k", type=int, default=20, help="Candidates per query")
-    parser.add_argument("--output", default=str(Path(__file__).parent / "mw_groups.json"))
+    parser.add_argument(
+        "--output", default=str(Path(__file__).parent / "mw_groups.json")
+    )
     parser.add_argument("--qdrant-url", default=None)
     parser.add_argument("--qdrant-key", default=None)
     args = parser.parse_args()
@@ -368,14 +444,17 @@ def main():
         return
 
     # Show similarity distribution (this is what we want to be wider than Mancala's 0.99+)
-    class_points = [p for p in points if p.point_type == "class" and p.comp_vectors is not None]
+    class_points = [
+        p for p in points if p.point_type == "class" and p.comp_vectors is not None
+    ]
     if len(class_points) >= 2:
         sims = []
         import random
+
         random.seed(42)
         sample = random.sample(class_points, min(50, len(class_points)))
         for i, a in enumerate(sample):
-            for b in sample[i + 1:]:
+            for b in sample[i + 1 :]:
                 sims.append(maxsim_score(a.comp_vectors, b.comp_vectors))
         logger.info(f"\nComponent similarity distribution ({len(sims)} pairs):")
         logger.info(f"  Mean: {np.mean(sims):.4f}")
@@ -391,9 +470,9 @@ def main():
         groups_to_json(groups, args.output)
 
     # Summary
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"EXTRACTION SUMMARY")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
     logger.info(f"Collection: {args.collection}")
     logger.info(f"Total points: {len(points)}")
     logger.info(f"Query groups: {len(groups)}")

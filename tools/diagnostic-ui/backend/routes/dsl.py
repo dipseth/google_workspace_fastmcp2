@@ -1,4 +1,5 @@
 """DSL parsing, validation, suggestion, and containment rule endpoints."""
+
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -39,7 +40,8 @@ async def parse_dsl_endpoint(req: ParseDslRequest):
         # Build serializable AST
         def node_to_dict(node):
             d = {
-                "name": getattr(node, "component_name", None) or getattr(node, "name", str(node)),
+                "name": getattr(node, "component_name", None)
+                or getattr(node, "name", str(node)),
                 "symbol": getattr(node, "symbol", ""),
                 "multiplier": getattr(node, "multiplier", 1),
             }
@@ -54,7 +56,12 @@ async def parse_dsl_endpoint(req: ParseDslRequest):
         if hasattr(result, "root_nodes") and result.root_nodes:
             root_nodes = [node_to_dict(n) for n in result.root_nodes]
         elif hasattr(result, "tree") and result.tree:
-            root_nodes = [node_to_dict(n) for n in (result.tree if isinstance(result.tree, list) else [result.tree])]
+            root_nodes = [
+                node_to_dict(n)
+                for n in (
+                    result.tree if isinstance(result.tree, list) else [result.tree]
+                )
+            ]
 
         return {
             "is_valid": result.is_valid,
@@ -85,7 +92,11 @@ async def suggest_dsl_endpoint(req: SuggestDslRequest):
 
         dsl = extract_dsl_from_description(req.text)
         if not dsl:
-            return {"suggested_dsl": None, "expanded": None, "message": "No DSL pattern detected in text"}
+            return {
+                "suggested_dsl": None,
+                "expanded": None,
+                "message": "No DSL pattern detected in text",
+            }
 
         expanded = ""
         try:
@@ -176,6 +187,7 @@ async def search_components_endpoint(req: SearchRequest):
                 if not text:
                     continue
                 from gchat.wrapper_api import extract_dsl_from_description
+
                 extracted = extract_dsl_from_description(text)
                 if extracted:
                     dsl_candidate = extracted
@@ -185,7 +197,9 @@ async def search_components_endpoint(req: SearchRequest):
                 continue
 
             # Score description relevance to query (word overlap)
-            desc_words = set((r.get("card_description", "") or r.get("name", "")).lower().split())
+            desc_words = set(
+                (r.get("card_description", "") or r.get("name", "")).lower().split()
+            )
             overlap = len(query_words & desc_words)
             # Boost by search score (normalized)
             relevance = overlap + max(0, r["score"] + 5) * 0.1
@@ -195,7 +209,7 @@ async def search_components_endpoint(req: SearchRequest):
                 suggested_dsl = dsl_candidate
 
         return {
-            "results": deduped[:req.limit],
+            "results": deduped[: req.limit],
             "total": len(deduped),
             "suggested_dsl": suggested_dsl,
             "class_count": len(class_results),
@@ -204,6 +218,7 @@ async def search_components_endpoint(req: SearchRequest):
         }
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -219,14 +234,19 @@ async def text_search_endpoint(req: TextSearchRequest):
     """Search using Qdrant text index (exact/stemmed match on name, docstring, relationships)."""
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
-        results = wrapper.search_by_text(field=req.field, query=req.query, limit=req.limit)
+        results = wrapper.search_by_text(
+            field=req.field, query=req.query, limit=req.limit
+        )
 
         # Also search relationship descriptions for NL queries
         rel_results = []
         if req.field == "name":
-            rel_results = wrapper.search_by_relationship_text(query=req.query, limit=req.limit)
+            rel_results = wrapper.search_by_relationship_text(
+                query=req.query, limit=req.limit
+            )
 
         # Merge and deduplicate
         seen = {}
@@ -243,13 +263,14 @@ async def text_search_endpoint(req: TextSearchRequest):
                 }
 
         return {
-            "results": list(seen.values())[:req.limit],
+            "results": list(seen.values())[: req.limit],
             "total": len(seen),
             "field": req.field,
             "query": req.query,
         }
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

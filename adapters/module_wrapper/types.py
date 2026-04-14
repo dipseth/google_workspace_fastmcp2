@@ -528,7 +528,9 @@ class ContentSupplySummary:
     Keeps search_mixin decoupled from card/email builder internals.
     """
 
-    pool_counts: Dict[str, int]  # context_key → item count (e.g., {"buttons": 2, "content_texts": 3})
+    pool_counts: Dict[
+        str, int
+    ]  # context_key → item count (e.g., {"buttons": 2, "content_texts": 3})
     dominant_pool: str  # pool with the most items (e.g., "content_texts")
     total_items: int  # sum of all pool counts
     content_text: str  # concatenated text from all items (for semantic embedding)

@@ -164,9 +164,7 @@ def search_hybrid_multidim(
                         must=[
                             models.FieldCondition(
                                 key="type",
-                                match=models.MatchValue(
-                                    value="instance_pattern"
-                                ),
+                                match=models.MatchValue(value="instance_pattern"),
                             ),
                         ]
                     ),
@@ -200,7 +198,9 @@ def search_hybrid_multidim(
             # Get stored vectors (handle both dict and None)
             comp_vec = vectors.get("components") if isinstance(vectors, dict) else None
             inp_vec = vectors.get("inputs") if isinstance(vectors, dict) else None
-            rel_vec = vectors.get("relationships") if isinstance(vectors, dict) else None
+            rel_vec = (
+                vectors.get("relationships") if isinstance(vectors, dict) else None
+            )
             content_vec = vectors.get("content") if isinstance(vectors, dict) else None
 
             # Compute cross-dimensional similarities
@@ -224,9 +224,17 @@ def search_hybrid_multidim(
                     sim_i = self._cosine_similarity(query_colbert[0], inp_vec)
 
             if rel_vec and query_minilm:
-                if isinstance(rel_vec, list) and rel_vec and not isinstance(rel_vec[0], list):
+                if (
+                    isinstance(rel_vec, list)
+                    and rel_vec
+                    and not isinstance(rel_vec[0], list)
+                ):
                     sim_r = self._cosine_similarity(query_minilm, rel_vec)
-                elif isinstance(rel_vec, list) and rel_vec and isinstance(rel_vec[0], list):
+                elif (
+                    isinstance(rel_vec, list)
+                    and rel_vec
+                    and isinstance(rel_vec[0], list)
+                ):
                     sim_r = self._maxsim([query_minilm], rel_vec)
 
             if content_vec and query_content_minilm:
@@ -247,7 +255,7 @@ def search_hybrid_multidim(
 
             # Content boost (additive, not multiplicative -- zero content = no change)
             if sim_content > 0.0:
-                score *= (1.0 + sim_content)
+                score *= 1.0 + sim_content
 
             # --- Step 4: Feedback boost ---
             cf = payload.get("content_feedback")
@@ -304,9 +312,10 @@ def search_hybrid_multidim(
                     relationship_results.append(result)
                 # Patterns without explicit positive feedback go to pattern_results
                 if result not in pattern_results:
-                    if payload.get("content_feedback") != "positive" and payload.get(
-                        "form_feedback"
-                    ) != "positive":
+                    if (
+                        payload.get("content_feedback") != "positive"
+                        and payload.get("form_feedback") != "positive"
+                    ):
                         pattern_results.append(result)
             else:
                 class_results.append(result)

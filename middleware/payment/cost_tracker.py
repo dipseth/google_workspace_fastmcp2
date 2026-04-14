@@ -67,6 +67,7 @@ def is_budget_exceeded() -> bool:
     """
     try:
         from config.settings import settings
+
         budget = settings.sampling_monthly_budget_usd
     except Exception:
         return False
@@ -81,6 +82,7 @@ def load_monthly_costs(path: str | Path | None = None) -> None:
     if path is None:
         try:
             from config.settings import settings
+
             path = settings.sampling_cost_persistence_file
         except Exception:
             return
@@ -98,6 +100,7 @@ def save_monthly_costs(path: str | Path | None = None) -> None:
     if path is None:
         try:
             from config.settings import settings
+
             path = settings.sampling_cost_persistence_file
         except Exception:
             return
@@ -113,6 +116,7 @@ def save_monthly_costs(path: str | Path | None = None) -> None:
         p.write_text(_json.dumps(data, indent=2))
     except Exception as e:
         logger.debug("Failed to persist monthly costs: %s", e)
+
 
 # ── Per-request cost accumulator via ContextVar ──────────────────────────
 

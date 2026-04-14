@@ -27,6 +27,7 @@ logger = setup_logger()
 _fastembed = None
 _colbert_embed = None
 
+
 def _get_fastembed():
     """Lazy load FastEmbed TextEmbedding class (legacy compat)."""
     global _fastembed
@@ -35,6 +36,7 @@ def _get_fastembed():
 
         _fastembed = TextEmbedding
     return _fastembed
+
 
 def _get_colbert_embed():
     """Lazy load ColBERT LateInteractionTextEmbedding class (legacy compat)."""
@@ -45,9 +47,11 @@ def _get_colbert_embed():
         _colbert_embed = LateInteractionTextEmbedding
     return _colbert_embed
 
+
 # =============================================================================
 # EMBEDDING MIXIN
 # =============================================================================
+
 
 class EmbeddingMixin:
     """
@@ -148,6 +152,7 @@ class EmbeddingMixin:
                 else None
             ),
         }
+
 
 # Export for convenience
 __all__ = [

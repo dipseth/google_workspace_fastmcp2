@@ -95,14 +95,12 @@ def analyze_convergence(
             "min": int(np.min(all_cycle_counts)),
             "max": int(np.max(all_cycle_counts)),
         },
-        "halted_early_pct": halted_early_count / len(query_states) if query_states else 0,
+        "halted_early_pct": halted_early_count / len(query_states)
+        if query_states
+        else 0,
         "per_cycle": {
-            "z_H_drift": [
-                float(np.mean(d)) if d else 0.0 for d in all_z_H_drift
-            ],
-            "z_L_drift": [
-                float(np.mean(d)) if d else 0.0 for d in all_z_L_drift
-            ],
+            "z_H_drift": [float(np.mean(d)) if d else 0.0 for d in all_z_H_drift],
+            "z_L_drift": [float(np.mean(d)) if d else 0.0 for d in all_z_L_drift],
             "mean_top1_score": [
                 float(np.mean(s)) if s else 0.0 for s in all_score_improvement
             ],
@@ -129,10 +127,16 @@ def sweep_parameters(
 
     results = []
     for cfg in configs:
-        logger.info(f"  Sweep: alpha={cfg['alpha']}, beta={cfg['beta']}, ema={cfg['ema_decay']}")
+        logger.info(
+            f"  Sweep: alpha={cfg['alpha']}, beta={cfg['beta']}, ema={cfg['ema_decay']}"
+        )
         analysis = analyze_convergence(
-            game, embedder, collection_name, query_states,
-            max_cycles=10, **cfg,
+            game,
+            embedder,
+            collection_name,
+            query_states,
+            max_cycles=10,
+            **cfg,
         )
         results.append({**cfg, **analysis})
 
@@ -176,9 +180,7 @@ def main():
 
     if args.sweep:
         logger.info("Running parameter sweep...")
-        sweep_results = sweep_parameters(
-            game, embedder, collection_name, query_states
-        )
+        sweep_results = sweep_parameters(game, embedder, collection_name, query_states)
 
         print("\n" + "=" * 80)
         print("PARAMETER SWEEP RESULTS")
@@ -201,7 +203,10 @@ def main():
     else:
         logger.info("Analyzing convergence (default params)...")
         analysis = analyze_convergence(
-            game, embedder, collection_name, query_states,
+            game,
+            embedder,
+            collection_name,
+            query_states,
             max_cycles=10,
         )
 

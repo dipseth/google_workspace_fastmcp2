@@ -164,9 +164,13 @@ def mark_key_revealed(user_email: str) -> None:
             if isinstance(entry, dict) and entry.get("email") == email:
                 entry["revealed_at"] = datetime.now(timezone.utc).isoformat()
                 _save_registry(registry)
-                logger.debug(f"🔑 Marked per-user API key as revealed for {redact_email(email)}")
+                logger.debug(
+                    f"🔑 Marked per-user API key as revealed for {redact_email(email)}"
+                )
                 return
-    logger.debug(f"🔑 No registry entry found for {redact_email(email)} — cannot mark revealed")
+    logger.debug(
+        f"🔑 No registry entry found for {redact_email(email)} — cannot mark revealed"
+    )
 
 
 def was_key_revealed(user_email: str) -> bool:
@@ -226,7 +230,9 @@ def regenerate_unrevealed_key(user_email: str) -> Optional[str]:
         }
         _save_registry(registry)
 
-    logger.info(f"🔑 Force-regenerated and revealed per-user API key for {redact_email(email)}")
+    logger.info(
+        f"🔑 Force-regenerated and revealed per-user API key for {redact_email(email)}"
+    )
     return key
 
 

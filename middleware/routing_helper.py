@@ -16,6 +16,7 @@ from resources.service_categorization_logic import ServiceCategorizer
 
 logger = setup_logger()
 
+
 class RoutingConfidence:
     """Represents routing confidence with scoring details"""
 
@@ -34,6 +35,7 @@ class RoutingConfidence:
         self.is_confident = confidence_score >= 0.8  # High confidence threshold
         self.needs_fallback = confidence_score < 0.5  # Low confidence threshold
 
+
 class ServiceRoutingDecision:
     """Represents a complete routing decision with alternatives"""
 
@@ -50,6 +52,7 @@ class ServiceRoutingDecision:
         self.primary = primary
         self.alternatives = alternatives or []
         self.fallback_available = len(self.alternatives) > 0
+
 
 class ServiceRouter:
     """Service router for metadata-driven request routing"""
@@ -419,6 +422,7 @@ class ServiceRouter:
         """Refresh the service registry from current tool metadata"""
         self.logger.info("Refreshing service registry")
         self._initialize_service_registry()
+
 
 def create_service_router(mcp_server: FastMCP) -> ServiceRouter:
     """

@@ -16,6 +16,7 @@ class TestConfigureLangfuseNoOtel:
 
         # Reset module state
         import middleware.langfuse_integration as mod
+
         mod._langfuse_initialized = False
 
         with (

@@ -351,8 +351,12 @@ class TestRecursiveSearch:
 
         for info in result.cycle_history:
             # Drift should stay bounded (not explode)
-            assert info.z_H_drift < 2.0, f"z_H drift {info.z_H_drift} at cycle {info.cycle}"
-            assert info.z_L_drift < 2.0, f"z_L drift {info.z_L_drift} at cycle {info.cycle}"
+            assert info.z_H_drift < 2.0, (
+                f"z_H drift {info.z_H_drift} at cycle {info.cycle}"
+            )
+            assert info.z_L_drift < 2.0, (
+                f"z_L drift {info.z_L_drift} at cycle {info.cycle}"
+            )
 
     def test_no_ema_more_drift(self, indexed_collection):
         """Without EMA (decay=1.0), drift should be larger (using centroid strategy)."""
@@ -362,14 +366,24 @@ class TestRecursiveSearch:
 
         # Use centroid strategy which produces more consistent drift behavior
         result_ema = recursive_search(
-            embedder.client, collection,
-            ric.components, ric.relationships, ric.inputs,
-            max_cycles=6, ema_decay=0.9, strategy="centroid",
+            embedder.client,
+            collection,
+            ric.components,
+            ric.relationships,
+            ric.inputs,
+            max_cycles=6,
+            ema_decay=0.9,
+            strategy="centroid",
         )
         result_no_ema = recursive_search(
-            embedder.client, collection,
-            ric.components, ric.relationships, ric.inputs,
-            max_cycles=6, ema_decay=1.0, strategy="centroid",
+            embedder.client,
+            collection,
+            ric.components,
+            ric.relationships,
+            ric.inputs,
+            max_cycles=6,
+            ema_decay=1.0,
+            strategy="centroid",
         )
 
         # Compare final drift
@@ -385,8 +399,11 @@ class TestRecursiveSearch:
         ric = embedder.embed_state(game, state)
 
         result = recursive_search(
-            embedder.client, collection,
-            ric.components, ric.relationships, ric.inputs,
+            embedder.client,
+            collection,
+            ric.components,
+            ric.relationships,
+            ric.inputs,
             max_cycles=3,
         )
         assert len(result.cycle_history) > 0
@@ -399,9 +416,13 @@ class TestRecursiveSearch:
         ric = embedder.embed_state(game, state)
 
         result = multi_dimensional_search(
-            embedder.client, collection,
-            ric.components, ric.relationships, ric.inputs,
-            top_k=5, candidate_pool=15,
+            embedder.client,
+            collection,
+            ric.components,
+            ric.relationships,
+            ric.inputs,
+            top_k=5,
+            candidate_pool=15,
         )
         assert len(result.top_ids) > 0
         assert len(result.top_payloads) > 0
@@ -414,8 +435,11 @@ class TestRecursiveSearch:
 
         for scoring in ["multiplicative", "harmonic"]:
             result = multi_dimensional_search(
-                embedder.client, collection,
-                ric.components, ric.relationships, ric.inputs,
+                embedder.client,
+                collection,
+                ric.components,
+                ric.relationships,
+                ric.inputs,
                 scoring=scoring,
             )
             assert len(result.top_ids) > 0
@@ -431,8 +455,12 @@ class TestRecursiveSearch:
 
         for strategy in ["centroid", "best_match", "score_weighted", "consistency"]:
             result = recursive_search(
-                embedder.client, collection,
-                ric.components.copy(), ric.relationships.copy(), ric.inputs.copy(),
-                max_cycles=3, strategy=strategy,
+                embedder.client,
+                collection,
+                ric.components.copy(),
+                ric.relationships.copy(),
+                ric.inputs.copy(),
+                max_cycles=3,
+                strategy=strategy,
             )
             assert len(result.top_ids) > 0, f"Strategy {strategy} returned no results"

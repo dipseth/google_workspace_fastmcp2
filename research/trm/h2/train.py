@@ -50,7 +50,9 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def _batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+def _batch_to_device(
+    batch: dict[str, torch.Tensor], device: torch.device
+) -> dict[str, torch.Tensor]:
     """Move all tensors in a batch dict to the target device."""
     return {k: v.to(device) for k, v in batch.items()}
 
@@ -85,14 +87,19 @@ def compute_listwise_loss(
 
     # Score all (query, candidate) pairs
     scores, halt_logits, per_cycle_scores = model(
-        q_comp, q_inp, q_rel, c_comp, c_inp, c_rel,
+        q_comp,
+        q_inp,
+        q_rel,
+        c_comp,
+        c_inp,
+        c_rel,
     )
 
     # Reshape scores back to [B, K]
     scores_2d = scores.squeeze(-1).reshape(B, K)
 
     labels = batch["labels"]  # [B, K]
-    mask = batch["mask"]      # [B, K]
+    mask = batch["mask"]  # [B, K]
 
     # Mask out padding with large negative value
     scores_2d = scores_2d.masked_fill(mask == 0, -1e9)
@@ -126,7 +133,9 @@ def compute_listwise_loss(
     return total_loss, {
         "loss": total_loss.item(),
         "ranking_loss": ranking_loss.item(),
-        "deep_sup_loss": deep_sup_loss.item() if isinstance(deep_sup_loss, torch.Tensor) and deep_sup_loss.dim() == 0 else 0.0,
+        "deep_sup_loss": deep_sup_loss.item()
+        if isinstance(deep_sup_loss, torch.Tensor) and deep_sup_loss.dim() == 0
+        else 0.0,
         "accuracy": accuracy,
     }
 
@@ -192,14 +201,22 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dimension")
-    parser.add_argument("--H-cycles", type=int, default=3, help="Outer recursion cycles")
-    parser.add_argument("--L-cycles", type=int, default=4, help="Inner recursion cycles")
+    parser.add_argument(
+        "--H-cycles", type=int, default=3, help="Outer recursion cycles"
+    )
+    parser.add_argument(
+        "--L-cycles", type=int, default=4, help="Inner recursion cycles"
+    )
     parser.add_argument("--top-k", type=int, default=20, help="Candidates per query")
     parser.add_argument(
-        "--model-type", choices=["trpn", "similarity"], default="similarity",
+        "--model-type",
+        choices=["trpn", "similarity"],
+        default="similarity",
         help="Model type: 'trpn' (full recursive) or 'similarity' (learned scoring on cosine sims)",
     )
-    parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
+    parser.add_argument(
+        "--patience", type=int, default=10, help="Early stopping patience"
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--checkpoint-dir",
@@ -214,7 +231,11 @@ def main():
 
     # --- Game setup ---
     game_factory = GAMES[args.game]
-    game = game_factory() if callable(game_factory) and not isinstance(game_factory, type) else game_factory()
+    game = (
+        game_factory()
+        if callable(game_factory) and not isinstance(game_factory, type)
+        else game_factory()
+    )
     logger.info(f"Game: {game.name}")
 
     # --- Generate states ---

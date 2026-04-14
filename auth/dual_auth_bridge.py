@@ -58,6 +58,7 @@ from .context import (
 
 logger = setup_logger()
 
+
 class DualAuthBridge:
     """
     Bridges memory-based (GoogleProvider) and file-based OAuth authentication.
@@ -237,7 +238,9 @@ class DualAuthBridge:
             return None
 
         except Exception as e:
-            logger.error(f"❌ Failed to bridge credentials for {redact_email(user_email)}: {e}")
+            logger.error(
+                f"❌ Failed to bridge credentials for {redact_email(user_email)}: {e}"
+            )
             return None
 
     def validate_dual_flow(self) -> Dict[str, Any]:
@@ -349,7 +352,9 @@ class DualAuthBridge:
                     credentials = self.bridge_credentials(target_email, "memory")
 
         if credentials:
-            logger.info(f"✅ Got credentials for {redact_email(target_email)} from {prefer_source}")
+            logger.info(
+                f"✅ Got credentials for {redact_email(target_email)} from {prefer_source}"
+            )
             return target_email, credentials
 
         logger.warning(f"❌ No credentials found for {redact_email(target_email)}")
@@ -393,7 +398,9 @@ class DualAuthBridge:
             from .google_auth import get_valid_credentials
 
             if not get_valid_credentials(user_email):
-                logger.error(f"Cannot switch to {redact_email(user_email)} - no credentials found")
+                logger.error(
+                    f"Cannot switch to {redact_email(user_email)} - no credentials found"
+                )
                 return False
 
             # Register as secondary account
@@ -428,8 +435,10 @@ class DualAuthBridge:
 
         return accounts
 
+
 # Global bridge instance
 _dual_auth_bridge: Optional[DualAuthBridge] = None
+
 
 def get_dual_auth_bridge() -> DualAuthBridge:
     """Get or create the global dual auth bridge instance."""
@@ -437,6 +446,7 @@ def get_dual_auth_bridge() -> DualAuthBridge:
     if _dual_auth_bridge is None:
         _dual_auth_bridge = DualAuthBridge()
     return _dual_auth_bridge
+
 
 def validate_dual_auth_setup() -> Dict[str, Any]:
     """

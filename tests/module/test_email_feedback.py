@@ -386,9 +386,7 @@ class TestEmailFeedbackBuilder:
         buttons = [b for b in blocks if isinstance(b, ButtonBlock)]
         # At least one button should have an emoji character
         texts = [btn.text for btn in buttons]
-        has_emoji = any(
-            any(ord(c) > 127 for c in t) for t in texts
-        )
+        has_emoji = any(any(ord(c) > 127 for c in t) for t in texts)
         assert has_emoji, f"Expected emoji in labels, got: {texts}"
 
 

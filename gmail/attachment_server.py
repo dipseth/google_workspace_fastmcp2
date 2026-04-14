@@ -113,9 +113,7 @@ def save_attachment(raw_bytes: bytes, filename: str) -> str:
     with open(file_path, "wb") as f:
         f.write(raw_bytes)
 
-    logger.info(
-        "Attachment saved: %s (%d bytes)", file_id[:8], len(raw_bytes)
-    )
+    logger.info("Attachment saved: %s (%d bytes)", file_id[:8], len(raw_bytes))
     # Ensure cleanup task is running
     try:
         start_cleanup_task()

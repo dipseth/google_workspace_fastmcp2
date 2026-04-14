@@ -252,6 +252,7 @@ from adapters.module_wrapper.wrapper_factory import (
 # FULL MODULE WRAPPER - COMPOSED FROM MIXINS
 # =============================================================================
 
+
 class ModuleWrapper(
     QdrantMixin,
     EmbeddingMixin,
@@ -467,6 +468,7 @@ class ModuleWrapper(
             logger.info(f"ModuleWrapper initialized for {self.module_name}")
             # Optional strict-mode validation
             import os
+
             if os.environ.get("MODULE_WRAPPER_STRICT") == "1":
                 self.validate_dependencies(strict=True)
 
@@ -535,12 +537,8 @@ class ModuleWrapper(
 
                 # Verify it uses named vectors with all expected vector names
                 is_named = isinstance(vectors_config, dict)
-                actual_vectors = (
-                    set(vectors_config.keys()) if is_named else set()
-                )
-                has_all_vectors = (
-                    is_named and actual_vectors >= EXPECTED_VECTOR_NAMES
-                )
+                actual_vectors = set(vectors_config.keys()) if is_named else set()
+                has_all_vectors = is_named and actual_vectors >= EXPECTED_VECTOR_NAMES
 
                 if has_all_vectors and info.points_count > 0 and not self.force_reindex:
                     logger.info(
@@ -884,6 +882,7 @@ class ModuleWrapper(
                 logger.warning(msg)
 
         return issues
+
 
 # =============================================================================
 # EXPORTS

@@ -66,12 +66,12 @@ async def test_path(label: str, model: str, api_key: str, api_base: str | None):
     litellm.drop_params = True
 
     prompt = _system_prompt()
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"  {label}")
     print(f"  model={model}")
     print(f"  api_base={api_base or '(default)'}")
-    print(f"  prompt ~{len(prompt)//4} tokens")
-    print(f"{'='*50}")
+    print(f"  prompt ~{len(prompt) // 4} tokens")
+    print(f"{'=' * 50}")
 
     kwargs = {
         "model": model,
@@ -153,13 +153,13 @@ async def main():
         print("\nSkipping Anthropic: ANTHROPIC_API_KEY not set")
 
     # Summary
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print("SUMMARY")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     for path, ok in results.items():
         status = "CACHE WORKS" if ok else "NO CACHE"
         print(f"  {path}: {status}")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
 
 
 if __name__ == "__main__":

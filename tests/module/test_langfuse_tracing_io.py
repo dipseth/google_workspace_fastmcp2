@@ -128,7 +128,8 @@ class TestEndSpan:
         mock_span = MagicMock()
 
         mod.end_span(
-            mock_span, None,
+            mock_span,
+            None,
             error=ValueError("boom"),
             output_summary="partial output",
         )
@@ -146,7 +147,8 @@ class TestEndSpan:
         mod.end_span(mock_span, None)
 
         langfuse_calls = [
-            c for c in mock_span.set_attribute.call_args_list
+            c
+            for c in mock_span.set_attribute.call_args_list
             if c[0][0].startswith("langfuse.")
         ]
         assert langfuse_calls == []
@@ -262,7 +264,9 @@ class TestAnthropicWrapperIO:
         from mcp.types import ImageContent
 
         result = MagicMock()
-        result.content = ImageContent(type="image", data="base64data", mimeType="image/png")
+        result.content = ImageContent(
+            type="image", data="base64data", mimeType="image/png"
+        )
 
         from mcp.types import TextContent as MCPTextContent
 

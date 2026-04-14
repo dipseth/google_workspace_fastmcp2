@@ -236,11 +236,13 @@ class VariationGenerator:
             "avg_variations_per_family": 0,
         }
 
+
 # =============================================================================
 # CONVENIENCE FUNCTIONS (Backwards Compatibility)
 # =============================================================================
 
 _generator_instance: Optional[VariationGenerator] = None
+
 
 def get_variation_generator() -> VariationGenerator:
     """
@@ -252,6 +254,7 @@ def get_variation_generator() -> VariationGenerator:
     if _generator_instance is None:
         _generator_instance = VariationGenerator()
     return _generator_instance
+
 
 def generate_and_cache_variations(
     pattern: Payload,

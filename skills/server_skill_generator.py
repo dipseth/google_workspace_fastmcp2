@@ -107,6 +107,7 @@ chat cards, sandboxed code execution, Jinja2 macros, privacy middleware, and \
 Qdrant-backed response history. Not all tools are active at any given time — use \
 `manage_tools(action="list")` to see what's currently enabled."""
 
+
 def _email_params_table(symbols: Dict[str, str]) -> str:
     """Generate email parameter table with dynamic symbols."""
     s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
@@ -142,6 +143,7 @@ def _card_params_table(symbols: Dict[str, str]) -> str:
 | `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `webhook_url` | str | None | Webhook URL. Defaults to `MCP_CHAT_WEBHOOK` env var |
 | `thread_key` | str | None | Thread key for replies |"""
+
 
 _QDRANT_SECTION = """\
 ### Qdrant Search Tools
@@ -682,10 +684,6 @@ def write_server_skill(
     )
     skill_dir = Path(output_dir) / "google-workspace-mcp"
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(
-        doc.content, encoding="utf-8"
-    )
-    logger.info(
-        "Generated server skill: %s", skill_dir / "SKILL.md"
-    )
+    (skill_dir / "SKILL.md").write_text(doc.content, encoding="utf-8")
+    logger.info("Generated server skill: %s", skill_dir / "SKILL.md")
     return skill_dir

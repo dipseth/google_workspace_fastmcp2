@@ -1015,7 +1015,9 @@ def setup_card_tools(mcp: FastMCP) -> None:
                                     mappings=report_dict.get("mappings", []),
                                     unconsumed=report_dict.get("unconsumed", {}),
                                     dsl_demands=report_dict.get("dsl_demands"),
-                                    auto_corrections=report_dict.get("auto_corrections"),
+                                    auto_corrections=report_dict.get(
+                                        "auto_corrections"
+                                    ),
                                 )
 
                         # Extract DSL structure and Jinja template status from card
@@ -1295,8 +1297,10 @@ def setup_card_tools(mcp: FastMCP) -> None:
             # Log card render feedback for A/B scoring correlation
             try:
                 from config.settings import Settings as _CfgS
+
                 if _CfgS().search_shadow_scoring:
                     import hashlib as _hl
+
                     _qh = _hl.md5(card_description.encode()).hexdigest()[:12]
                     logger.info(
                         "Card render feedback | query=%s | success=%s | search_score=%s | component=%s | dsl=%s",

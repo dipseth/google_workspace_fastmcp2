@@ -105,9 +105,7 @@ class DomainConfig:
         rewrap_rules = checkpoint.get("rewrap_rules", {})
         content_affinity = checkpoint.get("content_affinity", {})
         content_templates = checkpoint.get("content_templates", {})
-        confusion_pairs = [
-            tuple(p) for p in checkpoint.get("confusion_pairs", [])
-        ]
+        confusion_pairs = [tuple(p) for p in checkpoint.get("confusion_pairs", [])]
 
         return cls(
             domain_id=domain_id,
@@ -163,30 +161,92 @@ GCHAT_DOMAIN = DomainConfig(
     },
     content_affinity={
         "ButtonList": {
-            "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
-                         "send", "save", "delete", "confirm", "run", "stop", "retry",
-                         "update", "refresh", "download", "upload", "connect"],
+            "patterns": [
+                "submit",
+                "deploy",
+                "restart",
+                "cancel",
+                "approve",
+                "reject",
+                "send",
+                "save",
+                "delete",
+                "confirm",
+                "run",
+                "stop",
+                "retry",
+                "update",
+                "refresh",
+                "download",
+                "upload",
+                "connect",
+            ],
             "type": "action",
         },
         "Button": {
-            "patterns": ["submit", "deploy", "restart", "cancel", "approve", "reject",
-                         "send", "save", "delete", "ok", "go", "start"],
+            "patterns": [
+                "submit",
+                "deploy",
+                "restart",
+                "cancel",
+                "approve",
+                "reject",
+                "send",
+                "save",
+                "delete",
+                "ok",
+                "go",
+                "start",
+            ],
             "type": "action",
         },
         "DecoratedText": {
-            "patterns": ["status", "info", "details", "label", "name", "email",
-                         "description", "version", "type", "state", "count",
-                         "total", "last updated", "created", "owner"],
+            "patterns": [
+                "status",
+                "info",
+                "details",
+                "label",
+                "name",
+                "email",
+                "description",
+                "version",
+                "type",
+                "state",
+                "count",
+                "total",
+                "last updated",
+                "created",
+                "owner",
+            ],
             "type": "display",
         },
         "TextParagraph": {
-            "patterns": ["message", "description", "note", "warning", "error",
-                         "summary", "explanation", "instructions", "help"],
+            "patterns": [
+                "message",
+                "description",
+                "note",
+                "warning",
+                "error",
+                "summary",
+                "explanation",
+                "instructions",
+                "help",
+            ],
             "type": "narrative",
         },
         "Grid": {
-            "patterns": ["list", "items", "products", "results", "files", "users",
-                         "servers", "services", "resources", "entries"],
+            "patterns": [
+                "list",
+                "items",
+                "products",
+                "results",
+                "files",
+                "users",
+                "servers",
+                "services",
+                "resources",
+                "entries",
+            ],
             "type": "tabular",
         },
         "GridItem": {
@@ -194,13 +254,30 @@ GCHAT_DOMAIN = DomainConfig(
             "type": "tabular",
         },
         "Image": {
-            "patterns": ["photo", "screenshot", "banner", "logo", "avatar",
-                         "chart", "graph", "diagram", "icon"],
+            "patterns": [
+                "photo",
+                "screenshot",
+                "banner",
+                "logo",
+                "avatar",
+                "chart",
+                "graph",
+                "diagram",
+                "icon",
+            ],
             "type": "media",
         },
         "ChipList": {
-            "patterns": ["tag", "label", "category", "filter", "option",
-                         "skill", "topic", "status"],
+            "patterns": [
+                "tag",
+                "label",
+                "category",
+                "filter",
+                "option",
+                "skill",
+                "topic",
+                "status",
+            ],
             "type": "categorical",
         },
         "Chip": {
@@ -208,28 +285,67 @@ GCHAT_DOMAIN = DomainConfig(
             "type": "categorical",
         },
         "SelectionInput": {
-            "patterns": ["choose", "select", "pick", "option", "preference",
-                         "setting", "mode", "type"],
+            "patterns": [
+                "choose",
+                "select",
+                "pick",
+                "option",
+                "preference",
+                "setting",
+                "mode",
+                "type",
+            ],
             "type": "input",
         },
         "TextInput": {
-            "patterns": ["enter", "type", "search", "name", "email", "url",
-                         "comment", "note", "message"],
+            "patterns": [
+                "enter",
+                "type",
+                "search",
+                "name",
+                "email",
+                "url",
+                "comment",
+                "note",
+                "message",
+            ],
             "type": "input",
         },
         "DateTimePicker": {
-            "patterns": ["date", "time", "schedule", "deadline", "start",
-                         "end", "due", "appointment"],
+            "patterns": [
+                "date",
+                "time",
+                "schedule",
+                "deadline",
+                "start",
+                "end",
+                "due",
+                "appointment",
+            ],
             "type": "temporal",
         },
         "SwitchControl": {
-            "patterns": ["enable", "disable", "toggle", "on", "off",
-                         "active", "notifications", "auto"],
+            "patterns": [
+                "enable",
+                "disable",
+                "toggle",
+                "on",
+                "off",
+                "active",
+                "notifications",
+                "auto",
+            ],
             "type": "toggle",
         },
         "Columns": {
-            "patterns": ["compare", "side by side", "left", "right",
-                         "details", "summary"],
+            "patterns": [
+                "compare",
+                "side by side",
+                "left",
+                "right",
+                "details",
+                "summary",
+            ],
             "type": "layout",
         },
         "Carousel": {
@@ -257,8 +373,16 @@ GCHAT_DOMAIN = DomainConfig(
             "Enable Feature, Disable Feature",
         ],
         "Button": [
-            "Submit", "Deploy", "Approve", "Cancel", "Restart",
-            "Send", "Save", "Delete", "Confirm", "Retry",
+            "Submit",
+            "Deploy",
+            "Approve",
+            "Cancel",
+            "Restart",
+            "Send",
+            "Save",
+            "Delete",
+            "Confirm",
+            "Retry",
         ],
         "DecoratedText": [
             "Status: Online, Version: 2.4.1, Last Updated: 2 hours ago",
@@ -287,12 +411,20 @@ GCHAT_DOMAIN = DomainConfig(
             "v1.0.0, v1.1.0, v1.2.0, v2.0.0-beta",
         ],
         "GridItem": [
-            "web-server-01", "database-primary", "cache-node-1",
-            "api-gateway", "load-balancer", "worker-queue",
+            "web-server-01",
+            "database-primary",
+            "cache-node-1",
+            "api-gateway",
+            "load-balancer",
+            "worker-queue",
         ],
         "Image": [
-            "Architecture Diagram", "Performance Chart", "Team Photo",
-            "System Dashboard Screenshot", "Logo", "Error Screenshot",
+            "Architecture Diagram",
+            "Performance Chart",
+            "Team Photo",
+            "System Dashboard Screenshot",
+            "Logo",
+            "Error Screenshot",
         ],
         "ChipList": [
             "Python, JavaScript, Go, Rust, TypeScript",
@@ -302,7 +434,11 @@ GCHAT_DOMAIN = DomainConfig(
             "Frontend, Backend, DevOps, QA, Design",
         ],
         "Chip": [
-            "Python", "Bug", "High Priority", "Active", "Frontend",
+            "Python",
+            "Bug",
+            "High Priority",
+            "Active",
+            "Frontend",
         ],
         "SelectionInput": [
             "Select region: US West, US East, EU, APAC",
@@ -310,16 +446,25 @@ GCHAT_DOMAIN = DomainConfig(
             "Select priority: Critical, High, Medium, Low",
         ],
         "TextInput": [
-            "Enter service name", "Search users", "Add comment",
-            "Enter email address", "Type your message",
+            "Enter service name",
+            "Search users",
+            "Add comment",
+            "Enter email address",
+            "Type your message",
         ],
         "DateTimePicker": [
-            "Schedule deployment", "Set deadline", "Pick start date",
-            "Choose maintenance window", "Select meeting time",
+            "Schedule deployment",
+            "Set deadline",
+            "Pick start date",
+            "Choose maintenance window",
+            "Select meeting time",
         ],
         "SwitchControl": [
-            "Enable notifications", "Auto-scaling", "Debug mode",
-            "Maintenance mode", "Feature flag: dark-theme",
+            "Enable notifications",
+            "Auto-scaling",
+            "Debug mode",
+            "Maintenance mode",
+            "Feature flag: dark-theme",
         ],
         "Columns": [
             "Current vs Previous, Before and After, Plan vs Actual",
@@ -329,18 +474,20 @@ GCHAT_DOMAIN = DomainConfig(
             "Overview, Details, Metrics, Logs",
         ],
         "CarouselCard": [
-            "Configuration Panel", "Deployment Status", "Metric Dashboard",
+            "Configuration Panel",
+            "Deployment Status",
+            "Metric Dashboard",
         ],
     },
     confusion_pairs=[
-        ("Status: Online", "chips"),         # Status could be a chip filter
-        ("Deploy", "content_texts"),         # Deploy verb as label
-        ("High Priority", "buttons"),        # Priority as button
-        ("API Gateway", "chips"),            # Service name as tag
-        ("v2.0.0", "chips"),                # Version as tag
-        ("Submit", "content_texts"),         # Action verb as label
-        ("Active", "buttons"),              # Status as action
-        ("web-server-01", "buttons"),       # Server name as button text
+        ("Status: Online", "chips"),  # Status could be a chip filter
+        ("Deploy", "content_texts"),  # Deploy verb as label
+        ("High Priority", "buttons"),  # Priority as button
+        ("API Gateway", "chips"),  # Service name as tag
+        ("v2.0.0", "chips"),  # Version as tag
+        ("Submit", "content_texts"),  # Action verb as label
+        ("Active", "buttons"),  # Status as action
+        ("web-server-01", "buttons"),  # Server name as button text
     ],
 )
 
@@ -348,15 +495,15 @@ EMAIL_DOMAIN = DomainConfig(
     domain_id="email",
     # Pool vocabulary mirrors DSL categories from email_wrapper_setup.py
     pool_vocab={
-        "content": 0,       # HeroBlock, TextBlock, ButtonBlock, ImageBlock
-        "layout": 1,        # ColumnsBlock, Column
-        "chrome": 2,        # HeaderBlock, FooterBlock, SocialBlock, TableBlock
-        "structure": 3,     # SpacerBlock, DividerBlock
-        "interactive": 4,   # AccordionBlock, CarouselBlock
+        "content": 0,  # HeroBlock, TextBlock, ButtonBlock, ImageBlock
+        "layout": 1,  # ColumnsBlock, Column
+        "chrome": 2,  # HeaderBlock, FooterBlock, SocialBlock, TableBlock
+        "structure": 3,  # SpacerBlock, DividerBlock
+        "interactive": 4,  # AccordionBlock, CarouselBlock
     },
     # Real MJML component names from gmail.mjml_types
     component_to_pool={
-        "EmailSpec": "content",        # Root container — catch-all
+        "EmailSpec": "content",  # Root container — catch-all
         "HeroBlock": "content",
         "TextBlock": "content",
         "ButtonBlock": "content",
@@ -373,11 +520,11 @@ EMAIL_DOMAIN = DomainConfig(
         "CarouselBlock": "interactive",
     },
     specificity_order=[
-        "interactive",   # Most specific (accordion, carousel)
-        "chrome",        # Headers, footers, social
-        "structure",     # Spacers, dividers
-        "layout",        # Columns
-        "content",       # Catch-all last
+        "interactive",  # Most specific (accordion, carousel)
+        "chrome",  # Headers, footers, social
+        "structure",  # Spacers, dividers
+        "layout",  # Columns
+        "content",  # Catch-all last
     ],
     rewrap_rules={
         "content": {"text_field": "text", "defaults": {}},
@@ -388,57 +535,147 @@ EMAIL_DOMAIN = DomainConfig(
     },
     content_affinity={
         "HeroBlock": {
-            "patterns": ["welcome", "announcement", "launch", "introducing", "hero",
-                         "headline", "banner", "promo", "sale", "event", "invite"],
+            "patterns": [
+                "welcome",
+                "announcement",
+                "launch",
+                "introducing",
+                "hero",
+                "headline",
+                "banner",
+                "promo",
+                "sale",
+                "event",
+                "invite",
+            ],
             "type": "hero",
         },
         "TextBlock": {
-            "patterns": ["paragraph", "description", "details", "body", "content",
-                         "message", "info", "update", "summary", "note"],
+            "patterns": [
+                "paragraph",
+                "description",
+                "details",
+                "body",
+                "content",
+                "message",
+                "info",
+                "update",
+                "summary",
+                "note",
+            ],
             "type": "narrative",
         },
         "ButtonBlock": {
-            "patterns": ["click", "cta", "action", "subscribe", "download", "buy",
-                         "register", "sign up", "get started", "learn more", "shop",
-                         "book", "try", "explore", "view", "open"],
+            "patterns": [
+                "click",
+                "cta",
+                "action",
+                "subscribe",
+                "download",
+                "buy",
+                "register",
+                "sign up",
+                "get started",
+                "learn more",
+                "shop",
+                "book",
+                "try",
+                "explore",
+                "view",
+                "open",
+            ],
             "type": "action",
         },
         "ImageBlock": {
-            "patterns": ["photo", "screenshot", "banner", "logo", "product",
-                         "chart", "diagram", "illustration", "thumbnail"],
+            "patterns": [
+                "photo",
+                "screenshot",
+                "banner",
+                "logo",
+                "product",
+                "chart",
+                "diagram",
+                "illustration",
+                "thumbnail",
+            ],
             "type": "media",
         },
-        "ColumnsBlock": {"patterns": ["compare", "side by side", "features", "pricing"], "type": "layout"},
+        "ColumnsBlock": {
+            "patterns": ["compare", "side by side", "features", "pricing"],
+            "type": "layout",
+        },
         "Column": {"patterns": [], "type": "layout"},
         "HeaderBlock": {
             "patterns": ["brand", "logo", "company", "header", "masthead"],
             "type": "chrome",
         },
         "FooterBlock": {
-            "patterns": ["unsubscribe", "footer", "legal", "address", "copyright",
-                         "privacy", "terms", "contact"],
+            "patterns": [
+                "unsubscribe",
+                "footer",
+                "legal",
+                "address",
+                "copyright",
+                "privacy",
+                "terms",
+                "contact",
+            ],
             "type": "chrome",
         },
         "SocialBlock": {
-            "patterns": ["twitter", "facebook", "linkedin", "instagram", "youtube",
-                         "social", "follow", "share", "connect"],
+            "patterns": [
+                "twitter",
+                "facebook",
+                "linkedin",
+                "instagram",
+                "youtube",
+                "social",
+                "follow",
+                "share",
+                "connect",
+            ],
             "type": "social",
         },
         "TableBlock": {
-            "patterns": ["table", "data", "row", "column", "comparison", "specs",
-                         "pricing", "schedule", "results", "inventory"],
+            "patterns": [
+                "table",
+                "data",
+                "row",
+                "column",
+                "comparison",
+                "specs",
+                "pricing",
+                "schedule",
+                "results",
+                "inventory",
+            ],
             "type": "tabular",
         },
         "SpacerBlock": {"patterns": [], "type": "structural"},
         "DividerBlock": {"patterns": [], "type": "structural"},
         "AccordionBlock": {
-            "patterns": ["faq", "question", "expand", "collapse", "details",
-                         "sections", "topics", "help"],
+            "patterns": [
+                "faq",
+                "question",
+                "expand",
+                "collapse",
+                "details",
+                "sections",
+                "topics",
+                "help",
+            ],
             "type": "interactive",
         },
         "CarouselBlock": {
-            "patterns": ["gallery", "slides", "images", "showcase", "portfolio",
-                         "products", "carousel"],
+            "patterns": [
+                "gallery",
+                "slides",
+                "images",
+                "showcase",
+                "portfolio",
+                "products",
+                "carousel",
+            ],
             "type": "interactive",
         },
         "EmailSpec": {"patterns": [], "type": "structural"},
@@ -461,13 +698,24 @@ EMAIL_DOMAIN = DomainConfig(
             "Reminder: Your trial expires in 3 days. Upgrade to keep access.",
         ],
         "ButtonBlock": [
-            "Get Started", "Shop Now", "Learn More", "Download",
-            "Subscribe", "View Dashboard", "Confirm Email",
-            "Reset Password", "Upgrade Plan", "Book a Demo",
+            "Get Started",
+            "Shop Now",
+            "Learn More",
+            "Download",
+            "Subscribe",
+            "View Dashboard",
+            "Confirm Email",
+            "Reset Password",
+            "Upgrade Plan",
+            "Book a Demo",
         ],
         "ImageBlock": [
-            "Product Screenshot", "Team Photo", "Infographic",
-            "Feature Illustration", "Event Banner", "Logo",
+            "Product Screenshot",
+            "Team Photo",
+            "Infographic",
+            "Feature Illustration",
+            "Event Banner",
+            "Logo",
         ],
         "HeaderBlock": [
             "Acme Corp, Monthly Newsletter",
@@ -499,12 +747,12 @@ EMAIL_DOMAIN = DomainConfig(
         ],
     },
     confusion_pairs=[
-        ("Get Started", "chrome"),           # CTA button text as header
-        ("Unsubscribe", "content"),          # Footer text as content
+        ("Get Started", "chrome"),  # CTA button text as header
+        ("Unsubscribe", "content"),  # Footer text as content
         ("Product Screenshot", "interactive"),  # Image as carousel
-        ("FAQ", "content"),                  # Accordion keyword as text
-        ("Follow us", "content"),            # Social as text
-        ("$29/mo", "content"),               # Table data as text
+        ("FAQ", "content"),  # Accordion keyword as text
+        ("Follow us", "content"),  # Social as text
+        ("$29/mo", "content"),  # Table data as text
     ],
 )
 

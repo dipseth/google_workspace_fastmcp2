@@ -115,6 +115,7 @@ MODULE_PREFIX_SYMBOLS: Dict[str, str] = {
 # STYLING REGISTRY
 # =============================================================================
 
+
 @dataclass
 class StyleRule:
     """A styling rule that can be applied to card content."""
@@ -123,6 +124,7 @@ class StyleRule:
     description: str  # e.g., "Green color for success states"
     html_template: str  # e.g., '<font color="#34a853">{text}</font>'
     semantic_triggers: List[str]  # e.g., ["success", "ok", "valid", "approved"]
+
 
 # Default styling rules (from SmartCardBuilder patterns)
 # These are NOT in the dataclass module but are application-level customizations
@@ -172,6 +174,7 @@ DEFAULT_STYLE_RULES: List[StyleRule] = [
         semantic_triggers=["quote", "note", "annotation", "comment"],
     ),
 ]
+
 
 @dataclass
 class StylingRegistry:
@@ -229,9 +232,11 @@ class StylingRegistry:
             parts.append(f"{rule.name}: {rule.description} ({triggers})")
         return " | ".join(parts)
 
+
 # =============================================================================
 # SYMBOL GENERATOR
 # =============================================================================
+
 
 class SymbolGenerator:
     """
@@ -450,9 +455,11 @@ class SymbolGenerator:
         # Multiple mentions create stronger association
         return f"{base_sym} {component_name} {base_sym} | {component_name} widget {base_sym}"
 
+
 # =============================================================================
 # FACTORY FUNCTIONS
 # =============================================================================
+
 
 def create_generator_for_module(
     module_name: str,
@@ -477,6 +484,7 @@ def create_generator_for_module(
     generator.generate_symbols(component_names)
     return generator
 
+
 def create_default_styling_registry() -> StylingRegistry:
     """
     Create a styling registry with default rules.
@@ -487,9 +495,11 @@ def create_default_styling_registry() -> StylingRegistry:
     registry = StylingRegistry(rules=DEFAULT_STYLE_RULES.copy())
     return registry
 
+
 # =============================================================================
 # INTEGRATION HELPERS
 # =============================================================================
+
 
 def extract_component_names_from_wrapper(wrapper: "ModuleWrapper") -> List[str]:
     """

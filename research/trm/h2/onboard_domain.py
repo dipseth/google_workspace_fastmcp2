@@ -77,9 +77,9 @@ def verify_qdrant_collection(collection: str) -> dict:
         with_vectors=False,
     )
     points, _ = result
-    component_names = sorted(set(
-        p.payload.get("name", "") for p in points if p.payload
-    ))
+    component_names = sorted(
+        set(p.payload.get("name", "") for p in points if p.payload)
+    )
 
     # Check named vectors from collection config
     vectors_config = info.config.params.vectors if info.config else {}
@@ -212,10 +212,14 @@ def auto_detect_domain_config(
         "n_pools": len(pool_vocab),
     }
 
-    logger.info(f"Auto-detected config: {len(components)} components → {len(pool_vocab)} pools")
+    logger.info(
+        f"Auto-detected config: {len(components)} components → {len(pool_vocab)} pools"
+    )
     for pool_name, idx in pool_vocab.items():
         members = [k for k, v in component_to_pool.items() if v == pool_name]
-        logger.info(f"  Pool '{pool_name}' ({idx}): {members[:5]}{'...' if len(members) > 5 else ''}")
+        logger.info(
+            f"  Pool '{pool_name}' ({idx}): {members[:5]}{'...' if len(members) > 5 else ''}"
+        )
 
     return skeleton
 
@@ -260,44 +264,51 @@ def main():
         description="Onboard a domain into the TRM/learned scorer pipeline"
     )
     parser.add_argument(
-        "--domain", required=True,
-        help="Domain ID (e.g., 'gchat', 'email', or a new domain name)"
+        "--domain",
+        required=True,
+        help="Domain ID (e.g., 'gchat', 'email', or a new domain name)",
     )
     parser.add_argument(
-        "--collection", required=True,
-        help="Qdrant collection containing class points with RIC vectors"
+        "--collection",
+        required=True,
+        help="Qdrant collection containing class points with RIC vectors",
     )
     parser.add_argument(
-        "--auto-detect", action="store_true",
-        help="Auto-detect DomainConfig from Qdrant data (for new domains)"
+        "--auto-detect",
+        action="store_true",
+        help="Auto-detect DomainConfig from Qdrant data (for new domains)",
     )
     parser.add_argument(
-        "--count", type=int, default=500,
-        help="Number of synthetic structures to generate"
+        "--count",
+        type=int,
+        default=500,
+        help="Number of synthetic structures to generate",
+    )
+    parser.add_argument("--epochs", type=int, default=150, help="Training epochs")
+    parser.add_argument(
+        "--feature-version",
+        type=int,
+        default=5,
+        choices=[2, 3, 5],
+        help="Feature version for training data",
     )
     parser.add_argument(
-        "--epochs", type=int, default=150,
-        help="Training epochs"
+        "--skip-training",
+        action="store_true",
+        help="Generate data only, skip model training",
     )
     parser.add_argument(
-        "--feature-version", type=int, default=5, choices=[2, 3, 5],
-        help="Feature version for training data"
-    )
-    parser.add_argument(
-        "--skip-training", action="store_true",
-        help="Generate data only, skip model training"
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true",
-        help="Verify collection and show config, don't run pipeline"
+        "--dry-run",
+        action="store_true",
+        help="Verify collection and show config, don't run pipeline",
     )
     args = parser.parse_args()
 
     # Step 1: Verify Qdrant collection
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"Onboarding domain: {args.domain}")
     logger.info(f"Collection: {args.collection}")
-    logger.info(f"{'='*60}\n")
+    logger.info(f"{'=' * 60}\n")
 
     logger.info("=== Step 1: Verify Qdrant collection ===")
     info = verify_qdrant_collection(args.collection)
@@ -306,10 +317,16 @@ def main():
         logger.error(f"  {info['error']}")
         sys.exit(1)
 
-    logger.info(f"  Points: {info['n_points']} total, {info['n_class_points']} class points")
-    logger.info(f"  RIC vectors: components={info['has_components']}, "
-                f"inputs={info['has_inputs']}, relationships={info['has_relationships']}")
-    logger.info(f"  Components: {info['component_names'][:10]}{'...' if len(info['component_names']) > 10 else ''}")
+    logger.info(
+        f"  Points: {info['n_points']} total, {info['n_class_points']} class points"
+    )
+    logger.info(
+        f"  RIC vectors: components={info['has_components']}, "
+        f"inputs={info['has_inputs']}, relationships={info['has_relationships']}"
+    )
+    logger.info(
+        f"  Components: {info['component_names'][:10]}{'...' if len(info['component_names']) > 10 else ''}"
+    )
 
     if info["n_class_points"] == 0:
         logger.error("No class points found — index components first via ModuleWrapper")
@@ -326,7 +343,9 @@ def main():
 
     if args.domain in list_domains():
         domain = get_domain(args.domain)
-        logger.info(f"  Domain '{args.domain}' already registered: {domain.n_pools} pools")
+        logger.info(
+            f"  Domain '{args.domain}' already registered: {domain.n_pools} pools"
+        )
     elif args.auto_detect:
         logger.info(f"  Domain '{args.domain}' not registered — auto-detecting...")
         skeleton = auto_detect_domain_config(args.collection, args.domain)
@@ -343,7 +362,9 @@ def main():
         )
         register_domain(domain)
         logger.info(f"  Registered domain '{args.domain}' with {domain.n_pools} pools")
-        logger.info(f"  NOTE: Add content_affinity and content_templates to domain_config.py for V5 features")
+        logger.info(
+            f"  NOTE: Add content_affinity and content_templates to domain_config.py for V5 features"
+        )
 
         # Save skeleton for reference
         skeleton_path = _h2_dir / f"domain_skeleton_{args.domain}.json"
@@ -370,12 +391,19 @@ def main():
     success = run_step(
         "Step 3: Generate training data",
         [
-            sys.executable, "-m", "research.trm.h2.generate_training_data",
-            "--domain", args.domain,
-            "--collection", args.collection,
-            "--count", str(args.count),
-            "--feature-version", str(fv),
-            "--output", str(data_path),
+            sys.executable,
+            "-m",
+            "research.trm.h2.generate_training_data",
+            "--domain",
+            args.domain,
+            "--collection",
+            args.collection,
+            "--count",
+            str(args.count),
+            "--feature-version",
+            str(fv),
+            "--output",
+            str(data_path),
         ],
     )
     if not success:
@@ -390,14 +418,21 @@ def main():
         success = run_step(
             "Step 4: Generate slot training data",
             [
-                sys.executable, "-m", "research.trm.h2.generate_slot_training_data",
-                "--domain", args.domain,
-                "--collection", args.collection,
-                "--output", str(slot_data_path),
+                sys.executable,
+                "-m",
+                "research.trm.h2.generate_slot_training_data",
+                "--domain",
+                args.domain,
+                "--collection",
+                args.collection,
+                "--output",
+                str(slot_data_path),
             ],
         )
         if not success:
-            logger.warning("Slot training data generation failed — continuing without it")
+            logger.warning(
+                "Slot training data generation failed — continuing without it"
+            )
             slot_data_path = None
     else:
         logger.info("\n=== Step 4: Skipped (no content_templates in domain config) ===")
@@ -406,9 +441,13 @@ def main():
     # Step 5: Merge into unified format
     unified_path = _h2_dir / f"{prefix}unified_training_data.json"
     merge_cmd = [
-        sys.executable, "-m", "research.trm.h2.generate_unified_training_data",
-        "--search-data", str(data_path),
-        "--output", str(unified_path),
+        sys.executable,
+        "-m",
+        "research.trm.h2.generate_unified_training_data",
+        "--search-data",
+        str(data_path),
+        "--output",
+        str(unified_path),
     ]
     if slot_data_path and slot_data_path.exists():
         merge_cmd.extend(["--build-data", str(slot_data_path)])
@@ -423,11 +462,17 @@ def main():
         logger.info("\n=== Step 6: Skipped (--skip-training) ===")
     else:
         train_cmd = [
-            sys.executable, "-m", "research.trm.h2.train_unified",
-            "--domain", args.domain,
-            "--search-data", str(data_path),
-            "--epochs", str(args.epochs),
-            "--checkpoint-dir", str(_h2_dir / "checkpoints"),
+            sys.executable,
+            "-m",
+            "research.trm.h2.train_unified",
+            "--domain",
+            args.domain,
+            "--search-data",
+            str(data_path),
+            "--epochs",
+            str(args.epochs),
+            "--checkpoint-dir",
+            str(_h2_dir / "checkpoints"),
         ]
         if slot_data_path and slot_data_path.exists():
             train_cmd.extend(["--build-data", str(slot_data_path)])
@@ -438,9 +483,9 @@ def main():
             sys.exit(1)
 
     # Step 7: Report
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"Onboarding complete: {args.domain}")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
     logger.info(f"  Domain: {args.domain}")
     logger.info(f"  Collection: {args.collection}")
     logger.info(f"  Training data: {data_path}")

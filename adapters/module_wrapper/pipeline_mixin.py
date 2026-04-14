@@ -52,6 +52,7 @@ CONTENT_DIM = _CONTENT_DIM  # MiniLM dense vector (content)
 # HELPER FUNCTIONS
 # =============================================================================
 
+
 def extract_input_values(component) -> str:
     """
     Extract input values text for the 'inputs' vector.
@@ -98,6 +99,7 @@ def extract_input_values(component) -> str:
         parts.append(f"{component.name} {comp_type}")
 
     return ", ".join(parts)
+
 
 def build_compact_relationship_text(
     component_name: ComponentName,
@@ -157,6 +159,7 @@ def build_compact_relationship_text(
 
     return f"{component_name}[{', '.join(parts)}]"
 
+
 def format_instance_params(params: dict) -> str:
     """Format instance_params for the inputs vector."""
     if not params:
@@ -207,9 +210,7 @@ def format_instance_params(params: dict) -> str:
     return ", ".join(parts) if parts else "basic card"
 
 
-def extract_content_text_from_params(
-    params: dict, card_description: str = ""
-) -> str:
+def extract_content_text_from_params(params: dict, card_description: str = "") -> str:
     """Extract user content text from instance_params for content embedding.
 
     Concatenates button texts, item labels, titles, etc.
@@ -300,9 +301,11 @@ def extract_content_text_from_params(
 
     return " ".join(texts)
 
+
 # =============================================================================
 # PIPELINE MIXIN
 # =============================================================================
+
 
 class PipelineMixin:
     """
@@ -550,11 +553,15 @@ class PipelineMixin:
         service = get_embedding_service()
 
         if self._colbert_embedder is None:
-            logger.info("Getting ColBERT embedder from EmbeddingService for pipeline...")
+            logger.info(
+                "Getting ColBERT embedder from EmbeddingService for pipeline..."
+            )
             self._colbert_embedder = service.get_model_sync("colbert")
 
         if self._relationships_embedder is None:
-            logger.info("Getting MiniLM embedder from EmbeddingService for relationships...")
+            logger.info(
+                "Getting MiniLM embedder from EmbeddingService for relationships..."
+            )
             self._relationships_embedder = service.get_model_sync("minilm")
 
     def run_ingestion_pipeline(
@@ -973,6 +980,7 @@ class PipelineMixin:
 
         except Exception as e:
             return {"error": str(e)}
+
 
 # Export for convenience
 __all__ = [

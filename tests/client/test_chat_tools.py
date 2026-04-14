@@ -365,9 +365,9 @@ class TestChatTools:
 
         assert result is not None and result.content
         content = result.content[0].text
-        assert any(keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES), (
-            f"Response didn't match any expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES
+        ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card_form(self, client):
@@ -391,9 +391,9 @@ class TestChatTools:
 
         assert result is not None and result.content
         content = result.content[0].text
-        assert any(keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES), (
-            f"Response didn't match any expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES
+        ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card_rich(self, client):
@@ -426,9 +426,9 @@ class TestChatTools:
 
         assert result is not None and result.content
         content = result.content[0].text
-        assert any(keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES), (
-            f"Response didn't match any expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES
+        ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_send_dynamic_card(self, client):
@@ -451,9 +451,9 @@ class TestChatTools:
 
         assert result is not None and result.content
         content = result.content[0].text
-        assert any(keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES), (
-            f"Response didn't match any expected pattern: {content}"
-        )
+        assert any(
+            keyword in content.lower() for keyword in DYNAMIC_CARD_VALID_RESPONSES
+        ), f"Response didn't match any expected pattern: {content}"
 
     @pytest.mark.asyncio
     async def test_send_message_with_threading(self, client):

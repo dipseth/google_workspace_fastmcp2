@@ -160,9 +160,7 @@ class RICEmbedder:
                 points.append(point)
 
                 if len(points) >= batch_size:
-                    self.client.upsert(
-                        collection_name=collection_name, points=points
-                    )
+                    self.client.upsert(collection_name=collection_name, points=points)
                     indexed += len(points)
                     points = []
                     logger.info(f"Indexed {indexed}/{len(states)} states")

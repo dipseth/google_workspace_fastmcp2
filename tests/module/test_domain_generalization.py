@@ -49,10 +49,17 @@ class TestDomainContentKnowledge:
         all_components = set(domain.component_to_pool.keys())
         unmapped = []
         for comp_name, affinity in domain.content_affinity.items():
-            if comp_name not in all_components and affinity.get("type") not in ("structural", "input", "temporal", "toggle"):
+            if comp_name not in all_components and affinity.get("type") not in (
+                "structural",
+                "input",
+                "temporal",
+                "toggle",
+            ):
                 unmapped.append(comp_name)
         # Allow some unmapped — they're used for content generation, not pool routing
-        assert len(unmapped) <= 5, f"{domain_id}: too many unmapped affinity keys: {unmapped}"
+        assert len(unmapped) <= 5, (
+            f"{domain_id}: too many unmapped affinity keys: {unmapped}"
+        )
 
     @pytest.mark.parametrize("domain_id", ["gchat", "email"])
     def test_pool_mapped_components_have_affinity_or_templates(self, domain_id):
@@ -60,12 +67,15 @@ class TestDomainContentKnowledge:
         domain = get_domain(domain_id)
         # Check that at least some pool-mapped components have content
         mapped_with_content = sum(
-            1 for comp in domain.component_to_pool
+            1
+            for comp in domain.component_to_pool
             if comp in domain.content_affinity or comp in domain.content_templates
         )
         total_mapped = len(domain.component_to_pool)
         coverage = mapped_with_content / total_mapped if total_mapped > 0 else 0
-        assert coverage > 0.3, f"{domain_id}: only {coverage:.0%} of components have content knowledge"
+        assert coverage > 0.3, (
+            f"{domain_id}: only {coverage:.0%} of components have content knowledge"
+        )
 
     @pytest.mark.parametrize("domain_id", ["gchat", "email"])
     def test_content_affinity_entries_have_patterns_and_type(self, domain_id):
@@ -120,12 +130,14 @@ class TestDomainContentSwitching:
 
     def test_gchat_content_loads_by_default(self):
         from research.trm.h2 import generate_training_data as gtd
+
         # Module import triggers gchat init
         assert len(gtd.CONTENT_AFFINITY) > 0
         assert "ButtonList" in gtd.CONTENT_AFFINITY
 
     def test_switch_to_email_loads_email_content(self):
         from research.trm.h2 import generate_training_data as gtd
+
         gtd._init_domain_content("email")
         try:
             assert "HeroBlock" in gtd.CONTENT_AFFINITY
@@ -138,6 +150,7 @@ class TestDomainContentSwitching:
 
     def test_switch_back_to_gchat_restores(self):
         from research.trm.h2 import generate_training_data as gtd
+
         gtd._init_domain_content("email")
         gtd._init_domain_content("gchat")
         assert "ButtonList" in gtd.CONTENT_AFFINITY
@@ -145,11 +158,10 @@ class TestDomainContentSwitching:
 
     def test_content_text_generation_uses_active_domain(self):
         from research.trm.h2 import generate_training_data as gtd
+
         gtd._init_domain_content("email")
         try:
-            text = gtd._generate_content_text_for_components(
-                ["HeroBlock", "TextBlock"]
-            )
+            text = gtd._generate_content_text_for_components(["HeroBlock", "TextBlock"])
             assert len(text) > 0, "Email content text should not be empty"
         finally:
             gtd._init_domain_content("gchat")
@@ -157,6 +169,7 @@ class TestDomainContentSwitching:
     def test_unknown_domain_falls_back_to_gchat(self):
         """Unknown domain falls back to gchat via get_domain_or_default."""
         from research.trm.h2 import generate_training_data as gtd
+
         gtd._init_domain_content("nonexistent_domain")
         try:
             # get_domain_or_default returns gchat for unknown domains
@@ -351,12 +364,14 @@ class TestSlotTrainingDomainIntegration:
             POOL_VOCAB,
             _init_slot_domain,
         )
+
         _init_slot_domain("gchat")
         assert "buttons" in POOL_VOCAB
         assert "Button" in COMPONENT_TO_POOL
 
     def test_slot_domain_init_email(self):
         from research.trm.h2 import generate_slot_training_data as gstd
+
         gstd._init_slot_domain("email")
         try:
             # Access via module to get updated globals
@@ -374,10 +389,21 @@ class TestEmailDomainSpecifics:
     """Validate EMAIL_DOMAIN matches the real MJML wrapper components."""
 
     EXPECTED_MJML_COMPONENTS = {
-        "EmailSpec", "HeroBlock", "TextBlock", "ButtonBlock", "ImageBlock",
-        "ColumnsBlock", "Column", "SpacerBlock", "DividerBlock",
-        "HeaderBlock", "FooterBlock", "SocialBlock", "TableBlock",
-        "AccordionBlock", "CarouselBlock",
+        "EmailSpec",
+        "HeroBlock",
+        "TextBlock",
+        "ButtonBlock",
+        "ImageBlock",
+        "ColumnsBlock",
+        "Column",
+        "SpacerBlock",
+        "DividerBlock",
+        "HeaderBlock",
+        "FooterBlock",
+        "SocialBlock",
+        "TableBlock",
+        "AccordionBlock",
+        "CarouselBlock",
     }
 
     def test_all_mjml_components_mapped(self):

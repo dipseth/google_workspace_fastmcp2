@@ -104,9 +104,7 @@ class RecursiveBlock(nn.Module):
             [SwiGLU(hidden_dim, expansion) for _ in range(num_layers)]
         )
 
-    def forward(
-        self, hidden: torch.Tensor, injection: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, hidden: torch.Tensor, injection: torch.Tensor) -> torch.Tensor:
         # Input injection (trm.py:112)
         hidden = hidden + injection
         # Layer stack with residual + post-norm (trm.py:100-104)
@@ -308,16 +306,22 @@ class SimilarityScorer(nn.Module):
         sim_r = self._cosine_sim(query_rel, cand_rel)  # [B, 1]
 
         # Norms as additional features (captures magnitude information)
-        q_norms = torch.cat([
-            query_comp.norm(dim=-1, keepdim=True),
-            query_inp.norm(dim=-1, keepdim=True),
-            query_rel.norm(dim=-1, keepdim=True),
-        ], dim=-1)  # [B, 3]
-        c_norms = torch.cat([
-            cand_comp.norm(dim=-1, keepdim=True),
-            cand_inp.norm(dim=-1, keepdim=True),
-            cand_rel.norm(dim=-1, keepdim=True),
-        ], dim=-1)  # [B, 3]
+        q_norms = torch.cat(
+            [
+                query_comp.norm(dim=-1, keepdim=True),
+                query_inp.norm(dim=-1, keepdim=True),
+                query_rel.norm(dim=-1, keepdim=True),
+            ],
+            dim=-1,
+        )  # [B, 3]
+        c_norms = torch.cat(
+            [
+                cand_comp.norm(dim=-1, keepdim=True),
+                cand_inp.norm(dim=-1, keepdim=True),
+                cand_rel.norm(dim=-1, keepdim=True),
+            ],
+            dim=-1,
+        )  # [B, 3]
 
         features = torch.cat([sim_c, sim_i, sim_r, q_norms, c_norms], dim=-1)  # [B, 9]
         scores = self.mlp(features)  # [B, 1]

@@ -497,7 +497,10 @@ class ComponentBuilder:
                 )
                 # Skip placeholder children that lack required fields
                 if child_params.get("_placeholder"):
-                    if expected_child_type in ("Button", "Chip") and not child_params.get("url"):
+                    if expected_child_type in (
+                        "Button",
+                        "Chip",
+                    ) and not child_params.get("url"):
                         logger.debug(
                             f"Skipping placeholder {expected_child_type} (no URL)"
                         )
@@ -511,6 +514,7 @@ class ComponentBuilder:
                             create_material_icon,
                             resolve_icon_name,
                         )
+
                         resolved_name = resolve_icon_name(child_params["icon"])
                         child_params["icon"] = create_material_icon(resolved_name)
                     # Chips require onClick — auto-generate action if no URL
@@ -522,6 +526,7 @@ class ComponentBuilder:
                                 ActionParameter,
                             )
                             from card_framework.v2.widgets.on_click import OnClick
+
                             child_params["on_click"] = OnClick(
                                 action=Action(
                                     function="chip_select",
@@ -711,11 +716,7 @@ class ComponentBuilder:
                                     "image": "Image",
                                     "button_list": "ButtonList",
                                 }.get(nw_type, "TextParagraph")
-                                nw_params = {
-                                    k: v
-                                    for k, v in nw.items()
-                                    if k != "type"
-                                }
+                                nw_params = {k: v for k, v in nw.items() if k != "type"}
                                 built = self.build_component(
                                     nw_name,
                                     nw_params,
@@ -801,7 +802,9 @@ class ComponentBuilder:
             )
 
             child_widget = build_child_widget(
-                wrapper, child_name, resolved_params,
+                wrapper,
+                child_name,
+                resolved_params,
                 build_component_fn=self.build_component,
             )
 

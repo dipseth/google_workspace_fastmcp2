@@ -194,7 +194,9 @@ def text_decorated_icon(builder, text: str, **_kwargs) -> Dict:
     return build_text_feedback(builder, "decorated_text_icon", text)
 
 
-def text_decorated_labeled(builder, text: str, label: str = "Feedback", **_kwargs) -> Dict:
+def text_decorated_labeled(
+    builder, text: str, label: str = "Feedback", **_kwargs
+) -> Dict:
     return build_text_feedback(builder, "decorated_text_labeled", text, label=label)
 
 
@@ -247,9 +249,7 @@ def build_clickable_item(
                 if hasattr(instance, "to_dict"):
                     item_dict = builder._convert_to_camel_case(instance.to_dict())
                     if is_button:
-                        apply_button_icon(
-                            item_dict, material_icon, icon, icon_url
-                        )
+                        apply_button_icon(item_dict, material_icon, icon, icon_url)
                         if button_type:
                             item_dict["type"] = button_type
                     return item_dict
@@ -407,12 +407,18 @@ def click_icon_buttons(builder, card_id: str, feedback_type: str, **_kwargs) -> 
     return build_clickable_feedback(builder, "icon_buttons", card_id, feedback_type)
 
 
-def click_icon_buttons_alt(builder, card_id: str, feedback_type: str, **_kwargs) -> Dict:
+def click_icon_buttons_alt(
+    builder, card_id: str, feedback_type: str, **_kwargs
+) -> Dict:
     return build_clickable_feedback(builder, "icon_buttons_alt", card_id, feedback_type)
 
 
-def click_url_image_buttons(builder, card_id: str, feedback_type: str, **_kwargs) -> Dict:
-    return build_clickable_feedback(builder, "url_image_buttons", card_id, feedback_type)
+def click_url_image_buttons(
+    builder, card_id: str, feedback_type: str, **_kwargs
+) -> Dict:
+    return build_clickable_feedback(
+        builder, "url_image_buttons", card_id, feedback_type
+    )
 
 
 def click_star_rating(builder, card_id: str, feedback_type: str, **_kwargs) -> Dict:
@@ -602,19 +608,25 @@ def build_feedback_layout(
 def layout_sequential(
     content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
 ) -> List[Dict]:
-    return build_feedback_layout("sequential", content_widgets, form_widgets, content_first)
+    return build_feedback_layout(
+        "sequential", content_widgets, form_widgets, content_first
+    )
 
 
 def layout_with_divider(
     content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
 ) -> List[Dict]:
-    return build_feedback_layout("with_divider", content_widgets, form_widgets, content_first)
+    return build_feedback_layout(
+        "with_divider", content_widgets, form_widgets, content_first
+    )
 
 
 def layout_compact(
     content_widgets: List[Dict], form_widgets: List[Dict], content_first: bool
 ) -> List[Dict]:
-    return build_feedback_layout("compact", content_widgets, form_widgets, content_first)
+    return build_feedback_layout(
+        "compact", content_widgets, form_widgets, content_first
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -646,24 +658,40 @@ def create_feedback_section(builder, card_id: str) -> Dict:
         "text_paragraph": lambda t, **kw: text_paragraph(builder, t, **kw),
         "decorated_text": lambda t, **kw: text_decorated(builder, t, **kw),
         "decorated_text_icon": lambda t, **kw: text_decorated_icon(builder, t, **kw),
-        "decorated_text_labeled": lambda t, **kw: text_decorated_labeled(builder, t, **kw),
+        "decorated_text_labeled": lambda t, **kw: text_decorated_labeled(
+            builder, t, **kw
+        ),
         "chip_text": lambda t, **kw: text_chip(builder, t, **kw),
     }
 
     click_builders = {
         "button_list": lambda cid, ft, **kw: click_button_list(builder, cid, ft, **kw),
         "chip_list": lambda cid, ft, **kw: click_chip_list(builder, cid, ft, **kw),
-        "icon_buttons": lambda cid, ft, **kw: click_icon_buttons(builder, cid, ft, **kw),
-        "icon_buttons_alt": lambda cid, ft, **kw: click_icon_buttons_alt(builder, cid, ft, **kw),
-        "url_image_buttons": lambda cid, ft, **kw: click_url_image_buttons(builder, cid, ft, **kw),
+        "icon_buttons": lambda cid, ft, **kw: click_icon_buttons(
+            builder, cid, ft, **kw
+        ),
+        "icon_buttons_alt": lambda cid, ft, **kw: click_icon_buttons_alt(
+            builder, cid, ft, **kw
+        ),
+        "url_image_buttons": lambda cid, ft, **kw: click_url_image_buttons(
+            builder, cid, ft, **kw
+        ),
         "star_rating": lambda cid, ft, **kw: click_star_rating(builder, cid, ft, **kw),
-        "emoji_rating": lambda cid, ft, **kw: click_emoji_rating(builder, cid, ft, **kw),
+        "emoji_rating": lambda cid, ft, **kw: click_emoji_rating(
+            builder, cid, ft, **kw
+        ),
     }
 
     dual_builders = {
-        "decorated_with_button": lambda t, cid, ft, **kw: dual_decorated_with_button(builder, t, cid, ft, **kw),
-        "columns_inline": lambda t, cid, ft, **kw: dual_columns_inline(builder, t, cid, ft, **kw),
-        "decorated_inline_only": lambda t, cid, ft, **kw: dual_decorated_inline_only(builder, t, cid, ft, **kw),
+        "decorated_with_button": lambda t, cid, ft, **kw: dual_decorated_with_button(
+            builder, t, cid, ft, **kw
+        ),
+        "columns_inline": lambda t, cid, ft, **kw: dual_columns_inline(
+            builder, t, cid, ft, **kw
+        ),
+        "decorated_inline_only": lambda t, cid, ft, **kw: dual_decorated_inline_only(
+            builder, t, cid, ft, **kw
+        ),
     }
 
     layout_builders = {
@@ -718,9 +746,7 @@ def create_feedback_section(builder, card_id: str) -> Dict:
         ]
 
     # Apply layout
-    widgets = layout_builders[layout_type](
-        content_widgets, form_widgets, content_first
-    )
+    widgets = layout_builders[layout_type](content_widgets, form_widgets, content_first)
 
     # Build metadata for training
     assembly_metadata = {

@@ -133,13 +133,9 @@ class TicTacToe(Game):
             if x_in > 0 and o_in > 0:
                 parts.append(f"{line_name}: contested (X={x_in}, O={o_in})")
             elif x_in > 0:
-                parts.append(
-                    f"{line_name}: X controls ({x_in}/3, {empty_in} open)"
-                )
+                parts.append(f"{line_name}: X controls ({x_in}/3, {empty_in} open)")
             elif o_in > 0:
-                parts.append(
-                    f"{line_name}: O controls ({o_in}/3, {empty_in} open)"
-                )
+                parts.append(f"{line_name}: O controls ({o_in}/3, {empty_in} open)")
             else:
                 parts.append(f"{line_name}: empty")
 

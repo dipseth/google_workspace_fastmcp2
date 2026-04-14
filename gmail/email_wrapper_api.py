@@ -109,9 +109,7 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
     # Core symbols organized by category
     lines.append("### Symbols")
     for category, components in CATEGORIES.items():
-        mappings = [
-            f"{symbols.get(c, '?')}={c}" for c in components if c in symbols
-        ]
+        mappings = [f"{symbols.get(c, '?')}={c}" for c in components if c in symbols]
         if mappings:
             lines.append(f"**{category}:** {', '.join(mappings)}")
 
@@ -121,9 +119,7 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
     col_sym = symbols["Column"]
 
     lines.append("\n### Containment Rules")
-    lines.append(
-        f"- {spec_sym} EmailSpec → all block types (top-level container)"
-    )
+    lines.append(f"- {spec_sym} EmailSpec → all block types (top-level container)")
     lines.append(f"- {cols_sym} ColumnsBlock → {col_sym} Column")
     lines.append(
         f"- {col_sym} Column → content blocks (TextBlock, ButtonBlock, ImageBlock)"
@@ -140,9 +136,7 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
         footer_sym = symbols["FooterBlock"]
 
         lines.append("\n### Examples")
-        lines.append(
-            f"- `{spec_sym}[{hero_sym}, {text_sym}]` = hero + text email"
-        )
+        lines.append(f"- `{spec_sym}[{hero_sym}, {text_sym}]` = hero + text email")
         lines.append(
             f"- `{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}]` = hero + 2 text blocks + button"
         )
@@ -154,9 +148,7 @@ def get_email_dsl_documentation(include_examples: bool = True) -> str:
             f"- `{spec_sym}[{hero_sym}, {cols_sym}[{col_sym}x2], {btn_sym}]` = "
             "hero + 2-column layout + button"
         )
-        lines.append(
-            "- Syntax: `xN` = multiplier, `[]` = children, `,` = siblings"
-        )
+        lines.append("- Syntax: `xN` = multiplier, `[]` = children, `,` = siblings")
 
     return "\n".join(lines)
 
@@ -227,9 +219,7 @@ def get_email_tool_examples(
                     "title": "Welcome!",
                     "subtitle": "Thanks for joining",
                 },
-                text: {
-                    "_items": [{"text": "We're glad to have you."}]
-                },
+                text: {"_items": [{"text": "We're glad to have you."}]},
             },
         },
         {
@@ -261,16 +251,8 @@ def get_email_tool_examples(
             "email_description": f"{spec}[{header}, {text}, {divider}, {footer}]",
             "email_params": {
                 header: {"title": "Acme Corp"},
-                text: {
-                    "_items": [{"text": "Important announcement."}]
-                },
-                footer: {
-                    "_items": [
-                        {
-                            "text": "2026 Acme Corp. All rights reserved."
-                        }
-                    ]
-                },
+                text: {"_items": [{"text": "Important announcement."}]},
+                footer: {"_items": [{"text": "2026 Acme Corp. All rights reserved."}]},
             },
         },
         {
@@ -320,11 +302,7 @@ def get_email_tool_examples(
                         }
                     ]
                 },
-                text: {
-                    "_items": [
-                        {"text": "Check out our new product."}
-                    ]
-                },
+                text: {"_items": [{"text": "Check out our new product."}]},
                 btn: {
                     "_items": [
                         {

@@ -57,6 +57,7 @@ logger = setup_logger()
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class InstancePattern:
     """
@@ -90,6 +91,7 @@ class InstancePattern:
             **self.metadata,
         }
 
+
 @dataclass
 class PatternVariation:
     """A single variation of an instance pattern."""
@@ -102,6 +104,7 @@ class PatternVariation:
     dsl_notation: Optional[DSLNotation] = None
     cache_key: Optional[CacheKey] = None
     created_at: float = field(default_factory=time.time)
+
 
 @dataclass
 class VariationFamily:
@@ -116,9 +119,11 @@ class VariationFamily:
     def size(self) -> int:
         return len(self.variations)
 
+
 # =============================================================================
 # STRUCTURE VARIATOR (Generic)
 # =============================================================================
+
 
 class StructureVariator:
     """
@@ -307,9 +312,11 @@ class StructureVariator:
 
         return variations
 
+
 # =============================================================================
 # PARAMETER VARIATOR (Generic)
 # =============================================================================
+
 
 class ParameterVariator:
     """
@@ -446,9 +453,11 @@ class ParameterVariator:
 
         return variations
 
+
 # =============================================================================
 # INSTANCE PATTERN MIXIN
 # =============================================================================
+
 
 class InstancePatternMixin:
     """

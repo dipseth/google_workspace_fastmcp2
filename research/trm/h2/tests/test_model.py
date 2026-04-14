@@ -115,7 +115,8 @@ class TestTinyProjectionNetwork:
 
         # At least some parameters should have non-zero gradients
         grads = [
-            p.grad for p in self.model.parameters()
+            p.grad
+            for p in self.model.parameters()
             if p.grad is not None and p.grad.abs().sum() > 0
         ]
         assert len(grads) > 0, "No gradients flowed"
@@ -143,8 +144,12 @@ class TestTinyProjectionNetwork:
         q = tuple(torch.randn(1, 384) for _ in range(3))
 
         with torch.no_grad():
-            s1, _, _ = self.model(*q, torch.randn(1, 384), torch.randn(1, 384), torch.randn(1, 384))
-            s2, _, _ = self.model(*q, torch.randn(1, 384), torch.randn(1, 384), torch.randn(1, 384))
+            s1, _, _ = self.model(
+                *q, torch.randn(1, 384), torch.randn(1, 384), torch.randn(1, 384)
+            )
+            s2, _, _ = self.model(
+                *q, torch.randn(1, 384), torch.randn(1, 384), torch.randn(1, 384)
+            )
 
         # Very unlikely to be exactly equal with random inputs
         assert not torch.allclose(s1, s2, atol=1e-6)

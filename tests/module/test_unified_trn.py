@@ -28,7 +28,12 @@ class TestUnifiedTRNArchitecture:
     def test_all_mode_returns_all_keys(self):
         model = UnifiedTRN()
         out = model(torch.randn(2, 17), torch.randn(2, 384), mode="all")
-        assert set(out.keys()) == {"form_score", "content_score", "halt_prob", "pool_logits"}
+        assert set(out.keys()) == {
+            "form_score",
+            "content_score",
+            "halt_prob",
+            "pool_logits",
+        }
 
     def test_search_mode_shapes(self):
         model = UnifiedTRN()
@@ -71,7 +76,9 @@ class TestUnifiedTRNArchitecture:
             out1 = model(s, c, mode="all")
             out2 = model(s, c, mode="all")
         for key in out1:
-            assert torch.allclose(out1[key], out2[key]), f"{key} not deterministic in eval"
+            assert torch.allclose(out1[key], out2[key]), (
+                f"{key} not deterministic in eval"
+            )
 
     def test_non_deterministic_in_train_mode(self):
         """Dropout should cause variation in train mode."""
@@ -178,14 +185,20 @@ class TestUnifiedTRNGradients:
 
     def test_backbone_receives_gradients_from_all_heads(self):
         """Backbone should get gradients whether loss comes from form, content, pool, or halt."""
-        for mode, key in [("search", "form_score"), ("search", "content_score"),
-                          ("build", "pool_logits"), ("search", "halt_prob")]:
+        for mode, key in [
+            ("search", "form_score"),
+            ("search", "content_score"),
+            ("build", "pool_logits"),
+            ("search", "halt_prob"),
+        ]:
             model = UnifiedTRN()
             model.train()
             model.zero_grad()
             out = model(torch.randn(4, 17), torch.randn(4, 384), mode=mode)
             if key == "pool_logits":
-                loss = torch.nn.functional.cross_entropy(out[key], torch.tensor([0, 1, 2, 3]))
+                loss = torch.nn.functional.cross_entropy(
+                    out[key], torch.tensor([0, 1, 2, 3])
+                )
             else:
                 loss = out[key].sum()
             loss.backward()
@@ -250,11 +263,14 @@ class TestUnifiedTRNEdgeCases:
                 scores.append(out["pool_logits"])
         # At least some pairs should differ
         n_different = sum(
-            1 for i in range(len(scores))
+            1
+            for i in range(len(scores))
             for j in range(i + 1, len(scores))
             if not torch.allclose(scores[i], scores[j], atol=1e-3)
         )
-        assert n_different > 0, "Model collapses all different content inputs to same output"
+        assert n_different > 0, (
+            "Model collapses all different content inputs to same output"
+        )
 
 
 class TestBackwardCompatibility:
@@ -262,6 +278,7 @@ class TestBackwardCompatibility:
 
     def test_get_domain_defaults_gchat(self):
         from research.trm.h2.unified_trn import get_domain_defaults
+
         defaults = get_domain_defaults("gchat")
         assert defaults["pool_vocab"] == dict(GCHAT_DOMAIN.pool_vocab)
         assert defaults["component_to_pool"] == dict(GCHAT_DOMAIN.component_to_pool)
@@ -269,6 +286,7 @@ class TestBackwardCompatibility:
 
     def test_get_domain_defaults_email(self):
         from research.trm.h2.unified_trn import get_domain_defaults
+
         defaults = get_domain_defaults("email")
         assert defaults["pool_vocab"] == dict(EMAIL_DOMAIN.pool_vocab)
         assert defaults["n_pools"] == EMAIL_DOMAIN.n_pools

@@ -218,7 +218,9 @@ def consume_from_context(
                 # without needing a custom consumption handler.
                 params.update(resource)
                 if mapping_report:
-                    preview = str(resource.get("text", resource.get("title", component_name)))[:40]
+                    preview = str(
+                        resource.get("text", resource.get("title", component_name))
+                    )[:40]
                     mapping_report.record(
                         input_type=context_key.rstrip("s"),
                         index=current_index,
@@ -231,9 +233,17 @@ def consume_from_context(
         # Cross-pool field adaptation: remap fields when the source pool
         # differs from what the target component expects.
         # e.g., content_texts provides "text" but GridItem needs "title"
-        if component_name in ("GridItem", "CarouselCard") and "title" not in params and "text" in params:
+        if (
+            component_name in ("GridItem", "CarouselCard")
+            and "title" not in params
+            and "text" in params
+        ):
             params["title"] = params.pop("text")
-        elif component_name in ("DecoratedText", "TextParagraph") and "text" not in params and "title" in params:
+        elif (
+            component_name in ("DecoratedText", "TextParagraph")
+            and "text" not in params
+            and "title" in params
+        ):
             params["text"] = params.pop("title")
     else:
         # No more resources — mark as placeholder so builder can skip non-functional widgets

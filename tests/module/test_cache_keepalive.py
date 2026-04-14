@@ -132,8 +132,9 @@ class TestCacheKeepaliveEngine:
 
         fake_response = _make_litellm_response(cached_tokens=800)
 
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=fake_response) as mock_acompletion:
-
+        with patch(
+            "litellm.acompletion", new_callable=AsyncMock, return_value=fake_response
+        ) as mock_acompletion:
             result = await engine._send_keepalive(cfg)
 
             # Verify litellm was called with correct kwargs
@@ -172,8 +173,9 @@ class TestCacheKeepaliveEngine:
 
         fake_response = _make_litellm_response(cached_tokens=600)
 
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=fake_response) as mock_acompletion:
-
+        with patch(
+            "litellm.acompletion", new_callable=AsyncMock, return_value=fake_response
+        ) as mock_acompletion:
             await engine._send_keepalive(cfg)
 
             call_kwargs = mock_acompletion.call_args[1]
@@ -195,8 +197,9 @@ class TestCacheKeepaliveEngine:
         fake_response = _make_litellm_response()
         sent_prompts = []
 
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=fake_response) as mock_acompletion:
-
+        with patch(
+            "litellm.acompletion", new_callable=AsyncMock, return_value=fake_response
+        ) as mock_acompletion:
             for _ in range(5):
                 await engine._send_keepalive(cfg)
                 call_kwargs = mock_acompletion.call_args[1]
@@ -217,8 +220,9 @@ class TestCacheKeepaliveEngine:
 
         fake_response = _make_litellm_response(cached_tokens=500)
 
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=fake_response) as mock_acompletion:
-
+        with patch(
+            "litellm.acompletion", new_callable=AsyncMock, return_value=fake_response
+        ) as mock_acompletion:
             await engine._send_keepalive(cfg)
             await engine._send_keepalive(cfg)
 
@@ -286,7 +290,9 @@ class TestCacheKeepaliveEngine:
             cached_tokens=800, prompt_tokens=1000, completion_tokens=50
         )
 
-        with patch("litellm.acompletion", new_callable=AsyncMock, return_value=fake_response) as mock_acompletion:
+        with patch(
+            "litellm.acompletion", new_callable=AsyncMock, return_value=fake_response
+        ) as mock_acompletion:
             result = await engine._send_keepalive(cfg)
 
         # Expected cost:
@@ -313,8 +319,7 @@ class TestCacheKeepaliveEngine:
         jitter = settings.cache_keepalive_jitter_seconds
         # Simulate what the loop does
         samples = [
-            max(60, interval + random.uniform(-jitter, jitter))
-            for _ in range(100)
+            max(60, interval + random.uniform(-jitter, jitter)) for _ in range(100)
         ]
         for s in samples:
             assert s >= max(60, interval - jitter)

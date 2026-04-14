@@ -36,6 +36,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class CacheMixin:
     """
     Mixin that adds ComponentCache integration to ModuleWrapper.
@@ -431,6 +432,7 @@ class CacheMixin:
         """Get cache statistics."""
         cache = self._get_component_cache()
         return cache.stats
+
 
 # Import CacheEntry for type hints
 try:

@@ -30,6 +30,7 @@ TOTAL_STONES = 48  # 6 pits × 4 stones × 2 sides
 def test_stone_conservation(n_games: int = 200):
     """Every move must preserve total stone count."""
     import random
+
     game = Mancala(search_depth=6)
     violations = 0
     total_moves = 0
@@ -53,7 +54,9 @@ def test_stone_conservation(n_games: int = 200):
         # Terminal: all stones in stores
         assert sum(state.board) == TOTAL_STONES
 
-    print(f"[Stone Conservation] {n_games} games, {total_moves} moves, {violations} violations")
+    print(
+        f"[Stone Conservation] {n_games} games, {total_moves} moves, {violations} violations"
+    )
     return violations == 0
 
 
@@ -103,9 +106,15 @@ def test_capture_rule():
     # Pit 5 was 0, becomes 1. Last stone in empty own pit! Opposite is 12-5=7, which has 3.
     # Capture: store += 3 + 1 = 4, pit 5 = 0, pit 7 = 0
     next_state = game.apply_move(state2, 3)
-    assert next_state.board[6] == 4, f"Store should be 4 after capture, got {next_state.board[6]}"
-    assert next_state.board[5] == 0, f"Pit 5 should be empty after capture, got {next_state.board[5]}"
-    assert next_state.board[7] == 0, f"Pit 7 (opposite) should be empty, got {next_state.board[7]}"
+    assert next_state.board[6] == 4, (
+        f"Store should be 4 after capture, got {next_state.board[6]}"
+    )
+    assert next_state.board[5] == 0, (
+        f"Pit 5 should be empty after capture, got {next_state.board[5]}"
+    )
+    assert next_state.board[7] == 0, (
+        f"Pit 7 (opposite) should be empty, got {next_state.board[7]}"
+    )
 
     print("[Capture Rule] Correct")
     return True
@@ -120,7 +129,9 @@ def test_game_over_collection():
     # Total must be 48: pit0=1, store1=20, pits7-12=[2,3,1,1,0,0]=7, store2=20 → 1+20+7+20=48
     board = [1, 0, 0, 0, 0, 0, 20, 2, 3, 1, 1, 0, 0, 20]
     state = GameState(board=tuple(board), current_player=1)
-    assert sum(board) == TOTAL_STONES, f"Setup board sums to {sum(board)}, expected {TOTAL_STONES}"
+    assert sum(board) == TOTAL_STONES, (
+        f"Setup board sums to {sum(board)}, expected {TOTAL_STONES}"
+    )
 
     next_state = game.apply_move(state, 0)
     # Pit 0 (1 stone) → sow to pit 1 → pit 1 becomes 1.
@@ -156,7 +167,9 @@ def test_solver_consistency(n_states: int = 100):
         move2 = game.optimal_move(state)
         if move1 != move2:
             inconsistencies += 1
-            print(f"  INCONSISTENT: generate_states gave {move1}, optimal_move gives {move2}")
+            print(
+                f"  INCONSISTENT: generate_states gave {move1}, optimal_move gives {move2}"
+            )
 
     print(f"[Solver Consistency] {inconsistencies} inconsistencies in 50 states")
     return inconsistencies == 0
@@ -165,6 +178,7 @@ def test_solver_consistency(n_states: int = 100):
 def test_depth_sensitivity(n_states: int = 50):
     """Check how much the 'optimal' move changes with search depth."""
     import random
+
     game_d4 = Mancala(search_depth=4)
     game_d8 = Mancala(search_depth=8)
     game_d12 = Mancala(search_depth=12)
@@ -178,7 +192,9 @@ def test_depth_sensitivity(n_states: int = 50):
     agree_8_12 = 0
     agree_4_12 = 0
 
-    print(f"\n[Depth Sensitivity] Comparing depth=4 vs 8 vs 12 on {min(n_states, len(states))} states:")
+    print(
+        f"\n[Depth Sensitivity] Comparing depth=4 vs 8 vs 12 on {min(n_states, len(states))} states:"
+    )
     t0 = time.time()
 
     for state, _ in states[:n_states]:
@@ -194,9 +210,9 @@ def test_depth_sensitivity(n_states: int = 50):
 
     elapsed = time.time() - t0
     total = min(n_states, len(states))
-    print(f"  d4==d8:  {agree_4_8}/{total} ({agree_4_8/total:.1%})")
-    print(f"  d8==d12: {agree_8_12}/{total} ({agree_8_12/total:.1%})")
-    print(f"  d4==d12: {agree_4_12}/{total} ({agree_4_12/total:.1%})")
+    print(f"  d4==d8:  {agree_4_8}/{total} ({agree_4_8 / total:.1%})")
+    print(f"  d8==d12: {agree_8_12}/{total} ({agree_8_12 / total:.1%})")
+    print(f"  d4==d12: {agree_4_12}/{total} ({agree_4_12 / total:.1%})")
     print(f"  Time: {elapsed:.1f}s")
 
     return agree_8_12, total
@@ -251,8 +267,10 @@ def main():
         print(f"  {status}: {name}")
 
     print(f"\n  IMPORTANT: Solver is depth-limited (NOT fully solved).")
-    print(f"  Depth 8→12 agreement: {agree}/{total} ({agree/total:.1%})")
-    print(f"  This means ~{100-agree/total*100:.0f}% of 'optimal' labels may be wrong.")
+    print(f"  Depth 8→12 agreement: {agree}/{total} ({agree / total:.1%})")
+    print(
+        f"  This means ~{100 - agree / total * 100:.0f}% of 'optimal' labels may be wrong."
+    )
     print("=" * 60)
 
 

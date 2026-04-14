@@ -456,9 +456,7 @@ class DualOAuthRouter:
         # Clean up old transactions (> 15 min)
         cutoff = time.time() - 900
         expired = [
-            k
-            for k, v in self._github_transactions.items()
-            if v["created_at"] < cutoff
+            k for k, v in self._github_transactions.items() if v["created_at"] < cutoff
         ]
         for k in expired:
             del self._github_transactions[k]
@@ -823,9 +821,16 @@ async function toggleStar() {{
             authorize_params = {
                 k: v
                 for k, v in original_params.items()
-                if k in ("redirect_uri", "state", "code_challenge",
-                         "code_challenge_method", "scope", "response_type",
-                         "client_id")
+                if k
+                in (
+                    "redirect_uri",
+                    "state",
+                    "code_challenge",
+                    "code_challenge_method",
+                    "scope",
+                    "response_type",
+                    "client_id",
+                )
             }
             if authorize_params:
                 logger.info(

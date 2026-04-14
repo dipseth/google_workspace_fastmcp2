@@ -21,6 +21,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 def create_component_text_indices(
     client,
     collection_name: str,
@@ -179,6 +180,7 @@ def create_component_text_indices(
     logger.info(f"📊 Created {indices_created} text indices on {collection_name}")
     return indices_created
 
+
 def search_by_text(
     client,
     collection_name: str,
@@ -222,6 +224,7 @@ def search_by_text(
 
     return results
 
+
 def search_components_by_relationship(
     client,
     collection_name: str,
@@ -250,9 +253,11 @@ def search_components_by_relationship(
         limit=limit,
     )
 
+
 # =============================================================================
 # MULTI-MODULE SUPPORT
 # =============================================================================
+
 
 def create_module_field_index(
     client,
@@ -288,6 +293,7 @@ def create_module_field_index(
             return False
         logger.warning(f"Failed to create 'module' index: {e}")
         return False
+
 
 def search_within_module(
     client,

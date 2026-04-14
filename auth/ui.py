@@ -62,7 +62,7 @@ def generate_success_html(
                 'margin:10px 0;border:1px solid #c3e6cb;font-size:13px">'
                 f'<span style="background:#28a745;color:white;padding:2px 8px;border-radius:4px;'
                 f'font-size:11px;font-weight:600;margin-right:6px">MATCHES</span>'
-                f'Requested: <code>{html.escape(requested_email)}</code></div>'
+                f"Requested: <code>{html.escape(requested_email)}</code></div>"
             )
         else:
             _requested_section = (
@@ -70,7 +70,7 @@ def generate_success_html(
                 'margin:10px 0;border:1px solid #ffc107;font-size:13px">'
                 f'<span style="background:#ffc107;color:#856404;padding:2px 8px;border-radius:4px;'
                 f'font-size:11px;font-weight:600;margin-right:6px">CORRECTED</span>'
-                f'Originally requested: <code>{html.escape(requested_email)}</code>'
+                f"Originally requested: <code>{html.escape(requested_email)}</code>"
                 f'<br><small style="color:#6c757d">Session identity updated to match your actual Google account</small></div>'
             )
 
@@ -842,16 +842,20 @@ def generate_service_selection_html(
         <p>Select services and configure your auth method for FastMCP</p>
     </div>
     <div class="card-body">
-        {"" if not requested_email else (
-            '<div style="display:flex;align-items:center;gap:10px;background:#e8f4fd;'
-            'border:1px solid #bee5eb;border-radius:10px;padding:12px 16px;margin-bottom:16px">'
-            '<span style="font-size:18px">&#x1F916;</span>'
-            '<div>'
-            '<div style="font-size:13px;font-weight:600;color:#0c5460">Requested by assistant</div>'
-            f'<div style="font-size:12px;color:#5f6368;font-family:monospace;margin-top:2px">{html.escape(requested_email)}</div>'
-            '<div style="font-size:11px;color:#6c757d;margin-top:2px">Sign in with your actual Google account below</div>'
-            '</div></div>'
-        )}
+        {
+            ""
+            if not requested_email
+            else (
+                '<div style="display:flex;align-items:center;gap:10px;background:#e8f4fd;'
+                'border:1px solid #bee5eb;border-radius:10px;padding:12px 16px;margin-bottom:16px">'
+                '<span style="font-size:18px">&#x1F916;</span>'
+                "<div>"
+                '<div style="font-size:13px;font-weight:600;color:#0c5460">Requested by assistant</div>'
+                f'<div style="font-size:12px;color:#5f6368;font-family:monospace;margin-top:2px">{html.escape(requested_email)}</div>'
+                '<div style="font-size:11px;color:#6c757d;margin-top:2px">Sign in with your actual Google account below</div>'
+                "</div></div>"
+            )
+        }
         <form method="POST" action="/auth/services/selected" id="auth-form">
             <input type="hidden" name="state" value="{state}">
             <input type="hidden" name="flow_type" value="{flow_type}">
@@ -861,20 +865,30 @@ def generate_service_selection_html(
                 <div class="panel-header" onclick="togglePanel('auth-method-body', this)">
                     <span class="panel-icon">🔒</span>
                     <span class="panel-title">Authentication Method</span>
-                    <span class="panel-badge">{"PKCE (Recommended)" if use_pkce else "Legacy OAuth"}</span>
+                    <span class="panel-badge">{
+            "PKCE (Recommended)" if use_pkce else "Legacy OAuth"
+        }</span>
                     <span class="chevron">▼</span>
                 </div>
                 <div class="panel-body" id="auth-method-body">
                     <div class="auth-options">
-                        <div class="auth-option {"selected" if use_pkce else ""}" onclick="selectAuthMethod('pkce', this)">
-                            <input type="radio" name="auth_method" value="pkce" {"checked" if use_pkce else ""}>
+                        <div class="auth-option {
+            "selected" if use_pkce else ""
+        }" onclick="selectAuthMethod('pkce', this)">
+                            <input type="radio" name="auth_method" value="pkce" {
+            "checked" if use_pkce else ""
+        }>
                             <div class="auth-option-name">🔐 PKCE Flow</div>
                             <div class="auth-option-desc">OAuth 2.1 with Proof Key for Code Exchange — enhanced security</div>
                             <div class="auth-option-pros">✅ Best security · Code verifier protection · Encrypted storage</div>
                             <div class="auth-option-cons">⚠️ Requires client secret for web apps</div>
                         </div>
-                        <div class="auth-option {"selected" if not use_pkce else ""}" onclick="selectAuthMethod('credentials', this)">
-                            <input type="radio" name="auth_method" value="credentials" {"checked" if not use_pkce else ""}>
+                        <div class="auth-option {
+            "selected" if not use_pkce else ""
+        }" onclick="selectAuthMethod('credentials', this)">
+                            <input type="radio" name="auth_method" value="credentials" {
+            "checked" if not use_pkce else ""
+        }>
                             <div class="auth-option-name">📁 Legacy OAuth 2.0</div>
                             <div class="auth-option-desc">Traditional OAuth flow with encrypted credential storage</div>
                             <div class="auth-option-pros">✅ Multi-account support · Persists across restarts</div>
@@ -889,7 +903,9 @@ def generate_service_selection_html(
                 <div class="panel-header" onclick="togglePanel('creds-body', this)">
                     <span class="panel-icon">🔑</span>
                     <span class="panel-title">OAuth Credentials</span>
-                    <span class="panel-badge {"green" if _env_has_creds else ""}">{"Env configured" if _env_has_creds else "Manual entry"}</span>
+                    <span class="panel-badge {"green" if _env_has_creds else ""}">{
+            "Env configured" if _env_has_creds else "Manual entry"
+        }</span>
                     <span class="chevron">▼</span>
                 </div>
                 <div class="panel-body" id="creds-body">
@@ -904,21 +920,27 @@ def generate_service_selection_html(
                     <div id="custom-creds-fields" style="display:none;">
                         <div class="info-box amber" style="margin-bottom:12px;">
                             <strong>Redirect URI required in Google Cloud Console:</strong><br>
-                            <div class="redirect-uri" style="margin-top:6px;">{_redirect_uri}</div>
+                            <div class="redirect-uri" style="margin-top:6px;">{
+            _redirect_uri
+        }</div>
                         </div>
                         <div class="field-group">
                             <div>
                                 <div class="field-label">Client ID</div>
                                 <input type="text" name="custom_client_id" class="field-input"
                                        placeholder="xxxxxx.apps.googleusercontent.com"
-                                       value="{_env_client_id if _env_has_creds else ""}">
+                                       value="{
+            _env_client_id if _env_has_creds else ""
+        }">
                                 <div class="field-hint">From Google Cloud Console → APIs & Services → Credentials</div>
                             </div>
                             <div>
                                 <div class="field-label">Client Secret</div>
                                 <input type="text" name="custom_client_secret" class="field-input"
                                        placeholder="GOCSPX-..."
-                                       value="{_env_client_secret if _env_has_creds else ""}">
+                                       value="{
+            _env_client_secret if _env_has_creds else ""
+        }">
                                 <div class="field-hint">Optional for PKCE flow · Not recommended to enter in production UI</div>
                             </div>
                         </div>
@@ -929,7 +951,9 @@ def generate_service_selection_html(
                             </a> · Create/edit OAuth 2.0 Client ID · Add redirect URI above · Enable required APIs
                         </div>
                     </div>
-                    <div style="font-size:11px;color:#9aa0a6;margin-top:4px;">{creds_hint}</div>
+                    <div style="font-size:11px;color:#9aa0a6;margin-top:4px;">{
+            creds_hint
+        }</div>
                 </div>
             </div>
 
@@ -967,11 +991,19 @@ def generate_service_selection_html(
                 <div class="panel-header collapsed" onclick="togglePanel('chat-sa-body', this)">
                     <span class="panel-icon">🤖</span>
                     <span class="panel-title">Chat Bot Service Account</span>
-                    <span class="panel-badge {"green" if _sa_file_configured else ""}" id="chat-sa-badge">{"Env configured" if _sa_file_configured else "Optional"}</span>
+                    <span class="panel-badge {
+            "green" if _sa_file_configured else ""
+        }" id="chat-sa-badge">{
+            "Env configured" if _sa_file_configured else "Optional"
+        }</span>
                     <span class="chevron">▼</span>
                 </div>
                 <div class="panel-body" id="chat-sa-body" style="display:none;">
-                    {"" if not _sa_file_configured else '<div style="display:flex;align-items:center;gap:10px;background:rgba(52,168,83,0.08);border:1px solid rgba(52,168,83,0.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;"><span style="font-size:20px">✅</span><div><div style="font-size:13px;font-weight:600;color:#137333">Global service account configured via environment</div><div style="font-size:11px;color:#5f6368;margin-top:2px">Upload below only to use a different SA for your account</div></div></div>'}
+                    {
+            ""
+            if not _sa_file_configured
+            else '<div style="display:flex;align-items:center;gap:10px;background:rgba(52,168,83,0.08);border:1px solid rgba(52,168,83,0.3);border-radius:10px;padding:12px 16px;margin-bottom:12px;"><span style="font-size:20px">✅</span><div><div style="font-size:13px;font-weight:600;color:#137333">Global service account configured via environment</div><div style="font-size:11px;color:#5f6368;margin-top:2px">Upload below only to use a different SA for your account</div></div></div>'
+        }
                     <div class="info-box blue" style="line-height:1.7;">
                         <strong>What is this?</strong><br>
                         A Google Chat service account lets the MCP server act as a Chat bot &mdash;
@@ -1083,13 +1115,17 @@ def generate_service_selection_html(
                         <a href="https://docs.litellm.ai/docs/providers" target="_blank" rel="noopener">LiteLLM-compatible provider</a>
                         (Venice AI, OpenAI, Anthropic, Groq, Together, etc.) using <code>provider/model</code> format.
                         API keys are encrypted with split-key envelope encryption. Leave blank to use the server
-                        default (<code>{html.escape(_settings.litellm_model or "openai/gpt-4")}</code>).
+                        default (<code>{
+            html.escape(_settings.litellm_model or "openai/gpt-4")
+        }</code>).
                     </div>
                     <div class="field-group">
                         <div>
                             <div class="field-label">Model</div>
                             <input type="text" name="sampling_model" class="field-input"
-                                   placeholder="{html.escape(_settings.litellm_model or "openai/gpt-4")}">
+                                   placeholder="{
+            html.escape(_settings.litellm_model or "openai/gpt-4")
+        }">
                         </div>
                         <div>
                             <div class="field-label">API Key</div>
@@ -1334,9 +1370,7 @@ def generate_service_selection_html(
     except Exception as e:
         from config.enhanced_logging import setup_logger
 
-        setup_logger().error(
-            f"Error generating service selection HTML: {e}"
-        )
+        setup_logger().error(f"Error generating service selection HTML: {e}")
         return f"""<!DOCTYPE html>
 <html><head><title>Error</title></head>
 <body style="font-family:sans-serif;padding:40px">

@@ -76,4 +76,6 @@ class SessionKey(str, Enum):
     GITHUB_LOGIN = "github_login"  # str (GitHub username)
     GITHUB_EMAIL = "github_email"  # str (GitHub email, may be None)
     GITHUB_USER_ID = "github_user_id"  # str (GitHub numeric user ID)
-    GITHUB_STARRED_REPO = "github_starred_repo"  # bool (has user starred the gating repo)
+    GITHUB_STARRED_REPO = (
+        "github_starred_repo"  # bool (has user starred the gating repo)
+    )
