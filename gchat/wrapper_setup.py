@@ -619,15 +619,15 @@ def reset_wrapper():
 # GCHAT-SPECIFIC SKILL TEMPLATES
 # =============================================================================
 
-# DSL Guide template content
-GCHAT_DSL_GUIDE = """# Structure DSL
+# DSL Guide template — symbols are injected by _generate_gchat_dsl_template()
+_GCHAT_DSL_GUIDE_TEMPLATE = """# Structure DSL
 
 Google Chat cards use a compact DSL notation for defining structure.
 
 ## Basic Syntax
 
 ```
-§[δ×3, Ƀ[ᵬ×2]]
+{basic_example}
 ```
 
 Means: Section with 3 DecoratedText items and a ButtonList with 2 Buttons.
@@ -693,33 +693,38 @@ Filters can be chained:
 {examples}
 """
 
-# Skill examples for different skill types
-GCHAT_SKILL_EXAMPLES = {
-    "dsl-syntax": [
-        "§[δ] - Simple section with one DecoratedText",
-        "§[δ×3, Ƀ[ᵬ×2]] - Section with 3 texts and 2 buttons",
-        "§[ℊ[ǵ×4]] - Section with a 4-item Grid",
-        "§[δ, Ɨ, Ƀ[ᵬ]] - Section with text, image, and button",
-    ],
-    "jinja-filters": [
-        "{{ 'Online' | success_text }} - Green text",
-        "{{ 'Error' | error_text }} - Red text",
-        "{{ 'Warning' | warning_text }} - Yellow text",
-        "{{ text | color('#FF5733') }} - Custom orange text",
-        "{{ 'Important' | bold }} - Bold text",
-    ],
-}
+def _get_gchat_skill_examples(symbols: dict) -> dict:
+    """Generate skill examples dynamically from wrapper symbols."""
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+    section = s("Section")
+    dtext = s("DecoratedText")
+    btnlist = s("ButtonList")
+    btn = s("Button")
+    grid = s("Grid")
+    gitem = s("GridItem")
+    img = s("Image")
+    return {
+        "dsl-syntax": [
+            f"{section}[{dtext}] - Simple section with one DecoratedText",
+            f"{section}[{dtext}\u00d73, {btnlist}[{btn}\u00d72]] - Section with 3 texts and 2 buttons",
+            f"{section}[{grid}[{gitem}\u00d74]] - Section with a 4-item Grid",
+            f"{section}[{dtext}, {img}, {btnlist}[{btn}]] - Section with text, image, and button",
+        ],
+        "jinja-filters": [
+            "{{ 'Online' | success_text }} - Green text",
+            "{{ 'Error' | error_text }} - Red text",
+            "{{ 'Warning' | warning_text }} - Yellow text",
+            "{{ text | color('#FF5733') }} - Custom orange text",
+            "{{ 'Important' | bold }} - Bold text",
+        ],
+    }
+
 
 def _generate_gchat_dsl_template(wrapper) -> str:
-    """
-    Generate the DSL syntax skill document.
+    """Generate the DSL syntax skill document with dynamic symbols."""
+    symbols = getattr(wrapper, "symbol_mapping", {})
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
 
-    Args:
-        wrapper: ModuleWrapper instance
-
-    Returns:
-        Markdown content for DSL syntax guide
-    """
     # Get symbol table from wrapper
     symbol_table = (
         wrapper.get_symbol_table_text()
@@ -727,11 +732,17 @@ def _generate_gchat_dsl_template(wrapper) -> str:
         else "No symbols available."
     )
 
-    # Format examples
-    examples = GCHAT_SKILL_EXAMPLES.get("dsl-syntax", [])
+    # Build examples from dynamic symbols
+    examples = _get_gchat_skill_examples(symbols).get("dsl-syntax", [])
     examples_text = "\n".join(f"- `{e}`" for e in examples)
 
-    return GCHAT_DSL_GUIDE.format(
+    section = s("Section")
+    dtext = s("DecoratedText")
+    btnlist = s("ButtonList")
+    btn = s("Button")
+
+    return _GCHAT_DSL_GUIDE_TEMPLATE.format(
+        basic_example=f"{section}[{dtext}\u00d73, {btnlist}[{btn}\u00d72]]",
         symbol_table=symbol_table,
         examples=examples_text,
     )
@@ -789,6 +800,13 @@ def _generate_gchat_card_params_template(wrapper) -> str:
         "# Card Params Reference",
         "",
         "How to structure `card_params` when using DSL notation with `send_dynamic_card`.",
+        "",
+        "## Structure DSL vs Content DSL",
+        "",
+        f"- `card_description`: Accepts **both** Structure DSL (`{section}[{dtext}x2]`) "
+        f"and Content DSL (`{dtext} 'text' success bold`)",
+        f"- `card_params`: Explicit content overrides keyed by symbol — "
+        f"always takes priority over Content DSL",
         "",
         "## Symbol-Keyed Params",
         "",
@@ -925,8 +943,9 @@ def _register_gchat_skill_templates(wrapper) -> None:
     # Register Jinja filter guide
     wrapper.register_skill_template("jinja-filters", _generate_gchat_jinja_template)
 
-    # Register examples for each skill type
-    for skill_type, examples in GCHAT_SKILL_EXAMPLES.items():
+    # Register examples for each skill type (dynamically generated from symbols)
+    symbols = getattr(wrapper, "symbol_mapping", {})
+    for skill_type, examples in _get_gchat_skill_examples(symbols).items():
         wrapper.register_skill_examples(skill_type, examples)
 
     logger.info("Registered gchat skill templates with ModuleWrapper")
