@@ -286,7 +286,7 @@ class TestX402PaymentMiddleware:
     @pytest.mark.asyncio
     async def test_payment_verification_failure_returns_402(self):
         """If SDK verification fails, return error without executing tool."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
         from mcp.types import TextContent
 
         payload_b64 = _make_payment_payload_b64()
@@ -320,7 +320,7 @@ class TestX402PaymentMiddleware:
     @pytest.mark.asyncio
     async def test_settle_payment_adds_meta(self):
         """Settlement attaches x402 response data to result meta."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
         from mcp.types import TextContent
 
         from middleware.payment.middleware import _PendingSettlement
@@ -358,7 +358,7 @@ class TestX402PaymentMiddleware:
     @pytest.mark.asyncio
     async def test_settle_payment_error_logged_not_fatal(self):
         """Settlement errors don't crash the tool response."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
         from mcp.types import TextContent
 
         from middleware.payment.middleware import _PendingSettlement

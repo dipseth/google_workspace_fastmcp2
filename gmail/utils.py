@@ -310,6 +310,12 @@ def _extract_message_body(payload):
         data = base64.urlsafe_b64decode(payload["body"]["data"])
         body_data = data.decode("utf-8", errors="ignore")
 
+    # Fallback: extract HTML body and convert to plain text
+    if not body_data:
+        html_body = _extract_html_body(payload)
+        if html_body:
+            body_data = _html_to_plain_text(html_body)
+
     return body_data
 
 

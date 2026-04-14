@@ -17,7 +17,8 @@ Version: 2.0
 """
 
 from fastmcp import Context, FastMCP
-from fastmcp.prompts.prompt import Message, PromptMessage, TextContent
+from fastmcp.prompts import Message, PromptMessage
+from mcp.types import TextContent
 from pydantic import Field
 
 from prompts.tool_optimization_helper import ToolOptimizationHelper

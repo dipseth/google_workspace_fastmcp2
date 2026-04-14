@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
-from fastmcp.server.apps import UI_EXTENSION_ID, AppConfig
+from fastmcp.apps import UI_EXTENSION_ID, AppConfig
 from mcp.types import ToolListChangedNotification
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
@@ -507,7 +507,7 @@ def _get_tool_registry(mcp: FastMCP) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary mapping tool names to tool instances
     """
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools import Tool
 
     components = mcp.local_provider._components
     return {v.name: v for v in components.values() if isinstance(v, Tool)}

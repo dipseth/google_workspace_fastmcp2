@@ -26,7 +26,7 @@ def _get_tool_registry(mcp_server: FastMCP) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary mapping tool names to tool instances
     """
-    from fastmcp.tools.tool import Tool
+    from fastmcp.tools import Tool
 
     components = mcp_server.local_provider._components
     return {v.name: v for v in components.values() if isinstance(v, Tool)}

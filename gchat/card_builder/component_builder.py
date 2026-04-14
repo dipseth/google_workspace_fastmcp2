@@ -505,7 +505,35 @@ class ComponentBuilder:
                 if expected_child_type == "Chip":
                     if "text" in child_params and "label" not in child_params:
                         child_params["label"] = child_params.pop("text")
-                    if not child_params.get("url"):
+                    # Convert icon string to proper materialIcon dict
+                    if "icon" in child_params and isinstance(child_params["icon"], str):
+                        from gchat.material_icons import resolve_icon_name, create_material_icon
+                        resolved_name = resolve_icon_name(child_params["icon"])
+                        child_params["icon"] = create_material_icon(resolved_name)
+                    # Chips require onClick — auto-generate action if no URL
+                    if not child_params.get("url") and "on_click" not in child_params:
+                        label = child_params.get("label", f"chip_{len(built_children)}")
+                        try:
+                            from card_framework.v2.widgets.on_click import OnClick
+                            from card_framework.v2.widgets.action import Action, ActionParameter
+                            child_params["on_click"] = OnClick(
+                                action=Action(
+                                    function="chip_select",
+                                    parameters=[
+                                        ActionParameter(key="label", value=str(label))
+                                    ],
+                                )
+                            )
+                        except ImportError:
+                            child_params["on_click"] = {
+                                "action": {
+                                    "function": "chip_select",
+                                    "parameters": [
+                                        {"key": "label", "value": str(label)}
+                                    ],
+                                }
+                            }
+                    if not child_params.get("label"):
                         continue
                 elif expected_child_type == "GridItem":
                     child_params.setdefault("title", f"Item {len(built_children) + 1}")
@@ -638,6 +666,7 @@ class ComponentBuilder:
         context: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """Build Columns component with nested column structure."""
+        wrapper = self._wrapper
         column_items = []
 
         for child in children:
@@ -648,17 +677,57 @@ class ComponentBuilder:
 
             for _ in range(col_mult):
                 col_widgets = []
-                for gc in col_grandchildren:
-                    gc_name = gc.get("name", "")
-                    gc_mult = gc.get("multiplier", 1)
-                    gc_children = gc.get("children", [])
+                if col_grandchildren:
+                    # Column has explicit nested widgets in DSL — build them
+                    for gc in col_grandchildren:
+                        gc_name = gc.get("name", "")
+                        gc_mult = gc.get("multiplier", 1)
+                        gc_children = gc.get("children", [])
 
-                    for _ in range(gc_mult):
-                        widget = self.build_widget_generic(
-                            gc_name, gc_children, context
-                        )
-                        if widget:
-                            col_widgets.append(widget)
+                        for _ in range(gc_mult):
+                            widget = self.build_widget_generic(
+                                gc_name, gc_children, context
+                            )
+                            if widget:
+                                col_widgets.append(widget)
+                else:
+                    # Column has no DSL children — consume content from context
+                    col_params = consume_from_context("Column", context, wrapper)
+                    if col_params:
+                        # Column params can contain a 'widgets' list or text content
+                        nested_widgets = col_params.get("widgets", [])
+                        if nested_widgets:
+                            for nw in nested_widgets:
+                                nw_type = nw.get("type", "decorated_text")
+                                nw_name = {
+                                    "decorated_text": "DecoratedText",
+                                    "text_paragraph": "TextParagraph",
+                                    "image": "Image",
+                                    "button_list": "ButtonList",
+                                }.get(nw_type, "TextParagraph")
+                                nw_params = {
+                                    k: v
+                                    for k, v in nw.items()
+                                    if k != "type"
+                                }
+                                built = self.build_component(
+                                    nw_name,
+                                    nw_params,
+                                    wrapper=wrapper,
+                                    wrap_with_key=True,
+                                )
+                                if built:
+                                    col_widgets.append(built)
+                        elif "text" in col_params:
+                            # Simple text content for this column
+                            built = self.build_component(
+                                "TextParagraph",
+                                {"text": col_params["text"]},
+                                wrapper=wrapper,
+                                wrap_with_key=True,
+                            )
+                            if built:
+                                col_widgets.append(built)
 
                 if col_widgets:
                     column_items.append({"widgets": col_widgets})

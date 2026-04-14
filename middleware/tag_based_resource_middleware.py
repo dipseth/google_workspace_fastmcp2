@@ -1036,7 +1036,7 @@ class TagBasedResourceMiddleware(Middleware):
         try:
             if context.fastmcp_context:
                 mcp_server = context.fastmcp_context.fastmcp
-                from fastmcp.tools.tool import Tool
+                from fastmcp.tools import Tool
 
                 components = mcp_server.local_provider._components
                 tools_dict = {
@@ -1097,7 +1097,7 @@ class TagBasedResourceMiddleware(Middleware):
             logger.debug(f"🔧 Calling tool {tool_name} with parameters: {parameters}")
 
         mcp_server = context.fastmcp_context.fastmcp
-        from fastmcp.tools.tool import Tool
+        from fastmcp.tools import Tool
 
         components = mcp_server.local_provider._components
         tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
@@ -1115,9 +1115,9 @@ class TagBasedResourceMiddleware(Middleware):
         # Call the tool's function with parameters
         try:
             # Check if the function is async
-            import asyncio
+            import inspect
 
-            if asyncio.iscoroutinefunction(tool_func):
+            if inspect.iscoroutinefunction(tool_func):
                 result = await tool_func(**parameters)
             else:
                 # Some tools might be sync functions

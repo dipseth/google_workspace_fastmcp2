@@ -726,6 +726,7 @@ class SmartCardBuilderV2:
         items: Optional[List[Dict]] = None,
         grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
+        columns: Optional[List[Dict]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Build a card from parsed DSL structure.
 
@@ -792,6 +793,7 @@ class SmartCardBuilderV2:
                 "buttons": buttons or [],
                 "content_texts": content_texts,
                 "chips": chips or [],
+                "columns": columns or [],
                 "carousel_cards": cards or [],
                 "grid_items": grid_items or items or [],
             }
@@ -828,11 +830,13 @@ class SmartCardBuilderV2:
             context = {
                 "buttons": buttons or [],
                 "chips": chips or [],
+                "columns": columns or [],
                 "carousel_cards": cards or [],
                 "grid_items": grid_items or items or [],
                 "image_url": image_url,
                 "content_texts": content_texts,
                 "_button_index": 0,
+                "_column_index": 0,
                 "_chip_index": 0,
                 "_carousel_card_index": 0,
                 "_grid_item_index": 0,
@@ -1548,6 +1552,7 @@ class SmartCardBuilderV2:
         image_titles = card_params.get("image_titles")
         items = card_params.get("items")
         grid_items = card_params.get("grid_items")
+        columns = card_params.get("columns")
         cards = card_params.get("cards") or card_params.get("carousel_cards")
         sections = card_params.get("sections")
 
@@ -1622,6 +1627,7 @@ class SmartCardBuilderV2:
                 items=items,
                 grid_items=grid_items,
                 cards=cards,
+                columns=columns,
             )
 
         if card_dict:
@@ -1648,6 +1654,7 @@ class SmartCardBuilderV2:
         items: Optional[List[Dict]] = None,
         grid_items: Optional[List[Dict]] = None,
         cards: Optional[List[Dict]] = None,
+        columns: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
         Build a card from DSL description.
@@ -1768,6 +1775,7 @@ class SmartCardBuilderV2:
                 items=styled_items,
                 grid_items=grid_items,
                 cards=cards,
+                columns=columns,
             )
 
         # Fallback: Try Content DSL only (no structure)

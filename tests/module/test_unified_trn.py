@@ -258,22 +258,31 @@ class TestUnifiedTRNEdgeCases:
 
 
 class TestBackwardCompatibility:
-    """Verify backward compatibility with existing constants."""
+    """Verify backward compatibility and domain-aware defaults."""
 
-    def test_pool_vocab_re_export_matches_gchat(self):
-        from research.trm.h2.unified_trn import POOL_VOCAB as TRN_VOCAB
-        assert TRN_VOCAB == dict(GCHAT_DOMAIN.pool_vocab)
+    def test_get_domain_defaults_gchat(self):
+        from research.trm.h2.unified_trn import get_domain_defaults
+        defaults = get_domain_defaults("gchat")
+        assert defaults["pool_vocab"] == dict(GCHAT_DOMAIN.pool_vocab)
+        assert defaults["component_to_pool"] == dict(GCHAT_DOMAIN.component_to_pool)
+        assert defaults["n_pools"] == GCHAT_DOMAIN.n_pools
 
-    def test_component_to_pool_re_export_matches_gchat(self):
-        from research.trm.h2.unified_trn import COMPONENT_TO_POOL as TRN_C2P
-        assert TRN_C2P == dict(GCHAT_DOMAIN.component_to_pool)
+    def test_get_domain_defaults_email(self):
+        from research.trm.h2.unified_trn import get_domain_defaults
+        defaults = get_domain_defaults("email")
+        assert defaults["pool_vocab"] == dict(EMAIL_DOMAIN.pool_vocab)
+        assert defaults["n_pools"] == EMAIL_DOMAIN.n_pools
 
     def test_feature_names_v5_has_17_features(self):
         assert len(FEATURE_NAMES_V5) == 17
 
-    def test_n_pools_matches_gchat(self):
+    def test_default_n_pools(self):
         model = UnifiedTRN()
-        assert model.n_pools == GCHAT_DOMAIN.n_pools
+        assert model.n_pools == 5  # DEFAULT_N_POOLS
+
+    def test_custom_n_pools(self):
+        model = UnifiedTRN(n_pools=EMAIL_DOMAIN.n_pools)
+        assert model.n_pools == EMAIL_DOMAIN.n_pools
 
     def test_structural_dim_matches_features(self):
         model = UnifiedTRN()

@@ -2,7 +2,7 @@
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.server.apps import AppConfig
+from fastmcp.apps import AppConfig
 
 from tools.ui_apps import _build_manage_tools_html, setup_ui_apps
 

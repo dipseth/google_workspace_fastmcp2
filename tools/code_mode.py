@@ -19,7 +19,7 @@ from fastmcp.experimental.transforms.code_mode import (
     Search,
 )
 from fastmcp.server.context import Context
-from fastmcp.tools.tool import Tool, ToolResult
+from fastmcp.tools import Tool, ToolResult
 from mcp.types import TextContent
 from pydantic import Field
 
@@ -261,10 +261,11 @@ class EnhancedSandboxProvider(MontySandboxProvider):
         }
 
         try:
+            # pydantic-monty >=0.0.8 removed external_functions from Monty()
+            # constructor; external_functions are now only passed to run_monty_async.
             monty = pydantic_monty.Monty(
                 code,
                 inputs=list((inputs or {}).keys()),
-                external_functions=list(all_external.keys()),
             )
         except Exception as exc:
             return _format_sandbox_error(exc)
@@ -823,6 +824,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
             NotFoundError,
             _unwrap_tool_result,
         )
+        from fastmcp.tools import ToolResult as _ToolResult
         from pydantic import ValidationError as _VE
 
         transform = code_mode
@@ -859,26 +861,70 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     return _unwrap_tool_result(result)
                 except _VE as ve:
                     # Attempt argument recovery via LLM
-                    corrected = await _recover_args(
-                        ctx, tool, tool_name, params, ve
-                    )
+                    corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
-                        result = await ctx.fastmcp.call_tool(
-                            tool.name, corrected
-                        )
+                        result = await ctx.fastmcp.call_tool(tool.name, corrected)
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
-            return await transform.sandbox_provider.run(
+            # Clear stale dashboard-tool tracker so a *previous*
+            # execute's cached tool doesn't bleed into this one.
+            try:
+                from middleware.dashboard_cache_middleware import (
+                    clear_last_dashboard_tool,
+                )
+
+                clear_last_dashboard_tool()
+            except Exception:
+                pass
+
+            raw = await transform.sandbox_provider.run(
                 code,
                 external_functions={"call_tool": call_tool},
             )
 
-        return Tool.from_function(
+            # If a dashboard-enabled tool was called during THIS execute,
+            # embed a Prefab dashboard directly in the ToolResult so
+            # VS Code renders it inline (no resource-fetch race).
+            try:
+                from middleware.dashboard_cache_middleware import (
+                    get_cached_result,
+                    get_last_dashboard_tool,
+                )
+
+                last_tool = get_last_dashboard_tool()
+                if last_tool is not None:
+                    cached = get_cached_result(last_tool)
+                    if cached:
+                        from tools.ui_apps import (
+                            _build_prefab_data_dashboard,
+                            get_data_dashboard_config,
+                        )
+
+                        config = get_data_dashboard_config(last_tool)
+                        prefab = _build_prefab_data_dashboard(
+                            last_tool, cached, config
+                        )
+                        if prefab is not None:
+                            return _ToolResult(
+                                content=raw,
+                                structured_content=prefab.to_json(),
+                            )
+            except Exception:
+                pass
+            return raw
+
+        tool = Tool.from_function(
             fn=execute,
             name=transform.execute_tool_name,
             description=transform._build_execute_description(),
         )
+
+        # Dashboard rendering is now handled inline via Prefab
+        # structured_content in the ToolResult (see execute body above),
+        # so no resourceUri is needed on the tool definition.
+
+        return tool
 
     async def _recover_args(
         ctx: Context,
@@ -965,9 +1011,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # Strip markdown fences
             if text.startswith("```"):
                 lines = text.split("\n")
-                text = "\n".join(
-                    ln for ln in lines if not ln.strip().startswith("```")
-                )
+                text = "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
 
             corrected = json.loads(text)
             if not isinstance(corrected, dict):

@@ -15,6 +15,7 @@ Updated to use the newer, simpler Google Drive search syntax:
 """
 
 import asyncio
+import inspect
 from datetime import datetime, timedelta
 
 from fastmcp import Context, FastMCP
@@ -309,7 +310,7 @@ async def _get_recent_photos_items(
             }
 
         mcp_server = ctx.fastmcp
-        from fastmcp.tools.tool import Tool
+        from fastmcp.tools import Tool
 
         components = mcp_server.local_provider._components
         tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
@@ -347,7 +348,7 @@ async def _get_recent_photos_items(
             "max_results": min(page_size, 50),  # Photos API max is 50
         }
 
-        if asyncio.iscoroutinefunction(tool_func):
+        if inspect.iscoroutinefunction(tool_func):
             albums_result = await tool_func(**tool_params)
         else:
             albums_result = tool_func(**tool_params)

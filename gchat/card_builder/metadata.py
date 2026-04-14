@@ -21,6 +21,7 @@ from adapters.module_wrapper.types import ComponentName
 _CONTEXT_CONSUMERS_FALLBACK: Dict[ComponentName, Tuple[str, str]] = {
     "Button": ("buttons", "_button_index"),
     "Chip": ("chips", "_chip_index"),
+    "Column": ("columns", "_column_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
     "CarouselCard": ("carousel_cards", "_carousel_card_index"),

@@ -212,6 +212,20 @@ def consume_from_context(
                         component=component_name,
                         field_name="grid_item",
                     )
+            else:
+                # Generic pass-through for new/unrecognized pool types.
+                # This ensures newly registered context resources work
+                # without needing a custom consumption handler.
+                params.update(resource)
+                if mapping_report:
+                    preview = str(resource.get("text", resource.get("title", component_name)))[:40]
+                    mapping_report.record(
+                        input_type=context_key.rstrip("s"),
+                        index=current_index,
+                        value=preview,
+                        component=component_name,
+                        field_name=context_key.rstrip("s"),
+                    )
         context[index_key] = current_index + 1
 
         # Cross-pool field adaptation: remap fields when the source pool

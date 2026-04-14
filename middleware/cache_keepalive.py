@@ -684,10 +684,17 @@ class CacheKeepaliveEngine:
     async def _keepalive_loop(self) -> None:
         interval = self._settings.cache_keepalive_interval_seconds
         jitter = getattr(self._settings, "cache_keepalive_jitter_seconds", 300)
+        reactive = getattr(self._settings, "cache_keepalive_reactive", True)
+        idle_timeout = getattr(
+            self._settings, "cache_keepalive_idle_timeout_seconds", 3600
+        )
         logger.info(
-            "Cache keepalive loop started (interval=%ds, jitter=+/-%ds, modules=%s)",
+            "Cache keepalive loop started (interval=%ds, jitter=+/-%ds, "
+            "reactive=%s, idle_timeout=%ds, modules=%s)",
             interval,
             jitter,
+            reactive,
+            idle_timeout,
             list(self._modules.keys()),
         )
 
@@ -709,6 +716,42 @@ class CacheKeepaliveEngine:
                     interval,
                 )
             last_loop_at = now
+
+            # ── Budget gate: skip if monthly budget is exceeded ──
+            try:
+                from middleware.payment.cost_tracker import is_budget_exceeded
+
+                if is_budget_exceeded():
+                    logger.info(
+                        "Cache keepalive: SKIPPED — monthly budget exceeded"
+                    )
+                    await asyncio.sleep(max(60, interval))
+                    continue
+            except Exception:
+                pass
+
+            # ── Reactive mode: only send keepalives within idle_timeout
+            #    of the last real sampling activity ──
+            if reactive:
+                try:
+                    from middleware.payment.cost_tracker import (
+                        seconds_since_last_activity,
+                    )
+
+                    idle_secs = seconds_since_last_activity()
+                    if idle_secs > idle_timeout:
+                        logger.debug(
+                            "Cache keepalive: IDLE (%.0fs since last activity, "
+                            "timeout=%ds) — sleeping",
+                            idle_secs,
+                            idle_timeout,
+                        )
+                        # Sleep longer when idle — check again in 60s in case
+                        # a real call happens and we should resume
+                        await asyncio.sleep(60)
+                        continue
+                except Exception:
+                    pass
 
             for module in self._modules.values():
                 try:
@@ -969,6 +1012,13 @@ class CacheKeepaliveEngine:
                 "validation_total_cost_usd", 0.0
             )
             self._validation_total_calls = data.get("validation_total_calls", 0)
+            # Restore monthly budget tracking state
+            try:
+                from middleware.payment.cost_tracker import load_monthly_costs
+
+                load_monthly_costs(path_str)
+            except Exception:
+                pass
             logger.info("Cache keepalive: loaded persisted stats from %s", path_str)
         except Exception as exc:
             logger.warning(
@@ -987,6 +1037,13 @@ class CacheKeepaliveEngine:
             stats["validation_total_cost_usd"] = self._validation_total_cost_usd
             stats["validation_total_calls"] = self._validation_total_calls
             stats["last_saved_at"] = time.time()
+            # Persist monthly budget tracking state
+            try:
+                from middleware.payment.cost_tracker import save_monthly_costs
+
+                save_monthly_costs(path_str)
+            except Exception:
+                pass
             # Atomic write: temp file + rename
             fd, tmp = tempfile.mkstemp(dir=str(p.parent), suffix=".tmp")
             try:

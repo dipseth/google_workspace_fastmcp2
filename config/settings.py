@@ -308,6 +308,14 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 
+    # App Providers (FastMCP 3.2+)
+    # When enabled, registers Approval and Choice providers for interactive UIs
+    enable_app_providers: bool = Field(
+        default=False,
+        description="Enable FastMCP App providers (Approval, Choice)",
+        json_schema_extra={"env": "ENABLE_APP_PROVIDERS"},
+    )
+
     # Multi-Dimensional Search (Horizon 1 — RIC-TRM)
     # When enabled, callers use search_hybrid_multidim (multiplicative cross-dim scoring)
     # instead of search_hybrid (RRF rank fusion). POC validated: +9.5% Top-1 accuracy.
@@ -362,6 +370,38 @@ class Settings(BaseSettings):
         default=10,
         description="Candidate pool size for content RecommendQuery in recursive search",
         json_schema_extra={"env": "RECURSIVE_CONTENT_POOL_SIZE"},
+    )
+
+    # Model Artifact Management
+    # Multi-provider model artifact download + local cache with py-key-value-aio registry
+    model_artifact_enabled: bool = Field(
+        default=False,
+        description="Enable cloud model artifact download on startup",
+        json_schema_extra={"env": "MODEL_ARTIFACT_ENABLED"},
+    )
+    model_artifact_uri: str = Field(
+        default="",
+        description=(
+            "JSON mapping of domain->artifact URI, or single URI for all domains. "
+            "Supports gs://, s3://, az://, https:// schemes. "
+            'Example: \'{"gchat": "gs://my-bucket/trm/best_model_unified.pt"}\''
+        ),
+        json_schema_extra={"env": "MODEL_ARTIFACT_URI"},
+    )
+    model_artifact_cache_dir: str = Field(
+        default="",
+        description="Local directory for cached model artifacts. If empty, uses credentials_dir/model_cache",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CACHE_DIR"},
+    )
+    model_artifact_registry_backend: str = Field(
+        default="file",
+        description="Registry backend for artifact metadata: 'memory', 'file', or 'redis'",
+        json_schema_extra={"env": "MODEL_ARTIFACT_REGISTRY_BACKEND"},
+    )
+    model_artifact_checksum_verify: bool = Field(
+        default=True,
+        description="Verify SHA-256 checksum of downloaded artifacts against registry",
+        json_schema_extra={"env": "MODEL_ARTIFACT_CHECKSUM_VERIFY"},
     )
 
     # Response Limiting Configuration
@@ -587,6 +627,25 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "SAMPLING_COST_PERSISTENCE_FILE"},
     )
 
+    # Sampling Monthly Budget
+    sampling_monthly_budget_usd: float = Field(
+        default=0.0,
+        description="Monthly sampling budget in USD. 0 = unlimited. When exceeded, sampling calls are skipped.",
+        json_schema_extra={"env": "SAMPLING_MONTHLY_BUDGET_USD"},
+    )
+
+    # Reactive Cache Keepalive
+    cache_keepalive_reactive: bool = Field(
+        default=True,
+        description="Reactive mode: only keep cache warm after real sampling activity (ignores continuous loop)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_REACTIVE"},
+    )
+    cache_keepalive_idle_timeout_seconds: int = Field(
+        default=3600,
+        description="Stop keepalive after this many seconds of no real sampling activity (default 1 hour)",
+        json_schema_extra={"env": "CACHE_KEEPALIVE_IDLE_TIMEOUT_SECONDS"},
+    )
+
     # Argument Recovery
     sampling_argument_recovery_enabled: bool = Field(
         default=True,
@@ -626,12 +685,18 @@ class Settings(BaseSettings):
     github_oauth_client_id: str = ""
     github_oauth_client_secret: str = ""
     github_oauth_required_scopes: str = "user:email"  # Comma-separated GitHub scopes
-    github_oauth_gating_repo: str = ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+    github_oauth_gating_repo: str = (
+        ""  # owner/repo to check for star (e.g. "myorg/myrepo")
+    )
 
     # Alpha Access Control
     alpha_mode: bool = False  # Enable alpha access gating
-    alpha_google_email_allowlist: str = ""  # Comma-separated emails allowed via Google OAuth
-    alpha_github_require_star: bool = True  # Require GitHub users to star the gating repo
+    alpha_google_email_allowlist: str = (
+        ""  # Comma-separated emails allowed via Google OAuth
+    )
+    alpha_github_require_star: bool = (
+        True  # Require GitHub users to star the gating repo
+    )
 
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry

@@ -216,6 +216,29 @@ class LiteLLMSamplingHandler:
         except Exception:
             pass
 
+        # ── Budget gate: refuse if monthly spend exceeds budget ──
+        try:
+            from middleware.payment.cost_tracker import is_budget_exceeded
+
+            if is_budget_exceeded():
+                from middleware.payment.cost_tracker import get_monthly_cost
+
+                logger.warning(
+                    "LiteLLM sampling BLOCKED: monthly budget exceeded ($%.2f)",
+                    get_monthly_cost(),
+                )
+                return CreateMessageResult(
+                    role="assistant",
+                    content=TextContent(
+                        type="text",
+                        text="[Sampling skipped — monthly budget exceeded]",
+                    ),
+                    model=self.default_model,
+                    stopReason="endTurn",
+                )
+        except ImportError:
+            pass
+
         logger.debug(
             "LiteLLM sampling: model=%s, messages=%d, tools=%d",
             self.default_model,

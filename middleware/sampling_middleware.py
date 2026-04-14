@@ -1311,9 +1311,7 @@ class EnhancedSamplingMiddleware(Middleware):
                 json_text = text.strip()
                 if json_text.startswith("```"):
                     lines = json_text.split("\n")
-                    lines = [
-                        ln for ln in lines if not ln.strip().startswith("```")
-                    ]
+                    lines = [ln for ln in lines if not ln.strip().startswith("```")]
                     json_text = "\n".join(lines).strip()
                 validation = ValidationResult.model_validate_json(json_text)
 
@@ -1349,7 +1347,7 @@ class EnhancedSamplingMiddleware(Middleware):
 
     def _attach_validation_metadata(self, result, validation: "ValidationResult"):
         """Append validation info to ToolResult.meta dict."""
-        from fastmcp.tools.tool import ToolResult
+        from fastmcp.tools import ToolResult
 
         if not isinstance(result, ToolResult):
             return result
@@ -1437,14 +1435,29 @@ class EnhancedSamplingMiddleware(Middleware):
                     pass
 
         try:
+            # ── Budget gate: skip all LLM-backed validation when budget exceeded ──
+            _budget_ok = True
+            try:
+                from middleware.payment.cost_tracker import is_budget_exceeded
+
+                if is_budget_exceeded():
+                    _budget_ok = False
+                    if self.enable_debug:
+                        logger.debug(
+                            "Sampling budget exceeded — skipping validation for %s",
+                            tool_name,
+                        )
+            except ImportError:
+                pass
+
             # Pre-call: DSL validation & recovery for registered DSL tools
-            if tool_name in self._dsl_configs:
+            if _budget_ok and tool_name in self._dsl_configs:
                 await self._pre_validate_dsl(context, tool_name)
 
             # Semantic validation via sampling agent
             validation_task = None
             validation = None
-            if tool_name in self._validation_configs:
+            if _budget_ok and tool_name in self._validation_configs:
                 v_config = self._validation_configs[tool_name]
                 if v_config.mode == "pre":
                     # Synchronous — block, apply corrections
@@ -1809,9 +1822,7 @@ class EnhancedSamplingMiddleware(Middleware):
                 return None
 
         except Exception as exc:
-            logger.warning(
-                "Argument recovery failed for %s: %s", tool_name, exc
-            )
+            logger.warning("Argument recovery failed for %s: %s", tool_name, exc)
             return None
 
     async def _store_enhanced_context(self, context: MiddlewareContext, tool_name: str):
@@ -2380,7 +2391,14 @@ async def _validate_and_recover_dsl(
 
     try:
         return await _validate_and_recover_dsl_inner(
-            sctx, current_dsl, config, original_description, max_retries, parser, dsl_type, warnings
+            sctx,
+            current_dsl,
+            config,
+            original_description,
+            max_retries,
+            parser,
+            dsl_type,
+            warnings,
         )
     except Exception as exc:
         try:

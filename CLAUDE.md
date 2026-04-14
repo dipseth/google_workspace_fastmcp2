@@ -1,6 +1,12 @@
 # Google Workspace MCP Server
 
+@AGENTS.md
+
+## Project Identity
+
 FastMCP server (`google-workspace-unlimited` v1.11.0) providing 72+ tools across 9 Google Workspace services: Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos (+ People API).
+
+This server is the proving ground for **universal module wrapping** — the Module Wrapper framework and TRM learning layer described in AGENTS.md are built here, tested against real Google APIs, and iterated on in production. The Google Workspace tools are both the product and the test bed.
 
 **Stack:** Python 3.11-3.12, FastMCP 3.1+, Pydantic v2, Qdrant (vector search), LiteLLM (multi-provider LLM), Langfuse (observability), x402 (stablecoin payments), Jinja2 (templates).
 
@@ -55,7 +61,8 @@ server.py                  # Entry point — FastMCP app, middleware registratio
 config/settings.py         # Pydantic Settings (all env vars)
 auth/                      # OAuth 2.1 + PKCE, API key auth, JWT, credential storage
 middleware/                 # Middleware stack (see below)
-adapters/module_wrapper/   # Mixin-based module introspection system (see below)
+adapters/module_wrapper/   # MW framework — see AGENTS.md for full architecture
+research/trm/              # TRM research — see AGENTS.md for vision + status
 gmail/ drive/ docs/ sheets/ slides/ gcalendar/ gchat/ forms/ photos/ people/
                            # Service modules — each has *_tools.py entry point
 resources/                 # MCP resource providers
@@ -90,48 +97,7 @@ Creates `FastMCP` app, registers all service tools via `setup_*_tools(mcp)` func
 10. **Response Limiting** — Response size/token limiting (if configured)
 11. **Dashboard Cache** — Caches dashboard/list tool responses
 
-## Code Conventions
-
-- **Tool registration:** Each service exposes `setup_*_tools(mcp)` called from `server.py`
-- **Async throughout:** All tool handlers are `async def`
-- **Settings via env:** All config in `config/settings.py` (Pydantic Settings), loaded from `.env`
-- **Logging:** Use `from config.enhanced_logging import setup_logger; logger = setup_logger()`
-- **Imports:** First-party packages listed in `pyproject.toml [tool.ruff.lint.isort]`
-- **Line length:** 88 (ruff/black)
-- **Linter:** ruff with E/F/W/I rules; many rules intentionally suppressed (see pyproject.toml)
-
-## Testing
-
-Tests require a running MCP server. The test framework auto-detects available services and fetches real resource IDs.
-
-**Markers:** `auth_required`, `service(name)`, `integration`, `slow`, `core`, `middleware`, `x402`, `payment`
-
-**Auto-skip:** Tests auto-skip if infrastructure is missing (Qdrant URL, OAuth credentials, credentials dir).
-
-**Key fixtures** (`tests/client/conftest.py`):
-- `client` — Async MCP client connected to running server (auto-enables all tools)
-- `real_*_id` fixtures — Fetch real resource IDs from live services (gmail_message_id, drive_document_id, etc.)
-- `cleanup_tracker` — Session-scoped tracker; auto-deletes created resources unless `SKIP_TEST_CLEANUP=1`
-
-**Pattern:** See `tests/client/TESTING_FRAMEWORK.md` for the standardized template.
-
-## Key Systems
-
-### Module Wrapper (`adapters/module_wrapper/`)
-
-**Status: Mature, active development.**
-
-Mixin-based architecture for module introspection, component extraction, and semantic search. Uses 13 composable mixins with explicit dependency contracts (`_MIXIN_PROVIDES`, `_MIXIN_REQUIRES`, `_MIXIN_INIT_ORDER`).
-
-**Core mixins:** Base (module resolution) → Qdrant (vector DB) → Embedding (FastEmbed + ColBERT) → Indexing (component extraction) → Search (multi-vector semantic search) → Graph (DAG relationships) → Cache (3-tier L1/L2/L3) → Pipeline (background ingestion) → Domain (lifecycle hooks) → InstancePattern (variation generation) → Skills (skill doc generation)
-
-**Vector schema:** 3 named vectors per point — `components` (ColBERT 128D), `inputs` (ColBERT 128D), `relationships` (MiniLM 384D).
-
-**Used by:** Google Chat card tools, Gmail email wrapper, sampling middleware, skills provider. 63+ files reference it.
-
-**Development priorities:**
-- Continue stabilizing mixin contracts and pipeline reliability
-- Expand domain coverage beyond cards/email
+## Key Systems (Operational)
 
 ### Langfuse Integration (`middleware/langfuse_integration.py`)
 
@@ -163,7 +129,7 @@ Routes MCP sampling requests through LiteLLM's `acompletion()` to 100+ LLM provi
 
 `EnhancedSamplingMiddleware` — 2,740 lines handling:
 - **Validation agents:** `ValidationAgentConfig` — pre-execution (sync, applies corrections) or parallel (async, advisory). Configurable per-tool with expert system prompts, confidence thresholds, and DSL syntax bypass.
-- **DSL error recovery:** On parse failure, triggers recovery sampling with all registered DSL docs as context
+- **DSL error recovery:** On parse failure, triggers recovery sampling with all registered DSL docs as context. Leverages MW symbol documentation — see AGENTS.md DSL Notation section.
 - **DSLToolConfig:** Maps tool args to DSL parsers, extractors, result types, and doc providers
 - **Enhancement levels:** Control how much context injection occurs per tool call
 
@@ -184,11 +150,40 @@ Multiple auth modes coexist:
 - **Credential storage modes:** `FILE_PLAINTEXT`, `FILE_ENCRYPTED` (Fernet via HKDF-SHA256 from API key), `MEMORY_ONLY`, `MEMORY_WITH_BACKUP`
 - **Scope management:** `auth/scope_registry.py` — centralized Google API scope definitions
 
+## Code Conventions
+
+- **Tool registration:** Each service exposes `setup_*_tools(mcp)` called from `server.py`
+- **Async throughout:** All tool handlers are `async def`
+- **Settings via env:** All config in `config/settings.py` (Pydantic Settings), loaded from `.env`
+- **Logging:** Use `from config.enhanced_logging import setup_logger; logger = setup_logger()`
+- **Imports:** First-party packages listed in `pyproject.toml [tool.ruff.lint.isort]`
+- **Line length:** 88 (ruff/black)
+- **Linter:** ruff with E/F/W/I rules; many rules intentionally suppressed (see pyproject.toml)
+
+## Testing
+
+Tests require a running MCP server. The test framework auto-detects available services and fetches real resource IDs.
+
+**Markers:** `auth_required`, `service(name)`, `integration`, `slow`, `core`, `middleware`, `x402`, `payment`
+
+**Auto-skip:** Tests auto-skip if infrastructure is missing (Qdrant URL, OAuth credentials, credentials dir).
+
+**Key fixtures** (`tests/client/conftest.py`):
+- `client` — Async MCP client connected to running server (auto-enables all tools)
+- `real_*_id` fixtures — Fetch real resource IDs from live services (gmail_message_id, drive_document_id, etc.)
+- `cleanup_tracker` — Session-scoped tracker; auto-deletes created resources unless `SKIP_TEST_CLEANUP=1`
+
+**Pattern:** See `tests/client/TESTING_FRAMEWORK.md` for the standardized template.
+
 ## Active Development Areas
 
-1. **Module Wrapper** — Mature mixin architecture, stabilizing pipeline and expanding domain coverage. Focus: reliability of background ingestion, mixin contract validation, new domain adapters.
+1. **Module Wrapper domain expansion** — Framework is mature; priority is wrapping new Python modules beyond cards/email/qdrant. Each new domain validates and stress-tests the mixin architecture.
 
-2. **Langfuse Evaluations & Experiments** — Tracing is live; next step is building evaluation functions and experiment workflows to measure sampling quality and iterate on prompts/models for fine-tuning.
+2. **TRM recursive refinement** — UnifiedTRN (28.7K params) is deployed for card builder slot assignment. Next: integrate recursive multi-cycle search into the production search path. See AGENTS.md for the full TRM roadmap.
+
+3. **Langfuse evaluations & experiments** — Tracing is live; next step is building evaluation functions and experiment workflows to measure sampling quality and iterate on prompts/models.
+
+4. **New domain adapters** — Each wrapped module produces DSL notation, semantic search, and auto-generated skills. Expanding to more Python libraries is the primary growth vector.
 
 ## PR & Commit Conventions
 

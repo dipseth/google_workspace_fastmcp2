@@ -3,18 +3,116 @@
 Uses a ContextVar to accumulate sampling costs within a single tool execution.
 The Qdrant middleware reads accumulated costs after call_next() returns and
 includes them in the stored payload for cost analytics.
+
+Monthly budget enforcement: ``is_budget_exceeded()`` checks whether the current
+calendar month's spend has crossed ``SAMPLING_MONTHLY_BUDGET_USD``.  The
+sampling handler and middleware call this before making LLM requests.
+
+Reactive keepalive support: ``record_sampling_activity()`` / ``seconds_since_last_activity()``
+let the keepalive engine know when *real* (non-keepalive) sampling happened.
 """
 
 from __future__ import annotations
 
+import json as _json
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
+
+# ── Monthly budget + reactive keepalive state ──────────────────────────────
+
+_last_sampling_activity: float = 0.0  # epoch of last real (non-keepalive) sampling call
+_monthly_costs: dict = {}  # {"2026-04": 3.21, ...}
+
+
+def _current_month_key() -> str:
+    """Return e.g. '2026-04'."""
+    return time.strftime("%Y-%m")
+
+
+def record_sampling_activity() -> None:
+    """Mark that a real (non-keepalive) sampling call just happened."""
+    global _last_sampling_activity
+    _last_sampling_activity = time.time()
+
+
+def seconds_since_last_activity() -> float:
+    """Seconds since the last real sampling activity (inf if none)."""
+    if _last_sampling_activity == 0.0:
+        return float("inf")
+    return time.time() - _last_sampling_activity
+
+
+def add_monthly_cost(amount_usd: float) -> None:
+    """Accumulate *amount_usd* into the current calendar month."""
+    key = _current_month_key()
+    _monthly_costs[key] = _monthly_costs.get(key, 0.0) + amount_usd
+
+
+def get_monthly_cost() -> float:
+    """Total sampling spend for the current calendar month."""
+    return _monthly_costs.get(_current_month_key(), 0.0)
+
+
+def is_budget_exceeded() -> bool:
+    """Return True if the monthly budget has been exceeded.
+
+    Returns False (unlimited) when budget is 0 or unset.
+    """
+    try:
+        from config.settings import settings
+        budget = settings.sampling_monthly_budget_usd
+    except Exception:
+        return False
+    if budget <= 0:
+        return False
+    return get_monthly_cost() >= budget
+
+
+def load_monthly_costs(path: str | Path | None = None) -> None:
+    """Load persisted monthly costs from the sampling cost JSON file."""
+    global _monthly_costs, _last_sampling_activity
+    if path is None:
+        try:
+            from config.settings import settings
+            path = settings.sampling_cost_persistence_file
+        except Exception:
+            return
+    try:
+        data = _json.loads(Path(path).read_text())
+        # The file stores per-module stats; we read the top-level monthly_costs dict
+        _monthly_costs.update(data.get("monthly_costs", {}))
+        _last_sampling_activity = data.get("last_sampling_activity", 0.0)
+    except (FileNotFoundError, _json.JSONDecodeError, Exception):
+        pass
+
+
+def save_monthly_costs(path: str | Path | None = None) -> None:
+    """Persist monthly costs back into the sampling cost JSON file."""
+    if path is None:
+        try:
+            from config.settings import settings
+            path = settings.sampling_cost_persistence_file
+        except Exception:
+            return
+    p = Path(path)
+    try:
+        data = _json.loads(p.read_text()) if p.exists() else {}
+    except Exception:
+        data = {}
+    data["monthly_costs"] = _monthly_costs
+    data["last_sampling_activity"] = _last_sampling_activity
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_json.dumps(data, indent=2))
+    except Exception as e:
+        logger.debug("Failed to persist monthly costs: %s", e)
 
 # ── Per-request cost accumulator via ContextVar ──────────────────────────
 
@@ -111,14 +209,19 @@ def track_sample_call(
     if model:
         costs.model = model
 
+    # Update monthly budget tracking
+    add_monthly_cost(estimated_cost)
+    record_sampling_activity()
+
     logger.debug(
         "Sampling cost tracked: +%d input/%d output tokens, "
-        "+$%.6f (total calls=%d, total=$%.6f)",
+        "+$%.6f (total calls=%d, total=$%.6f, month=$%.4f)",
         input_tokens,
         output_tokens,
         estimated_cost,
         costs.sample_calls,
         costs.estimated_cost_usd,
+        get_monthly_cost(),
     )
 
 

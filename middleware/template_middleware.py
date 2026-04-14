@@ -625,7 +625,8 @@ class EnhancedTemplateMiddleware(Middleware):
                 rendered_content = template_content
 
             # Wrap in PromptMessage format
-            from fastmcp.prompts.prompt import PromptMessage, TextContent
+            from fastmcp.prompts import PromptMessage
+            from mcp.types import TextContent
 
             result = PromptMessage(
                 role="assistant",

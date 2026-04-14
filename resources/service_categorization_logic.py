@@ -50,9 +50,7 @@ class ServiceCategorizer:
                 continue
 
             if service not in discovered_services:
-                service_metadata = ScopeRegistry.get_service_metadata(
-                    service
-                )
+                service_metadata = ScopeRegistry.get_service_metadata(service)
                 discovered_services[service] = {
                     "name": service,
                     "tools": [],
@@ -66,12 +64,8 @@ class ServiceCategorizer:
                 {
                     "name": tool_name,
                     "description": metadata.get("description", ""),
-                    "operation_type": metadata.get(
-                        "operation_type", "unknown"
-                    ),
-                    "required_scopes": metadata.get(
-                        "required_scopes", []
-                    ),
+                    "operation_type": metadata.get("operation_type", "unknown"),
+                    "required_scopes": metadata.get("required_scopes", []),
                 }
             )
 
@@ -84,12 +78,8 @@ class ServiceCategorizer:
 
         # Convert sets to lists for JSON serialization
         for service_info in discovered_services.values():
-            service_info["operations"] = list(
-                service_info["operations"]
-            )
-            service_info["required_scopes"] = list(
-                service_info["required_scopes"]
-            )
+            service_info["operations"] = list(service_info["operations"])
+            service_info["required_scopes"] = list(service_info["required_scopes"])
 
         self.logger.info(
             f"Discovered {len(discovered_services)} services from {len(tools)} tools"
@@ -138,19 +128,11 @@ class ServiceCategorizer:
         matching_tools = []
 
         for tool_name in tools:
-            tool_scopes = (
-                self.metadata_handler.get_required_scopes_for_tool(
-                    tool_name
-                )
-            )
+            tool_scopes = self.metadata_handler.get_required_scopes_for_tool(tool_name)
 
             # Check if tool requires any of the specified scopes
-            if any(
-                scope in tool_scopes for scope in required_scopes
-            ):
-                metadata = self.metadata_handler.get_tool_metadata(
-                    tool_name
-                )
+            if any(scope in tool_scopes for scope in required_scopes):
+                metadata = self.metadata_handler.get_tool_metadata(tool_name)
                 matching_tools.append(
                     {
                         "name": tool_name,
@@ -161,9 +143,7 @@ class ServiceCategorizer:
 
         return matching_tools
 
-    def get_service_capabilities(
-        self, service: str
-    ) -> Dict[str, Any]:
+    def get_service_capabilities(self, service: str) -> Dict[str, Any]:
         """
         Get capabilities for a specific service based on its tools.
 
@@ -186,16 +166,12 @@ class ServiceCategorizer:
         }
 
         for tool_name in tools:
-            metadata = self.metadata_handler.get_tool_metadata(
-                tool_name
-            )
+            metadata = self.metadata_handler.get_tool_metadata(tool_name)
             if not metadata:
                 continue
 
             # Extract capabilities from metadata
-            capabilities["operations"].add(
-                metadata.get("operation_type", "unknown")
-            )
+            capabilities["operations"].add(metadata.get("operation_type", "unknown"))
 
             # Extract features from tags
             tags = metadata.get("tags", set())
@@ -203,9 +179,7 @@ class ServiceCategorizer:
                 tags = list(tags)
 
             for tag in tags:
-                if (
-                    tag != service
-                ):  # Don't include the service name itself
+                if tag != service:  # Don't include the service name itself
                     capabilities["features"].add(tag)
 
             # Track scopes
@@ -240,9 +214,7 @@ class ServiceCategorizer:
                     else service_name.title()
                 ),
                 "icon": (
-                    capabilities["metadata"].icon
-                    if capabilities["metadata"]
-                    else "🔧"
+                    capabilities["metadata"].icon if capabilities["metadata"] else "🔧"
                 ),
                 "description": (
                     capabilities["metadata"].description
@@ -297,9 +269,7 @@ def get_dynamic_service_list(
             "description": service_info["description"],
             "tool_count": service_info["total_tools"],
             "operations": service_info["operations"],
-            "features": service_info["features"][
-                :5
-            ],  # Limit features for display
+            "features": service_info["features"][:5],  # Limit features for display
         }
         for service_name, service_info in service_map.items()
     ]
@@ -346,8 +316,7 @@ def categorize_tool_by_tags(tags: List[str]) -> Dict[str, Any]:
         "service": service,
         "operation_type": operation,
         "features": features,
-        "inferred": service
-        is None,  # Whether service was inferred vs explicit
+        "inferred": service is None,  # Whether service was inferred vs explicit
     }
 
 
@@ -370,10 +339,7 @@ def validate_service_tool_coverage(
     report = {
         "total_known_services": len(known_services),
         "services_with_tools": len(discovered_services),
-        "coverage_percentage": (
-            len(discovered_services) / len(known_services)
-        )
-        * 100,
+        "coverage_percentage": (len(discovered_services) / len(known_services)) * 100,
         "services_without_tools": [],
         "tool_distribution": {},
     }
@@ -385,8 +351,6 @@ def validate_service_tool_coverage(
 
     # Tool distribution
     for service, service_info in discovered_services.items():
-        report["tool_distribution"][service] = service_info[
-            "total_tools"
-        ]
+        report["tool_distribution"][service] = service_info["total_tools"]
 
     return report

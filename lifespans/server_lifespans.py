@@ -814,11 +814,86 @@ async def cache_keepalive_lifespan(server: Any):
         await engine.stop()
 
 
+@lifespan
+async def model_artifact_lifespan(server: Any):
+    """
+    Model artifact download lifecycle.
+
+    Downloads PyTorch model checkpoints from cloud storage (GCS, S3, Azure, HTTP)
+    on startup using a py-key-value-aio backed registry for metadata tracking.
+
+    Sets MODEL_ARTIFACT_CACHE_DIR in _lifespan_state so that checkpoint resolution
+    can find downloaded artifacts without changing env vars at runtime.
+
+    No-op if MODEL_ARTIFACT_ENABLED is not set.
+
+    Yields:
+        Dict with 'model_artifact_provider' and 'model_artifact_paths' (domain->path)
+    """
+    from config.settings import settings
+
+    if not settings.model_artifact_enabled:
+        logger.info("Model artifacts: disabled (MODEL_ARTIFACT_ENABLED=false)")
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+        return
+
+    from config.model_artifacts import (
+        ModelArtifactProvider,
+        parse_artifact_uri_setting,
+    )
+
+    uri_map = parse_artifact_uri_setting(settings.model_artifact_uri)
+    if not uri_map:
+        logger.warning(
+            "Model artifacts: enabled but MODEL_ARTIFACT_URI is empty, skipping"
+        )
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+        return
+
+    logger.info(
+        f"Model artifacts: downloading {len(uri_map)} artifact(s) "
+        f"({', '.join(uri_map.keys())})"
+    )
+
+    try:
+        provider = await ModelArtifactProvider.create(settings)
+        paths = await provider.ensure_all(uri_map)
+
+        # Store paths in lifespan state for checkpoint resolution
+        _lifespan_state["model_artifact_paths"] = {
+            domain: str(path) for domain, path in paths.items()
+        }
+
+        logger.info(
+            f"Model artifacts: {len(paths)}/{len(uri_map)} downloaded successfully"
+        )
+
+        yield {
+            "model_artifact_provider": provider,
+            "model_artifact_paths": paths,
+        }
+    except Exception as e:
+        logger.error(f"Model artifacts: startup download failed: {e}")
+        logger.warning("Model artifacts: falling back to local checkpoints")
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+
+
+def get_model_artifact_paths() -> Dict[str, str]:
+    """Get downloaded model artifact paths from lifespan state.
+
+    Returns:
+        Dict mapping domain names to local file paths.
+        Empty dict if model artifacts are disabled or not yet downloaded.
+    """
+    return _lifespan_state.get("model_artifact_paths", {})
+
+
 # Pre-composed lifespan for the full server lifecycle using FastMCP's | operator
 # Composition order: enter left-to-right, exit right-to-left
 combined_server_lifespan = (
     otel_lifespan  # First — TracerProvider must be active for all other spans
-    | embedding_lifespan  # Second — models must be loaded before Qdrant init
+    | model_artifact_lifespan  # Second — download models before anything uses them
+    | embedding_lifespan  # Third — embedding models loaded before Qdrant init
     | qdrant_lifespan
     | colbert_lifespan
     | session_state_lifespan
@@ -832,6 +907,7 @@ combined_server_lifespan = (
 # Export for use in server.py
 __all__ = [
     "otel_lifespan",
+    "model_artifact_lifespan",
     "embedding_lifespan",
     "qdrant_lifespan",
     "colbert_lifespan",
@@ -845,4 +921,5 @@ __all__ = [
     "register_profile_middleware",
     "register_template_middleware",
     "get_lifespan_state",
+    "get_model_artifact_paths",
 ]

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import TextContent
 
 from config.enhanced_logging import setup_logger
@@ -52,6 +52,9 @@ _redis_store: Any = None
 # Set of tool names we should intercept (populated from _DASHBOARD_CONFIGS keys)
 _watched_tools: Set[str] = set()
 
+# Tracks the most recently called dashboard tool (used by _latest resource)
+_last_dashboard_tool: Optional[str] = None
+
 
 def set_redis_store(store: Any) -> None:
     """Set the Redis store for dashboard cache offloading."""
@@ -73,6 +76,27 @@ def get_cached_result(tool_name: str) -> Optional[dict]:
     """
     entry = _result_cache.get(tool_name)
     return entry.data if entry else None
+
+
+def set_last_dashboard_tool(tool_name: str) -> None:
+    """Record the most recently called dashboard tool."""
+    global _last_dashboard_tool
+    _last_dashboard_tool = tool_name
+
+
+def get_last_dashboard_tool() -> Optional[str]:
+    """Return the most recently called dashboard tool name, or ``None``."""
+    return _last_dashboard_tool
+
+
+def clear_last_dashboard_tool() -> None:
+    """Reset the last-dashboard-tool tracker.
+
+    Called before each ``execute`` invocation so that stale values from
+    a *previous* execute do not leak into the current one.
+    """
+    global _last_dashboard_tool
+    _last_dashboard_tool = None
 
 
 def get_cache_age(tool_name: str) -> Optional[float]:
@@ -122,16 +146,21 @@ class DashboardCacheMiddleware(Middleware):
                     data=data,
                     timestamp=time.time(),
                 )
+                set_last_dashboard_tool(tool_name)
                 # Offload to Redis with TTL when available
                 if _redis_store is not None:
                     try:
                         import asyncio
 
-                        asyncio.ensure_future(
-                            self._store_to_redis(tool_name, data)
-                        )
+                        asyncio.ensure_future(self._store_to_redis(tool_name, data))
                     except Exception:
                         pass  # Best-effort Redis write
+
+                # Embed a Prefab dashboard directly into the ToolResult's
+                # structured_content so VS Code renders it inline — no
+                # separate resource fetch (which races the tool execution).
+                self._inject_prefab_dashboard(response, tool_name, data)
+
                 logger.info(
                     f"📊 Dashboard cache updated for {tool_name} "
                     f"({len(str(data))} chars)"
@@ -163,6 +192,32 @@ class DashboardCacheMiddleware(Middleware):
             )
         except Exception as exc:
             logger.debug(f"Dashboard cache Redis write failed for {tool_name}: {exc}")
+
+    @staticmethod
+    def _inject_prefab_dashboard(
+        response: ToolResult, tool_name: str, data: dict
+    ) -> None:
+        """Best-effort: build a Prefab DataTable and set it as structured_content.
+
+        This embeds the dashboard directly in the ToolResult so VS Code
+        renders it inline alongside the text content.  The text content
+        (JSON) is kept for the LLM; the structured_content is rendered
+        by VS Code's Prefab renderer.
+        """
+        try:
+            from tools.ui_apps import (
+                _build_prefab_data_dashboard,
+                get_data_dashboard_config,
+            )
+
+            config = get_data_dashboard_config(tool_name)
+            prefab = _build_prefab_data_dashboard(tool_name, data, config)
+            if prefab is not None:
+                response.structured_content = prefab.to_json()
+        except Exception as exc:
+            logger.debug(
+                f"📊 Prefab dashboard injection skipped for {tool_name}: {exc}"
+            )
 
     @staticmethod
     def _extract_data(response: ToolResult) -> Optional[dict]:

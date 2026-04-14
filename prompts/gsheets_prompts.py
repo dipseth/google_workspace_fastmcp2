@@ -20,7 +20,8 @@ Resource Integration:
 from datetime import datetime, timezone
 
 from fastmcp import Context, FastMCP
-from fastmcp.prompts.prompt import PromptMessage, TextContent
+from fastmcp.prompts import PromptMessage
+from mcp.types import TextContent
 from pydantic import Field
 
 from config.enhanced_logging import setup_logger

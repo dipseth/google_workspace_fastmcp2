@@ -6,6 +6,7 @@ making frequently accessed data available as resources for better performance.
 """
 
 import asyncio
+import inspect
 from datetime import datetime, timedelta
 
 from fastmcp import Context, FastMCP
@@ -132,7 +133,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 )
 
             mcp_server = ctx.fastmcp
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = mcp_server.local_provider._components
             tools_dict = {v.name: v for v in components.values() if isinstance(v, Tool)}
@@ -169,7 +170,7 @@ def setup_tool_output_resources(mcp: FastMCP, qdrant_middleware=None) -> None:
                 "page_size": 10,
             }
 
-            if asyncio.iscoroutinefunction(tool_func):
+            if inspect.iscoroutinefunction(tool_func):
                 messages_result = await tool_func(**tool_params)
             else:
                 messages_result = tool_func(**tool_params)

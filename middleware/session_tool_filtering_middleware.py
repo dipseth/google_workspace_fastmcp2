@@ -354,6 +354,9 @@ class SessionToolFilteringMiddleware(Middleware):
             "search",
             "get_schema",
             "execute",
+            "fetch_document",
+            "semantic_search",
+            "tool_activity",
         }
         self.enable_debug = enable_debug
         self.minimal_startup = minimal_startup
@@ -1002,7 +1005,7 @@ def setup_session_tool_filtering_middleware(
     def get_all_tools() -> List[str]:
         """Get all registered tool names from the MCP server."""
         try:
-            from fastmcp.tools.tool import Tool
+            from fastmcp.tools import Tool
 
             components = mcp.local_provider._components
             return [v.name for v in components.values() if isinstance(v, Tool)]

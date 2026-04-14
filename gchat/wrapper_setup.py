@@ -56,6 +56,7 @@ GCHAT_STOPWORDS = [
 CARD_CONTEXT_RESOURCES = {
     "Button": ("buttons", "_button_index"),
     "Chip": ("chips", "_chip_index"),
+    "Column": ("columns", "_column_index"),
     "DecoratedText": ("content_texts", "_text_index"),
     "TextParagraph": ("content_texts", "_text_index"),
     "GridItem": ("grid_items", "_grid_item_index"),
