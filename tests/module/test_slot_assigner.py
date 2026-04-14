@@ -554,8 +554,9 @@ class TestSlotAssignmentWithDomainConfig:
 
     def test_reassign_with_gchat_domain(self):
         """Using domain_config=GCHAT_DOMAIN preserves gchat behavior."""
-        from gchat.card_builder.slot_assignment import reassign_supply_map
         from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import reassign_supply_map
 
         supply_map = {
             "buttons": ["Click me"],
@@ -574,8 +575,9 @@ class TestSlotAssignmentWithDomainConfig:
 
     def test_reassign_with_email_domain(self):
         """Using domain_config=EMAIL_DOMAIN uses email pool vocab."""
-        from gchat.card_builder.slot_assignment import reassign_supply_map
         from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import reassign_supply_map
 
         supply_map = {
             "content": ["Welcome text"],
@@ -593,8 +595,9 @@ class TestSlotAssignmentWithDomainConfig:
 
     def test_reassign_none_domain_preserves_default(self):
         """domain_config=None falls back to gchat default."""
-        from gchat.card_builder.slot_assignment import reassign_supply_map
         from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import reassign_supply_map
 
         supply_map = {
             "buttons": [],

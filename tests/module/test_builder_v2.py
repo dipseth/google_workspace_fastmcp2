@@ -1,7 +1,8 @@
 """Unit tests for SmartCardBuilderV2."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestSmartCardBuilderV2Init:
@@ -89,8 +90,8 @@ class TestGchatCardBuilder:
     """Test the GchatCardBuilder protocol wrapper."""
 
     def test_gchat_builder_satisfies_protocol(self):
-        from gchat.card_builder.builder_v3 import GchatCardBuilder
         from adapters.module_wrapper.builder_base import BuilderProtocol
+        from gchat.card_builder.builder_v3 import GchatCardBuilder
         builder = GchatCardBuilder()
         assert isinstance(builder, BuilderProtocol)
 
@@ -114,8 +115,8 @@ class TestGchatCardBuilder:
             assert pool in GCHAT_DOMAIN.pool_vocab, f"{comp_name} pool '{pool}' not in domain"
 
     def test_gchat_builder_build_supply_map(self):
-        from gchat.card_builder.builder_v3 import GchatCardBuilder
         from adapters.module_wrapper.builder_base import ParsedStructure
+        from gchat.card_builder.builder_v3 import GchatCardBuilder
         builder = GchatCardBuilder()
         parsed = ParsedStructure(
             content_items={"content_texts": ["Hello"], "buttons": ["Click"]},

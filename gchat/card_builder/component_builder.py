@@ -507,15 +507,21 @@ class ComponentBuilder:
                         child_params["label"] = child_params.pop("text")
                     # Convert icon string to proper materialIcon dict
                     if "icon" in child_params and isinstance(child_params["icon"], str):
-                        from gchat.material_icons import resolve_icon_name, create_material_icon
+                        from gchat.material_icons import (
+                            create_material_icon,
+                            resolve_icon_name,
+                        )
                         resolved_name = resolve_icon_name(child_params["icon"])
                         child_params["icon"] = create_material_icon(resolved_name)
                     # Chips require onClick — auto-generate action if no URL
                     if not child_params.get("url") and "on_click" not in child_params:
                         label = child_params.get("label", f"chip_{len(built_children)}")
                         try:
+                            from card_framework.v2.widgets.action import (
+                                Action,
+                                ActionParameter,
+                            )
                             from card_framework.v2.widgets.on_click import OnClick
-                            from card_framework.v2.widgets.action import Action, ActionParameter
                             child_params["on_click"] = OnClick(
                                 action=Action(
                                     function="chip_select",

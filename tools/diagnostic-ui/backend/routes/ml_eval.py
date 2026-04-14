@@ -2318,7 +2318,7 @@ async def candidate_pool_analysis():
 async def available_domains():
     """List available domain configurations."""
     try:
-        from research.trm.h2.domain_config import list_domains, get_domain
+        from research.trm.h2.domain_config import get_domain, list_domains
         domains = []
         for domain_id in list_domains():
             d = get_domain(domain_id)
