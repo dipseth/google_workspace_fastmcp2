@@ -135,8 +135,12 @@ def learned_recursive_search(
     # Score all candidates in one forward pass
     with torch.no_grad():
         scores, halt_logits, _ = model(
-            query_comp_t, query_inp_t, query_rel_t,
-            cand_comp_t, cand_inp_t, cand_rel_t,
+            query_comp_t,
+            query_inp_t,
+            query_rel_t,
+            cand_comp_t,
+            cand_inp_t,
+            cand_rel_t,
         )
 
     scores_np = scores.squeeze(-1).cpu().numpy()  # [K] — move back to CPU for sorting
@@ -146,9 +150,7 @@ def learned_recursive_search(
     sorted_ids = sorted(scored.keys(), key=lambda i: scored[i], reverse=True)
 
     payloads = {
-        pid: data["payload"]
-        for pid, data in all_candidates.items()
-        if data["payload"]
+        pid: data["payload"] for pid, data in all_candidates.items() if data["payload"]
     }
 
     return SearchResult(

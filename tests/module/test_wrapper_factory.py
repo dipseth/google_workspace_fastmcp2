@@ -28,10 +28,7 @@ class MockWrapper:
         }
 
     def get_skill_resources_annotation(self, skill_name, resource_hints):
-        return [
-            {"name": f"{skill_name}/{k}", **v}
-            for k, v in resource_hints.items()
-        ]
+        return [{"name": f"{skill_name}/{k}", **v} for k, v in resource_hints.items()]
 
 
 @pytest.fixture(autouse=True)
@@ -194,9 +191,7 @@ class TestGenerateDSLQuickReference:
             "Layout": ["Section"],
             "Interactive": ["Button"],
         }
-        result = generate_dsl_quick_reference(
-            wrapper, categories, title="Test DSL"
-        )
+        result = generate_dsl_quick_reference(wrapper, categories, title="Test DSL")
         assert "## Test DSL" in result
         assert "§=Section" in result
         assert "ᵬ=Button" in result

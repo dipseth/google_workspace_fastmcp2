@@ -93,21 +93,38 @@ def evaluate_with_learned(
         x = ric.inputs
 
         # Single-pass RRF
-        sp = single_pass_search(embedder.client, collection_name, z_H, z_L, x, top_k=top_k)
+        sp = single_pass_search(
+            embedder.client, collection_name, z_H, z_L, x, top_k=top_k
+        )
         _tally(methods["single_pass"], sp, true_move)
 
         # Multi-dimensional scoring
-        for scoring, key in [("multiplicative", "multi_multiply"), ("harmonic", "multi_harmonic")]:
+        for scoring, key in [
+            ("multiplicative", "multi_multiply"),
+            ("harmonic", "multi_harmonic"),
+        ]:
             md = multi_dimensional_search(
-                embedder.client, collection_name, z_H, z_L, x,
-                top_k=top_k, candidate_pool=20, scoring=scoring,
+                embedder.client,
+                collection_name,
+                z_H,
+                z_L,
+                x,
+                top_k=top_k,
+                candidate_pool=20,
+                scoring=scoring,
             )
             _tally(methods[key], md, true_move)
 
         # Learned recursive
         lr = learned_recursive_search(
-            embedder.client, collection_name, z_H, z_L, x,
-            model=model, top_k=top_k, candidate_pool=20,
+            embedder.client,
+            collection_name,
+            z_H,
+            z_L,
+            x,
+            model=model,
+            top_k=top_k,
+            candidate_pool=20,
         )
         _tally(methods["learned_recursive"], lr, true_move, lr.cycles_used)
 
@@ -146,9 +163,7 @@ def load_model(checkpoint_path: str):
     model_type = ckpt.get("model_type", "trpn")
 
     if model_type == "similarity":
-        model = SimilarityScorer(
-            hidden_dim=ckpt.get("hidden_dim", 32), num_layers=2
-        )
+        model = SimilarityScorer(hidden_dim=ckpt.get("hidden_dim", 32), num_layers=2)
     else:
         config = ckpt["config"]
         model = TinyProjectionNetwork(config)
@@ -183,7 +198,11 @@ def main():
 
     # Create game
     game_factory = GAMES[args.game]
-    game = game_factory() if callable(game_factory) and not isinstance(game_factory, type) else game_factory()
+    game = (
+        game_factory()
+        if callable(game_factory) and not isinstance(game_factory, type)
+        else game_factory()
+    )
     collection_name = f"trpn_{game.name}_eval"
 
     logger.info(f"=== TRPN Evaluation: {game.name} ===")
@@ -219,9 +238,7 @@ def main():
     # Evaluate
     logger.info("Running evaluation...")
     t0 = time.time()
-    results = evaluate_with_learned(
-        game, embedder, collection_name, test_states, model
-    )
+    results = evaluate_with_learned(game, embedder, collection_name, test_states, model)
     eval_time = time.time() - t0
 
     # Print results (same format as accuracy.py)

@@ -25,6 +25,7 @@ _qdrant_client = None
 _qdrant_models = None
 _numpy = None
 
+
 def _get_numpy():
     """Lazy load numpy to avoid import errors during startup."""
     global _numpy
@@ -38,6 +39,7 @@ def _get_numpy():
             logger.warning(f"NumPy not available: {e}")
             _numpy = False
     return _numpy if _numpy is not False else None
+
 
 def _get_qdrant_imports():
     """Lazy load Qdrant imports when first needed."""
@@ -67,9 +69,11 @@ def _get_qdrant_imports():
         logger.info("Qdrant client loaded")
     return _qdrant_client, _qdrant_models
 
+
 # =============================================================================
 # QDRANT MIXIN
 # =============================================================================
+
 
 class QdrantMixin:
     """
@@ -302,6 +306,7 @@ class QdrantMixin:
         except Exception as e:
             logger.warning(f"Could not get collection metadata: {e}")
             return {"error": str(e)}
+
 
 # Export for convenience
 __all__ = [

@@ -46,6 +46,7 @@ _FALLBACK_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
+
 def _get_oauth_endpoint_scopes():
     """
     Get OAuth endpoint scopes from centralized registry.
@@ -85,9 +86,11 @@ def _get_oauth_endpoint_scopes():
         logger.warning("Compatibility shim not available, using fallback scopes")
         return _FALLBACK_OAUTH_SCOPES
 
+
 from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
+
 
 async def _store_oauth_user_data_async(
     client_id: str, token_data: Dict[str, Any]
@@ -241,6 +244,7 @@ async def _store_oauth_user_data_async(
         )
         # This is background processing, so we don't want to crash anything
 
+
 def _generate_service_selection_html(
     state: str, flow_type: str, use_pkce: bool = True
 ) -> str:
@@ -263,6 +267,7 @@ def _generate_service_selection_html(
     return generate_service_selection_html(
         state, flow_type, use_pkce, requested_email=requested_email
     )
+
 
 async def _handle_fastmcp_service_selection(
     state: str, services: List[str], use_pkce: bool = True
@@ -294,6 +299,7 @@ async def _handle_fastmcp_service_selection(
     except Exception as e:
         logger.error(f"Error handling FastMCP service selection: {e}")
         raise
+
 
 def setup_service_selection_routes(mcp) -> None:
     """Register /auth/services/select and /auth/services/selected routes.
@@ -501,6 +507,7 @@ def setup_service_selection_routes(mcp) -> None:
     logger.info("  GET /auth/services/select (Service selection page)")
     logger.info("  POST /auth/services/selected (Service selection form handler)")
 
+
 async def _build_oauth_success_html(
     user_email: str, credentials: Any, session_id: str | None
 ) -> str:
@@ -519,7 +526,9 @@ async def _build_oauth_success_html(
     try:
         if session_id and _intro_privacy:
             store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
-            logger.info(f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}")
+            logger.info(
+                f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}"
+            )
         if session_id and _intro_sampling and _intro_sampling.get("model"):
             auth_mw_sampling = get_auth_middleware()
             if auth_mw_sampling:
@@ -598,6 +607,7 @@ async def _build_oauth_success_html(
         requested_email=requested_email or "",
     )
 
+
 def setup_legacy_callback_route(mcp) -> None:
     """Register only the /oauth2callback route.
 
@@ -659,7 +669,9 @@ def setup_legacy_callback_route(mcp) -> None:
                 state=state,
                 code_verifier=code_verifier,
             )
-            logger.info(f"✅ OAuth callback processed for user: {redact_email(user_email)}")
+            logger.info(
+                f"✅ OAuth callback processed for user: {redact_email(user_email)}"
+            )
 
             if not validate_user_access(user_email):
                 logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
@@ -676,7 +688,9 @@ def setup_legacy_callback_route(mcp) -> None:
 
                 dual_bridge = get_dual_auth_bridge()
                 dual_bridge.add_secondary_account(user_email)
-                logger.info(f"✅ Registered {redact_email(user_email)} as secondary account")
+                logger.info(
+                    f"✅ Registered {redact_email(user_email)} as secondary account"
+                )
             except Exception as e:
                 logger.warning(
                     f"⚠️ Dual auth bridge registration error (continuing): {e}"
@@ -703,8 +717,12 @@ def setup_legacy_callback_route(mcp) -> None:
                 for sid in list_sessions():
                     sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
                     requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
-                    owned = set(get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or [])
-                    authed = set(get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or [])
+                    owned = set(
+                        get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or []
+                    )
+                    authed = set(
+                        get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or []
+                    )
 
                     # Determine the stale email to replace (from USER_EMAIL or REQUESTED_EMAIL)
                     old_email = (sid_email or requested or "").lower().strip()
@@ -714,7 +732,9 @@ def setup_legacy_callback_route(mcp) -> None:
                         # Still ensure owned accounts include the verified email
                         if _verified not in owned and owned:
                             owned.add(_verified)
-                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
                         continue
 
                     # Update if: session had a wrong email, or had a requested email pending OAuth
@@ -722,19 +742,31 @@ def setup_legacy_callback_route(mcp) -> None:
                         store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                         owned.discard(old_email)
                         owned.add(_verified)
-                        store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                        store_session_data(
+                            sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                        )
                         authed.discard(old_email)
                         authed.add(_verified)
-                        store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
+                        store_session_data(
+                            sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                        )
+                        logger.info(
+                            f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}"
+                        )
                     elif not sid_email and owned:
                         # Session has no USER_EMAIL but has owned accounts — set the verified email
                         store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                         owned.add(_verified)
-                        store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                        store_session_data(
+                            sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                        )
                         authed.add(_verified)
-                        store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                        logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
+                        store_session_data(
+                            sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                        )
+                        logger.info(
+                            f"Set session {sid} email to {redact_email(user_email)} (was empty)"
+                        )
             except Exception as e:
                 logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -753,6 +785,7 @@ def setup_legacy_callback_route(mcp) -> None:
             )
 
     logger.info("  ✅ Legacy /oauth2callback route registered (GoogleProvider mode)")
+
 
 def setup_oauth_endpoints_fastmcp(mcp) -> None:
     """Setup OAuth discovery and DCR endpoints using FastMCP custom routes.
@@ -1580,7 +1613,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
 
                 # SECURITY: Validate user access before saving credentials
                 if not validate_user_access(user_email):
-                    logger.warning(f"🚫 Access denied for user: {redact_email(user_email)}")
+                    logger.warning(
+                        f"🚫 Access denied for user: {redact_email(user_email)}"
+                    )
 
                     # Return access denied page
                     from auth.ui import generate_access_denied_html
@@ -1622,8 +1657,14 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     for sid in list_sessions():
                         sid_email = get_session_data(sid, SessionKey.USER_EMAIL)
                         requested = get_session_data(sid, SessionKey.REQUESTED_EMAIL)
-                        owned = set(get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS) or [])
-                        authed = set(get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS) or [])
+                        owned = set(
+                            get_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS)
+                            or []
+                        )
+                        authed = set(
+                            get_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS)
+                            or []
+                        )
 
                         # Determine the stale email to replace
                         old_email = (sid_email or requested or "").lower().strip()
@@ -1632,7 +1673,9 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                         if sid_email and sid_email.lower().strip() == _verified:
                             if _verified not in owned and owned:
                                 owned.add(_verified)
-                                store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                                store_session_data(
+                                    sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                                )
                             continue
 
                         # Update if session had a wrong email or a requested email pending OAuth
@@ -1640,18 +1683,30 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                             store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                             owned.discard(old_email)
                             owned.add(_verified)
-                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
                             authed.discard(old_email)
                             authed.add(_verified)
-                            store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}")
+                            store_session_data(
+                                sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                            )
+                            logger.info(
+                                f"Updated session {sid} email from {redact_email(old_email)} to {redact_email(user_email)}"
+                            )
                         elif not sid_email and owned:
                             store_session_data(sid, SessionKey.USER_EMAIL, user_email)
                             owned.add(_verified)
-                            store_session_data(sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned))
+                            store_session_data(
+                                sid, SessionKey.API_KEY_OWNED_ACCOUNTS, list(owned)
+                            )
                             authed.add(_verified)
-                            store_session_data(sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed))
-                            logger.info(f"Set session {sid} email to {redact_email(user_email)} (was empty)")
+                            store_session_data(
+                                sid, SessionKey.SESSION_AUTHED_EMAILS, sorted(authed)
+                            )
+                            logger.info(
+                                f"Set session {sid} email to {redact_email(user_email)} (was empty)"
+                            )
                 except Exception as e:
                     logger.warning(f"Could not update sessions after OAuth: {e}")
 
@@ -1674,9 +1729,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 )
 
             except Exception as oauth_error:
-                logger.error(
-                    f"❌ OAuth processing failed: {oauth_error}"
-                )
+                logger.error(f"❌ OAuth processing failed: {oauth_error}")
 
                 # Enhanced error messaging for OAuth issues
                 error_str = str(oauth_error).lower()
@@ -2153,6 +2206,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     # In GoogleProvider mode these are registered separately via setup_config_api_routes()
     # Here they're already inline above, so no separate call needed.
 
+
 def setup_config_api_routes(mcp) -> None:
     """Register /api/privacy-mode and /api/sampling-config routes.
 
@@ -2625,6 +2679,7 @@ def setup_config_api_routes(mcp) -> None:
         "  ✅ Config API routes registered (/api/privacy-mode, /api/sampling-config, /api/models, /api/revoke)"
     )
 
+
 def setup_status_check_routes(mcp) -> None:
     """Register /auth/status-check route for viewing credential status in browser."""
 
@@ -2735,6 +2790,7 @@ def setup_complete_oauth_endpoints(
         logger.info(f"  ✅ MCP Endpoint:         {settings.base_url}/mcp")
 
         try:
+
             @mcp.custom_route("/oauth/status", methods=["GET", "OPTIONS"])
             async def oauth_status_check_gp(request):
                 """OAuth authentication status polling endpoint (supplemental)."""
@@ -2782,10 +2838,14 @@ def setup_complete_oauth_endpoints(
             logger.info("  ✅ Supplemental /oauth/status endpoint registered")
 
             setup_service_selection_routes(mcp)
-            logger.info("  ✅ Service selection routes registered (/auth/services/select)")
+            logger.info(
+                "  ✅ Service selection routes registered (/auth/services/select)"
+            )
 
             setup_legacy_callback_route(mcp)
-            logger.info("  ✅ Legacy /oauth2callback registered for start_google_auth flow")
+            logger.info(
+                "  ✅ Legacy /oauth2callback registered for start_google_auth flow"
+            )
 
             setup_config_api_routes(mcp)
             logger.info("  ✅ Config API routes registered for OAuth success page")

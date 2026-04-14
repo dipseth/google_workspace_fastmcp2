@@ -102,17 +102,13 @@ def create_sso_google_provider(
 
         async def exchange_refresh_token(self, client, refresh_token, scopes):
             """Intercept refresh to update stale-header fallback cache."""
-            result = await super().exchange_refresh_token(
-                client, refresh_token, scopes
-            )
+            result = await super().exchange_refresh_token(client, refresh_token, scopes)
             if result and hasattr(result, "access_token") and result.access_token:
                 import time as _t
 
                 _latest_issued_jwt[0] = result.access_token
                 _latest_issued_jwt[1] = _t.time()
-                logger.debug(
-                    "🔑 Refresh: updated latest JWT for stale-header fallback"
-                )
+                logger.debug("🔑 Refresh: updated latest JWT for stale-header fallback")
             return result
 
         async def _save_google_credentials(self, idp_tokens: dict):
@@ -312,9 +308,8 @@ def create_sso_google_provider(
 
         # 4. Fallback: try validating as a raw Google access token
         if (
-            ("." not in token[:40] or not token.startswith("eyJ"))
-            and token_prefix not in _stale_token_aliases
-        ):
+            "." not in token[:40] or not token.startswith("eyJ")
+        ) and token_prefix not in _stale_token_aliases:
             logger.info(
                 "🔄 Token is not a FastMCP JWT — trying Google tokeninfo fallback..."
             )
@@ -371,9 +366,7 @@ def create_sso_google_provider(
                 _latest_issued_jwt[0] = None
                 _latest_issued_jwt[1] = 0.0
                 _stale_token_aliases.clear()
-                logger.debug(
-                    "🧹 Cleared expired JWT from stale-header fallback cache"
-                )
+                logger.debug("🧹 Cleared expired JWT from stale-header fallback cache")
             else:
                 _is_known_stale = token_prefix in _stale_token_aliases
                 _in_grace_window = now - _grace_ts <= _GRACE_PERIOD_SECONDS
@@ -481,9 +474,7 @@ def create_sso_google_provider(
         _proxy_module.build_metadata = _patched_build_metadata
     except (ImportError, AttributeError):
         pass
-    logger.info(
-        '  🔓 Metadata patched: token_endpoint_auth_methods includes "none"'
-    )
+    logger.info('  🔓 Metadata patched: token_endpoint_auth_methods includes "none"')
 
     # --- Enable DEBUG logging for OAuth flow tracing ---
     for _oauth_logger_name in [

@@ -34,6 +34,7 @@ from .core import BUILTIN_PREFIXES, PRIMITIVE_TYPES, ModuleComponent
 
 logger = setup_logger()
 
+
 def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """Get NL relationship patterns (empty by default — domain wrappers provide these).
 
@@ -42,9 +43,11 @@ def _get_nl_relationship_patterns() -> Dict[tuple, str]:
     """
     return {}
 
+
 # =============================================================================
 # RELATIONSHIPS MIXIN
 # =============================================================================
+
 
 class RelationshipsMixin:
     """
@@ -531,6 +534,7 @@ class RelationshipsMixin:
             # SetPayloadOperation entries and flush in batches.
             try:
                 from qdrant_client.models import SetPayload, SetPayloadOperation
+
                 _has_batch = True
             except ImportError:
                 _has_batch = False
@@ -570,7 +574,9 @@ class RelationshipsMixin:
                             collection_name=collection_name,
                             update_operations=pending_ops,
                         )
-                        logger.debug("Flushed %d relationship batch ops", len(pending_ops))
+                        logger.debug(
+                            "Flushed %d relationship batch ops", len(pending_ops)
+                        )
                         pending_ops = []
                 else:
                     # Fallback: individual set_payload calls
@@ -593,7 +599,9 @@ class RelationshipsMixin:
                         collection_name=collection_name,
                         update_operations=pending_ops,
                     )
-                    logger.debug("Flushed final %d relationship batch ops", len(pending_ops))
+                    logger.debug(
+                        "Flushed final %d relationship batch ops", len(pending_ops)
+                    )
                 except Exception as e:
                     logger.warning("batch_update_points failed: %s, falling back", e)
                     # Fallback: individual calls for remaining ops
@@ -1294,6 +1302,7 @@ class RelationshipsMixin:
         except Exception as e:
             logger.error(f"Failed to upsert custom components: {e}", exc_info=True)
             return 0
+
 
 # Export for convenience
 __all__ = [

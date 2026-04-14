@@ -219,9 +219,7 @@ class Mancala(Game):
         p1_pits = " ".join(f"{b[i]:2d}" for i in range(6))
 
         board_str = (
-            f"P2: {p2_pits}\n"
-            f"S2={b[13]:2d}            S1={b[6]:2d}\n"
-            f"P1: {p1_pits}"
+            f"P2: {p2_pits}\nS2={b[13]:2d}            S1={b[6]:2d}\nP1: {p1_pits}"
         )
 
         return (
@@ -283,9 +281,7 @@ class Mancala(Game):
             stones = [b[i] for i in pits]
             empty = stones.count(0)
             heavy = sum(1 for s in stones if s >= 8)
-            parts.append(
-                f"{name} pits: {stones} (empty={empty}, heavy={heavy})"
-            )
+            parts.append(f"{name} pits: {stones} (empty={empty}, heavy={heavy})")
 
         # Capture opportunities
         for player in [1, 2]:
@@ -297,9 +293,7 @@ class Mancala(Game):
                     if b[opposite] > 0:
                         captures.append((i, b[opposite]))
             if captures:
-                parts.append(
-                    f"P{player} capture targets: {captures}"
-                )
+                parts.append(f"P{player} capture targets: {captures}")
 
         # Extra turn opportunities
         for player in [1, 2]:

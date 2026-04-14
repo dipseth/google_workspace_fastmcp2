@@ -83,10 +83,14 @@ class AccessControl:
         # Check 2: Existing credentials (if required)
         if self.require_existing_credentials:
             if self._has_existing_credentials(email_lower):
-                logger.info(f"✅ Email allowed (has credentials): {redact_email(email)}")
+                logger.info(
+                    f"✅ Email allowed (has credentials): {redact_email(email)}"
+                )
                 return True
             else:
-                logger.warning(f"❌ Email denied (no credentials): {redact_email(email)}")
+                logger.warning(
+                    f"❌ Email denied (no credentials): {redact_email(email)}"
+                )
                 return False
 
         # Check 3: If allowlist is configured but email not in it
@@ -95,7 +99,9 @@ class AccessControl:
             return False
 
         # Default: Allow if no restrictions configured
-        logger.warning(f"⚠️ No access restrictions configured - allowing {redact_email(email)}")
+        logger.warning(
+            f"⚠️ No access restrictions configured - allowing {redact_email(email)}"
+        )
         return True
 
     def _has_existing_credentials(self, email: str) -> bool:

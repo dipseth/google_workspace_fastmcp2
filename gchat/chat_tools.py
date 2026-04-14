@@ -397,9 +397,7 @@ async def _get_chat_service_with_fallback(user_google_email: UserGoogleEmail):
             logger.error(f"Chat service injection error: {e}")
 
     except Exception as e:
-        logger.error(
-            f"Unexpected error getting Chat service: {e}"
-        )
+        logger.error(f"Unexpected error getting Chat service: {e}")
 
     return None
 

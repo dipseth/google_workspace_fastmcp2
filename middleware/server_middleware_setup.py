@@ -108,7 +108,9 @@ def setup_all_middleware(
             "  ✅ Minimal startup mode active - new sessions get only essential tools"
         )
     else:
-        logger.info("  ✅ Per-session tool enable/disable supported via scope='session'")
+        logger.info(
+            "  ✅ Per-session tool enable/disable supported via scope='session'"
+        )
 
     # ─── 5. Template Middleware (must be before tool registration) ───
     from lifespans import register_template_middleware
@@ -197,9 +199,7 @@ def setup_all_middleware(
                 description_attr="email_description",
                 params_attr="email_params",
                 params_arg_key="email_params",
-                get_docs_fn=lambda: get_email_dsl_documentation(
-                    include_examples=True
-                ),
+                get_docs_fn=lambda: get_email_dsl_documentation(include_examples=True),
                 dsl_type_label="email",
                 error_keywords=["email_description"],
             )
@@ -320,8 +320,7 @@ def setup_all_middleware(
         "👤 Setting up Profile Enrichment Middleware for People API integration..."
     )
     enable_qdrant_profile_cache = (
-        qdrant_middleware is not None
-        and qdrant_middleware.client_manager.is_available
+        qdrant_middleware is not None and qdrant_middleware.client_manager.is_available
     )
     profile_middleware = ProfileEnrichmentMiddleware(
         enable_caching=True,
@@ -342,9 +341,7 @@ def setup_all_middleware(
             "✅ Profile Enrichment Middleware enabled with in-memory caching only"
         )
         logger.info("  📦 In-memory cache (5-minute TTL)")
-        logger.info(
-            "  ℹ️ Qdrant persistent cache: disabled (Qdrant not available)"
-        )
+        logger.info("  ℹ️ Qdrant persistent cache: disabled (Qdrant not available)")
 
     # ─── 9. TagBasedResourceMiddleware ───
     from middleware.tag_based_resource_middleware import TagBasedResourceMiddleware
@@ -399,9 +396,7 @@ def setup_all_middleware(
         logger.info(f"  Facilitator: {settings.payment_facilitator_url}")
         logger.info(f"  Scheme: {settings.payment_scheme}")
         logger.info(f"  Free for OAuth: {settings.payment_free_for_oauth}")
-        logger.info(
-            f"  SDK: {'active' if x402_resource_server else 'stub fallback'}"
-        )
+        logger.info(f"  SDK: {'active' if x402_resource_server else 'stub fallback'}")
     else:
         logger.info("X402 Payment middleware disabled (PAYMENT_ENABLED=false)")
 
@@ -412,9 +407,7 @@ def setup_all_middleware(
         )
 
         _rl_tools = [
-            t.strip()
-            for t in settings.response_limit_tools.split(",")
-            if t.strip()
+            t.strip() for t in settings.response_limit_tools.split(",") if t.strip()
         ] or None
         response_limiting_middleware = ResponseLimitingMiddleware(
             max_size=settings.response_limit_max_size,

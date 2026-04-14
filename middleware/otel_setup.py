@@ -32,6 +32,7 @@ _tracer: Optional[trace.Tracer] = None
 SERVICE_NAME = "google-workspace-mcp"
 TRACER_NAME = "mcp.sampling"
 
+
 def configure_otel_for_langfuse() -> bool:
     """Create and register a global TracerProvider exporting to Langfuse OTLP.
 
@@ -65,9 +66,7 @@ def configure_otel_for_langfuse() -> bool:
 
         # Langfuse OTLP endpoint with Basic auth
         endpoint = f"{host}/api/public/otel/v1/traces"
-        credentials = base64.b64encode(
-            f"{public_key}:{secret_key}".encode()
-        ).decode()
+        credentials = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
         headers = {"Authorization": f"Basic {credentials}"}
 
         exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
@@ -80,12 +79,15 @@ def configure_otel_for_langfuse() -> bool:
         trace.set_tracer_provider(_provider)
         _tracer = _provider.get_tracer(TRACER_NAME)
 
-        logger.info("OTEL TracerProvider configured for Langfuse (endpoint=%s)", endpoint)
+        logger.info(
+            "OTEL TracerProvider configured for Langfuse (endpoint=%s)", endpoint
+        )
         return True
 
     except Exception as e:
         logger.warning("Failed to configure OTEL TracerProvider: %s", e)
         return False
+
 
 def get_mcp_tracer() -> trace.Tracer:
     """Return the MCP tracer, creating a no-op tracer if not configured."""
@@ -93,6 +95,7 @@ def get_mcp_tracer() -> trace.Tracer:
     if _tracer is not None:
         return _tracer
     return trace.get_tracer(TRACER_NAME)
+
 
 def shutdown_otel() -> None:
     """Flush pending spans and shut down the TracerProvider."""

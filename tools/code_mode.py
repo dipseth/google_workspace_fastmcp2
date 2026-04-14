@@ -902,9 +902,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
                         )
 
                         config = get_data_dashboard_config(last_tool)
-                        prefab = _build_prefab_data_dashboard(
-                            last_tool, cached, config
-                        )
+                        prefab = _build_prefab_data_dashboard(last_tool, cached, config)
                         if prefab is not None:
                             return _ToolResult(
                                 content=raw,

@@ -19,6 +19,7 @@ logger = setup_logger()
 _key_pair: Optional[RSAKeyPair] = None
 _auth_provider: Optional[JWTVerifier] = None
 
+
 def setup_jwt_auth() -> JWTVerifier:
     """Setup JWT authentication for development using FastMCP 2's JWTVerifier.
 
@@ -53,6 +54,7 @@ def setup_jwt_auth() -> JWTVerifier:
     logger.info(f"📋 Required scopes from registry: {base_scopes}")
 
     return _auth_provider
+
 
 def generate_user_token(
     user_email: str,
@@ -143,6 +145,7 @@ def generate_user_token(
 
     return token
 
+
 def create_test_tokens() -> Dict[str, str]:
     """Create test tokens for development using scope registry.
 
@@ -164,9 +167,12 @@ def create_test_tokens() -> Dict[str, str]:
                 f"✅ Created test token for {redact_email(user_email)} with comprehensive scopes"
             )
         except Exception as e:
-            logger.error(f"❌ Failed to create token for {redact_email(user_email)}: {e}")
+            logger.error(
+                f"❌ Failed to create token for {redact_email(user_email)}: {e}"
+            )
 
     return tokens
+
 
 def get_user_email_from_token() -> str:
     """Get user email from current JWT token context.
@@ -196,14 +202,18 @@ def get_user_email_from_token() -> str:
 
             user_email = claims.get("email") or claims.get("google_email")
             if user_email:
-                logger.debug(f"✅ Got user email from JWT claims: {redact_email(user_email)}")
+                logger.debug(
+                    f"✅ Got user email from JWT claims: {redact_email(user_email)}"
+                )
                 return user_email
 
         # Fallback: try to extract from subject
         client_id = access_token.client_id
         if client_id and client_id.startswith("google-user-"):
             user_email = client_id.replace("google-user-", "")
-            logger.debug(f"✅ Extracted user email from subject: {redact_email(user_email)}")
+            logger.debug(
+                f"✅ Extracted user email from subject: {redact_email(user_email)}"
+            )
             return user_email
 
         raise RuntimeError(
@@ -215,6 +225,7 @@ def get_user_email_from_token() -> str:
         raise RuntimeError(
             f"Authentication error: Could not extract user email from JWT token: {e}"
         )
+
 
 if __name__ == "__main__":
     # Development test using FastMCP 2 JWTVerifier and scope registry

@@ -64,6 +64,7 @@ _initialized = False
 # DYNAMIC SYMBOL TABLE MANAGEMENT
 # =============================================================================
 
+
 def configure_symbols_from_generator(generator: "SymbolGenerator") -> None:
     """
     Configure the symbol table from a SymbolGenerator instance.
@@ -90,6 +91,7 @@ def configure_symbols_from_generator(generator: "SymbolGenerator") -> None:
 
     _initialized = True
     logger.info(f"🔣 Configured {len(SYMBOL_TO_COMPONENT)} symbols from generator")
+
 
 def configure_symbols_from_wrapper(
     wrapper: "ModuleWrapper",
@@ -119,6 +121,7 @@ def configure_symbols_from_wrapper(
     configure_symbols_from_generator(generator)
 
     return symbols
+
 
 def _build_ascii_confusables() -> None:
     """
@@ -150,6 +153,7 @@ def _build_ascii_confusables() -> None:
         aliases = ", ".join(f"{k}→{v}" for k, v in sorted(_ASCII_CONFUSABLES.items()))
         logger.debug(f"🔤 ASCII confusable aliases: {aliases}")
 
+
 def clear_symbols() -> None:
     """Clear all symbols (requires re-initialization via configure_symbols_*)."""
     global SYMBOL_TO_COMPONENT, COMPONENT_TO_SYMBOL, ALL_SYMBOLS, _initialized
@@ -160,6 +164,7 @@ def clear_symbols() -> None:
     _initialized = False
 
     logger.info("🔄 Cleared symbol tables (re-initialization required)")
+
 
 def ensure_initialized() -> bool:
     """
@@ -192,9 +197,11 @@ def ensure_initialized() -> bool:
         logger.warning(f"⚠️ Failed to auto-initialize symbols: {e}")
         return False
 
+
 # =============================================================================
 # EMBEDDING TEXT BUILDERS
 # =============================================================================
+
 
 def build_symbol_embedding_text(component_name: str) -> str:
     """
@@ -216,6 +223,7 @@ def build_symbol_embedding_text(component_name: str) -> str:
 
     # Multiple mentions create stronger association
     return f"{symbol} {component_name} {symbol} | {component_name} widget {symbol}"
+
 
 def build_component_identity_with_symbol(
     component_name: str,
@@ -256,9 +264,11 @@ def build_component_identity_with_symbol(
 
     return "\n".join(p for p in parts if p)
 
+
 # =============================================================================
 # STRUCTURE PARSING
 # =============================================================================
+
 
 @dataclass
 class ParsedNode:
@@ -289,6 +299,7 @@ class ParsedNode:
             result = f"{result}[{children_str}]"
         return result
 
+
 def parse_structure(structure_str: str) -> List[ParsedNode]:
     """
     Parse a structure string into a tree of ParsedNodes.
@@ -310,6 +321,7 @@ def parse_structure(structure_str: str) -> List[ParsedNode]:
     # Parse into tree
     nodes, _ = _parse_tokens(tokens, 0)
     return nodes
+
 
 def _tokenize_structure(s: str) -> List[str]:
     """Tokenize structure string into symbols, brackets, and multipliers."""
@@ -373,6 +385,7 @@ def _tokenize_structure(s: str) -> List[str]:
 
     return tokens
 
+
 def _parse_tokens(tokens: List[str], pos: int) -> Tuple[List[ParsedNode], int]:
     """Parse tokens into ParsedNode tree recursively."""
     nodes = []
@@ -431,9 +444,11 @@ def _parse_tokens(tokens: List[str], pos: int) -> Tuple[List[ParsedNode], int]:
 
     return nodes, pos
 
+
 # =============================================================================
 # STRUCTURE VALIDATION
 # =============================================================================
+
 
 def validate_structure(
     nodes: List[ParsedNode],
@@ -470,9 +485,11 @@ def validate_structure(
 
     return len(errors) == 0, errors
 
+
 # =============================================================================
 # SKELETON BUILDING
 # =============================================================================
+
 
 @dataclass
 class SkeletonSlot:
@@ -484,6 +501,7 @@ class SkeletonSlot:
     field_type: str  # e.g., "str", "Optional[str]", "List[Button]"
     required: bool = False
     value: Any = None  # Filled during input matching
+
 
 def build_skeleton(
     nodes: List[ParsedNode],
@@ -543,9 +561,11 @@ def build_skeleton(
 
     return slots
 
+
 # =============================================================================
 # MCP TOOL INSTRUCTIONS
 # =============================================================================
+
 
 def get_structure_instructions() -> str:
     """
@@ -628,9 +648,11 @@ Product grid: `{section_sym}[{header_sym}, {grid_sym}[{griditem_sym}×6], {btnli
 Form: `{section_sym}[{textinput_sym}×3, {datepicker_sym}, {btnlist_sym}[{btn_sym}]]`
 """
 
+
 # =============================================================================
 # EXPANSION (Symbol → Full Structure)
 # =============================================================================
+
 
 def expand_to_full_notation(structure_str: str) -> str:
     """
@@ -644,6 +666,7 @@ def expand_to_full_notation(structure_str: str) -> str:
     """
     nodes = parse_structure(structure_str)
     return ", ".join(n.to_expanded() for n in nodes)
+
 
 def compact_to_symbol_notation(structure_str: str) -> str:
     """

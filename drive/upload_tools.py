@@ -205,9 +205,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             if context_email:
                 user_google_email = context_email
 
-        logger.info(
-            f"Starting OAuth flow (auto_open_browser={auto_open_browser})"
-        )
+        logger.info(f"Starting OAuth flow (auto_open_browser={auto_open_browser})")
 
         # Validate that user_google_email is provided
         if not user_google_email:

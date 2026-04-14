@@ -201,9 +201,7 @@ class TestRenderComponentPerDomain:
         assert "mj-image" in result
 
     def test_email_render_hero(self, email_builder):
-        result = email_builder.render_component(
-            "HeroBlock", {"title": "Welcome"}
-        )
+        result = email_builder.render_component("HeroBlock", {"title": "Welcome"})
         assert isinstance(result, str)
         assert "Welcome" in result
 
@@ -240,9 +238,7 @@ class TestMockedPipelineBothDomains:
         supply_map = {pool: [] for pool in GCHAT_DOMAIN.pool_vocab}
         supply_map["content_texts"] = ["Hello"]
 
-        with patch(
-            "gchat.card_builder.slot_assignment.reassign_supply_map"
-        ) as mock:
+        with patch("gchat.card_builder.slot_assignment.reassign_supply_map") as mock:
             mock.return_value = supply_map
             result = gchat_builder.reassign_slots(supply_map, {"DecoratedText": 1})
             mock.assert_called_once()
@@ -253,18 +249,14 @@ class TestMockedPipelineBothDomains:
         supply_map = {pool: [] for pool in EMAIL_DOMAIN.pool_vocab}
         supply_map["content"] = ["Hello"]
 
-        with patch(
-            "gchat.card_builder.slot_assignment.reassign_supply_map"
-        ) as mock:
+        with patch("gchat.card_builder.slot_assignment.reassign_supply_map") as mock:
             mock.return_value = supply_map
             result = email_builder.reassign_slots(supply_map, {"TextBlock": 1})
             mock.assert_called_once()
             _, kwargs = mock.call_args
             assert kwargs.get("domain_config") is EMAIL_DOMAIN
 
-    def test_both_domains_build_without_errors(
-        self, gchat_builder, email_builder
-    ):
+    def test_both_domains_build_without_errors(self, gchat_builder, email_builder):
         """Both builders can build from the same high-level description."""
         # Email build (doesn't need wrapper/Qdrant)
         email_result = email_builder.build(

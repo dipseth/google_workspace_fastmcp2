@@ -67,7 +67,9 @@ def init(train_size: int = 500, checkpoint: str | None = None):
     if checkpoint:
         model = load_model(checkpoint)
     else:
-        ckpt_path = str(Path(__file__).resolve().parent.parent / "checkpoints" / "best_model.pt")
+        ckpt_path = str(
+            Path(__file__).resolve().parent.parent / "checkpoints" / "best_model.pt"
+        )
         model = load_model(ckpt_path)
 
     print(f"Ready. {len(train_states)} indexed, model loaded.")
@@ -96,7 +98,12 @@ def run_inference(state_idx: int = 0) -> dict:
     all_candidates = {}
     for vec, vec_name in [(z_H, "components"), (z_L, "relationships"), (x, "inputs")]:
         points = _search_vector(
-            embedder.client, collection, vec, vec_name, limit=20, with_vectors=True,
+            embedder.client,
+            collection,
+            vec,
+            vec_name,
+            limit=20,
+            with_vectors=True,
         )
         for p in points:
             if p.id not in all_candidates and p.vector and isinstance(p.vector, dict):
@@ -138,21 +145,25 @@ def run_inference(state_idx: int = 0) -> dict:
         cand_move = payload.get("optimal_move")
         is_correct = cand_move == true_move
 
-        candidates_detail.append({
-            "id": pid,
-            "optimal_move": cand_move,
-            "is_correct": is_correct,
-            "board": payload.get("board", ""),
-            "sim_components": round(sim_c, 4),
-            "sim_inputs": round(sim_i, 4),
-            "sim_relationships": round(sim_r, 4),
-            "multi_score": round(multi_score, 6),
-            "learned_score": round(learned_score, 4),
-        })
+        candidates_detail.append(
+            {
+                "id": pid,
+                "optimal_move": cand_move,
+                "is_correct": is_correct,
+                "board": payload.get("board", ""),
+                "sim_components": round(sim_c, 4),
+                "sim_inputs": round(sim_i, 4),
+                "sim_relationships": round(sim_r, 4),
+                "multi_score": round(multi_score, 6),
+                "learned_score": round(learned_score, 4),
+            }
+        )
 
     # Sort by each method
     by_multi = sorted(candidates_detail, key=lambda c: c["multi_score"], reverse=True)
-    by_learned = sorted(candidates_detail, key=lambda c: c["learned_score"], reverse=True)
+    by_learned = sorted(
+        candidates_detail, key=lambda c: c["learned_score"], reverse=True
+    )
 
     # Assign ranks
     for rank, c in enumerate(by_multi):
@@ -164,7 +175,9 @@ def run_inference(state_idx: int = 0) -> dict:
     sp = single_pass_search(embedder.client, collection, z_H, z_L, x, top_k=5)
     sp_move = sp.top_payloads[0].get("optimal_move") if sp.top_payloads else None
 
-    md = multi_dimensional_search(embedder.client, collection, z_H, z_L, x, top_k=5, candidate_pool=20)
+    md = multi_dimensional_search(
+        embedder.client, collection, z_H, z_L, x, top_k=5, candidate_pool=20
+    )
     md_move = md.top_payloads[0].get("optimal_move") if md.top_payloads else None
 
     learned_move = by_learned[0]["optimal_move"] if by_learned else None
@@ -198,8 +211,13 @@ def run_lookahead(state_idx: int = 0, depth: int = 3) -> dict:
     state, true_move = all_states[idx]
 
     result = lookahead_search(
-        game, state, embedder, collection, model,
-        depth=depth, candidate_pool=15,
+        game,
+        state,
+        embedder,
+        collection,
+        model,
+        depth=depth,
+        candidate_pool=15,
     )
 
     # Build serializable path tree
@@ -228,7 +246,9 @@ def run_lookahead(state_idx: int = 0, depth: int = 3) -> dict:
             "true_optimal_move": true_move,
             "legal_moves": game.legal_moves(state),
         },
-        "move_scores": {str(k): round(v, 3) for k, v in result.root_move_scores.items()},
+        "move_scores": {
+            str(k): round(v, 3) for k, v in result.root_move_scores.items()
+        },
         "best_move": result.best_move,
         "best_avg_score": round(result.best_avg_score, 3),
         "is_correct": result.best_move == true_move,
@@ -278,6 +298,7 @@ class VizHandler(SimpleHTTPRequestHandler):
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--train-size", type=int, default=500)

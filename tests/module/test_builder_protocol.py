@@ -18,15 +18,18 @@ class TestBuilderProtocolCompliance:
 
     def test_gchat_builder_isinstance_check(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
+
         assert isinstance(GchatCardBuilder(), BuilderProtocol)
 
     def test_email_builder_isinstance_check(self):
         from gmail.email_builder import EmailBuilder
+
         assert isinstance(EmailBuilder(), BuilderProtocol)
 
     def test_protocol_has_required_methods(self):
         """BuilderProtocol defines the expected interface."""
         import inspect
+
         members = {name for name, _ in inspect.getmembers(BuilderProtocol)}
         assert "parse_dsl" in members
         assert "build_supply_map" in members
@@ -40,47 +43,59 @@ class TestRegistryPerDomain:
 
     def test_gchat_registry_nonempty(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
+
         builder = GchatCardBuilder()
         assert len(builder.registry) > 0
 
     def test_email_registry_nonempty(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         assert len(builder.registry) > 0
 
     def test_gchat_registry_pools_are_gchat_pools(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
         from research.trm.h2.domain_config import GCHAT_DOMAIN
+
         builder = GchatCardBuilder()
         valid_pools = set(GCHAT_DOMAIN.pool_vocab.keys())
         for comp in builder.registry.list_components():
             pool = builder.registry.get_pool(comp)
-            assert pool in valid_pools, f"gchat component '{comp}' has invalid pool '{pool}'"
+            assert pool in valid_pools, (
+                f"gchat component '{comp}' has invalid pool '{pool}'"
+            )
 
     def test_email_registry_pools_are_email_pools(self):
         from gmail.email_builder import EmailBuilder
         from research.trm.h2.domain_config import EMAIL_DOMAIN
+
         builder = EmailBuilder()
         valid_pools = set(EMAIL_DOMAIN.pool_vocab.keys())
         for comp in builder.registry.list_components():
             pool = builder.registry.get_pool(comp)
-            assert pool in valid_pools, f"email component '{comp}' has invalid pool '{pool}'"
+            assert pool in valid_pools, (
+                f"email component '{comp}' has invalid pool '{pool}'"
+            )
 
     def test_gchat_and_email_have_different_domain_ids(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
         from gmail.email_builder import EmailBuilder
+
         assert GchatCardBuilder().domain_id != EmailBuilder().domain_id
 
     def test_gchat_has_button_component(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
+
         assert "Button" in GchatCardBuilder().registry
 
     def test_email_has_textblock_component(self):
         from gmail.email_builder import EmailBuilder
+
         assert "TextBlock" in EmailBuilder().registry
 
     def test_email_has_buttonblock_component(self):
         from gmail.email_builder import EmailBuilder
+
         assert "ButtonBlock" in EmailBuilder().registry
 
 
@@ -90,6 +105,7 @@ class TestSupplyMapPerDomain:
     def test_gchat_supply_map_keys(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
         from research.trm.h2.domain_config import GCHAT_DOMAIN
+
         builder = GchatCardBuilder()
         parsed = ParsedStructure(content_items={}, raw_dsl="")
         supply_map = builder.build_supply_map(parsed)
@@ -98,6 +114,7 @@ class TestSupplyMapPerDomain:
     def test_email_supply_map_keys(self):
         from gmail.email_builder import EmailBuilder
         from research.trm.h2.domain_config import EMAIL_DOMAIN
+
         builder = EmailBuilder()
         parsed = ParsedStructure(content_items={}, raw_dsl="")
         supply_map = builder.build_supply_map(parsed)
@@ -105,6 +122,7 @@ class TestSupplyMapPerDomain:
 
     def test_gchat_supply_map_content_merging(self):
         from gchat.card_builder.builder_v3 import GchatCardBuilder
+
         builder = GchatCardBuilder()
         parsed = ParsedStructure(
             content_items={"content_texts": ["A", "B"], "buttons": ["C"]},
@@ -115,6 +133,7 @@ class TestSupplyMapPerDomain:
 
     def test_email_supply_map_content_merging(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         parsed = ParsedStructure(
             content_items={"content": ["A"], "layout": ["B"]},
@@ -130,18 +149,21 @@ class TestOutputTypeValidation:
     def test_email_build_returns_email_spec(self):
         from gmail.email_builder import EmailBuilder
         from gmail.mjml_types import EmailSpec
+
         builder = EmailBuilder()
         result = builder.build("Welcome email", subject="Hello")
         assert isinstance(result, EmailSpec)
 
     def test_email_spec_has_subject(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         result = builder.build("Test", subject="My Subject")
         assert result.subject == "My Subject"
 
     def test_email_spec_to_mjml_produces_string(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         result = builder.build("Test email content", subject="Test")
         mjml = result.to_mjml()
@@ -150,6 +172,7 @@ class TestOutputTypeValidation:
 
     def test_email_render_component_textblock(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         result = builder.render_component("TextBlock", {"text": "Hello"})
         assert isinstance(result, str)
@@ -158,13 +181,17 @@ class TestOutputTypeValidation:
 
     def test_email_render_component_buttonblock(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
-        result = builder.render_component("ButtonBlock", {"text": "Click", "url": "https://example.com"})
+        result = builder.render_component(
+            "ButtonBlock", {"text": "Click", "url": "https://example.com"}
+        )
         assert isinstance(result, str)
         assert "mj-button" in result
 
     def test_email_render_unknown_component(self):
         from gmail.email_builder import EmailBuilder
+
         builder = EmailBuilder()
         result = builder.render_component("NonExistent", {"text": "test"})
         assert isinstance(result, str)
@@ -176,6 +203,7 @@ class TestComponentRegistryUnit:
 
     def test_registry_register_and_get(self):
         from adapters.module_wrapper.builder_base import ComponentInfo
+
         registry = ComponentRegistry(domain_id="test")
         info = ComponentInfo(name="Widget", pool="content", fields={"text": "str"})
         registry.register(info)
@@ -183,6 +211,7 @@ class TestComponentRegistryUnit:
 
     def test_registry_list_components(self):
         from adapters.module_wrapper.builder_base import ComponentInfo
+
         registry = ComponentRegistry(domain_id="test")
         registry.register(ComponentInfo(name="A", pool="p1"))
         registry.register(ComponentInfo(name="B", pool="p2"))
@@ -190,6 +219,7 @@ class TestComponentRegistryUnit:
 
     def test_registry_components_for_pool(self):
         from adapters.module_wrapper.builder_base import ComponentInfo
+
         registry = ComponentRegistry(domain_id="test")
         registry.register(ComponentInfo(name="A", pool="p1"))
         registry.register(ComponentInfo(name="B", pool="p1"))
@@ -199,6 +229,7 @@ class TestComponentRegistryUnit:
 
     def test_registry_len_and_contains(self):
         from adapters.module_wrapper.builder_base import ComponentInfo
+
         registry = ComponentRegistry(domain_id="test")
         registry.register(ComponentInfo(name="X", pool="p"))
         assert len(registry) == 1
@@ -207,6 +238,7 @@ class TestComponentRegistryUnit:
 
     def test_registry_get_pool(self):
         from adapters.module_wrapper.builder_base import ComponentInfo
+
         registry = ComponentRegistry(domain_id="test")
         registry.register(ComponentInfo(name="W", pool="mypool"))
         assert registry.get_pool("W") == "mypool"

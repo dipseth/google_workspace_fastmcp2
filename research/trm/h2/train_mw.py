@@ -75,7 +75,9 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
             name=g.get("query_description", ""),
             full_path="",
             symbol="",
-            comp_vectors=None, inp_vectors=None, rel_vector=None,
+            comp_vectors=None,
+            inp_vectors=None,
+            rel_vector=None,
             content_feedback="positive",
             form_feedback="positive",
             docstring=g.get("query_dsl", ""),
@@ -87,53 +89,62 @@ def load_synthetic_groups(path: str, feature_version: int = 1) -> list[MWQueryGr
         content_labels = []
         for c in g["candidates"]:
             cand = MWPoint(
-                point_id="", point_type="class",
-                name=c["name"], full_path=c.get("full_path", ""),
+                point_id="",
+                point_type="class",
+                name=c["name"],
+                full_path=c.get("full_path", ""),
                 symbol="",
-                comp_vectors=None, inp_vectors=None, rel_vector=None,
-                content_feedback=None, form_feedback=None,
+                comp_vectors=None,
+                inp_vectors=None,
+                rel_vector=None,
+                content_feedback=None,
+                form_feedback=None,
                 docstring="",
             )
 
             if feature_version >= 5:
-                cand._precomputed_features = np.array([
-                    c.get(f, 0.0) for f in FEATURE_NAMES_V5
-                ], dtype=np.float32)
+                cand._precomputed_features = np.array(
+                    [c.get(f, 0.0) for f in FEATURE_NAMES_V5], dtype=np.float32
+                )
             elif feature_version == 3 or feature_version == 4:
-                cand._precomputed_features = np.array([
-                    c.get(f, 0.0) for f in FEATURE_NAMES_V3
-                ], dtype=np.float32)
+                cand._precomputed_features = np.array(
+                    [c.get(f, 0.0) for f in FEATURE_NAMES_V3], dtype=np.float32
+                )
             elif feature_version == 2:
-                cand._precomputed_features = np.array([
-                    c.get(f, 0.0) for f in FEATURE_NAMES_V2
-                ], dtype=np.float32)
+                cand._precomputed_features = np.array(
+                    [c.get(f, 0.0) for f in FEATURE_NAMES_V2], dtype=np.float32
+                )
             else:
-                cand._precomputed_features = np.array([
-                    c["sim_components"], c["sim_inputs"],
-                    c["sim_relationships"],
-                    c.get("q_comp_norm", 0),
-                    c.get("q_inp_norm", 0),
-                    c.get("q_rel_norm", 0),
-                    c.get("c_comp_norm", 0),
-                    c.get("c_inp_norm", 0),
-                    c.get("c_rel_norm", 0),
-                ], dtype=np.float32)
+                cand._precomputed_features = np.array(
+                    [
+                        c["sim_components"],
+                        c["sim_inputs"],
+                        c["sim_relationships"],
+                        c.get("q_comp_norm", 0),
+                        c.get("q_inp_norm", 0),
+                        c.get("q_rel_norm", 0),
+                        c.get("c_comp_norm", 0),
+                        c.get("c_inp_norm", 0),
+                        c.get("c_rel_norm", 0),
+                    ],
+                    dtype=np.float32,
+                )
             candidates.append(cand)
 
             # Form label (backward compat: "label" or "form_label")
-            form_labels.append(
-                c.get("form_label", c.get("label", 0.0))
-            )
+            form_labels.append(c.get("form_label", c.get("label", 0.0)))
             # Content label (V5+, defaults to 0.0 for older data)
             content_labels.append(c.get("content_label", 0.0))
 
         if any(v == 1.0 for v in form_labels) and len(candidates) >= 2:
-            groups.append(MWQueryGroup(
-                query=query,
-                candidates=candidates,
-                labels=form_labels,
-                content_labels=content_labels,
-            ))
+            groups.append(
+                MWQueryGroup(
+                    query=query,
+                    candidates=candidates,
+                    labels=form_labels,
+                    content_labels=content_labels,
+                )
+            )
 
     logger.info(f"Loaded {len(groups)} valid synthetic groups")
     return groups
@@ -179,7 +190,7 @@ class MWListwiseDataset(Dataset):
             feats = []
             for cand in g.candidates:
                 # Use precomputed features if available (synthetic data)
-                if hasattr(cand, '_precomputed_features'):
+                if hasattr(cand, "_precomputed_features"):
                     feats.append(cand._precomputed_features)
                 else:
                     f = compute_similarity_features(g.query, cand)
@@ -192,18 +203,14 @@ class MWListwiseDataset(Dataset):
 
             # Form labels (always present — backward compat with "labels")
             form_labels = g.labels
-            form_tensor = torch.tensor(
-                form_labels + [0.0] * pad, dtype=torch.float32
-            )
+            form_tensor = torch.tensor(form_labels + [0.0] * pad, dtype=torch.float32)
 
             # Content labels (optional — from content_labels attr or zeros)
-            if dual_labels and hasattr(g, 'content_labels') and g.content_labels:
+            if dual_labels and hasattr(g, "content_labels") and g.content_labels:
                 c_labels = g.content_labels
             else:
                 c_labels = [0.0] * K
-            content_tensor = torch.tensor(
-                c_labels + [0.0] * pad, dtype=torch.float32
-            )
+            content_tensor = torch.tensor(c_labels + [0.0] * pad, dtype=torch.float32)
 
             mask_tensor = torch.cat([torch.ones(K), torch.zeros(pad)])
 
@@ -277,7 +284,13 @@ class SimilarityScorerMW(nn.Module):
     V3 (14 features): 8 decomposed ColBERT MaxSim + 1 dense cosine + 5 structural
     """
 
-    def __init__(self, input_dim: int = 9, hidden_dim: int = 32, num_layers: int = 2, dropout: float = 0.1):
+    def __init__(
+        self,
+        input_dim: int = 9,
+        hidden_dim: int = 32,
+        num_layers: int = 2,
+        dropout: float = 0.1,
+    ):
         super().__init__()
         self.input_dim = input_dim
         layers: list[nn.Module] = []
@@ -365,9 +378,7 @@ class DualHeadScorerMW(nn.Module):
                 nn.Linear(head_dim, 1),
             )
 
-    def forward(
-        self, features: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """features: [B, input_dim] → (form_scores: [B, 1], content_scores: [B, 1])"""
         shared = self.backbone(features)
         form_scores = self.form_head(shared)
@@ -382,9 +393,7 @@ class DualHeadScorerMW(nn.Module):
         return form_scores, content_scores
 
     def count_parameters(self):
-        return sum(
-            p.numel() for p in self.parameters() if p.requires_grad
-        )
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +453,13 @@ def compute_loss(model, batch, device):
             ndcg_scores[i] = dcg / max(idcg, 1e-8)
         ndcg_val = ndcg_scores.mean().item()
 
-    return loss, {"loss": loss.item(), "accuracy": acc1, "top3": acc3, "mrr": mrr_val, "ndcg5": ndcg_val}
+    return loss, {
+        "loss": loss.item(),
+        "accuracy": acc1,
+        "top3": acc3,
+        "mrr": mrr_val,
+        "ndcg5": ndcg_val,
+    }
 
 
 def _listwise_ce(scores, labels, mask):
@@ -518,9 +533,7 @@ def compute_dual_loss(
     B, K, Fd = features.shape
 
     # Forward: dual outputs
-    form_scores, content_scores = model(
-        features.reshape(B * K, Fd)
-    )
+    form_scores, content_scores = model(features.reshape(B * K, Fd))
     form_scores = form_scores.squeeze(-1).reshape(B, K)
     content_scores = content_scores.squeeze(-1).reshape(B, K)
 
@@ -529,14 +542,9 @@ def compute_dual_loss(
 
     # Content loss: masked for groups with no content labels
     has_content = (content_labels.sum(dim=-1) > 0).float()
-    content_loss_per_group = _listwise_ce(
-        content_scores, content_labels, mask
-    )
+    content_loss_per_group = _listwise_ce(content_scores, content_labels, mask)
     if has_content.sum() > 0:
-        content_loss = (
-            (content_loss_per_group * has_content).sum()
-            / has_content.sum()
-        )
+        content_loss = (content_loss_per_group * has_content).sum() / has_content.sum()
     else:
         content_loss = torch.tensor(0.0, device=device)
 
@@ -548,12 +556,8 @@ def compute_dual_loss(
         cm = content_scores.masked_fill(mask == 0, -1e9)
 
         # Per-head metrics
-        f_acc1, f_acc3, f_mrr, f_ndcg = _head_metrics(
-            fm, form_labels, device
-        )
-        c_acc1, c_acc3, c_mrr, c_ndcg = _head_metrics(
-            cm, content_labels, device
-        )
+        f_acc1, f_acc3, f_mrr, f_ndcg = _head_metrics(fm, form_labels, device)
+        c_acc1, c_acc3, c_mrr, c_ndcg = _head_metrics(cm, content_labels, device)
 
         # Combined score (alpha=form_weight)
         combined = form_weight * fm + content_weight * cm
@@ -601,36 +605,87 @@ def main():
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--val-split", type=float, default=0.2)
-    parser.add_argument("--checkpoint-dir", type=str,
-                        default=str(Path(__file__).parent / "checkpoints"))
-    parser.add_argument("--synthetic-data", type=str, default=None,
-                        help="Path to synthetic groups JSON from generate_training_data.py")
-    parser.add_argument("--noise-std", type=float, default=0.01,
-                        help="Gaussian noise std for feature augmentation")
-    parser.add_argument("--feature-dropout", type=float, default=0.1,
-                        help="Probability of zeroing a feature during training")
-    parser.add_argument("--domain", type=str, default="card", choices=["card", "email", "combined"],
-                        help="Domain label saved in checkpoint and used for naming")
-    parser.add_argument("--feature-version", type=int, default=1, choices=[1, 2, 3, 4, 5],
-                        help="Feature version: 1=9D, 2=8D, 3=14D, 4=15D, 5=17D dual-head")
-    parser.add_argument("--model-type", type=str, default="single", choices=["single", "dual"],
-                        help="Model type: single (SimilarityScorerMW) or dual (DualHeadScorerMW)")
-    parser.add_argument("--form-weight", type=float, default=0.6,
-                        help="Weight for form loss in dual-head training")
-    parser.add_argument("--content-weight", type=float, default=0.4,
-                        help="Weight for content loss in dual-head training")
-    parser.add_argument("--head-dim", type=int, default=24,
-                        help="Hidden dim for each head in dual-head model")
-    parser.add_argument("--structural-mask-prob", type=float, default=0.0,
-                        help="Probability of zeroing structural features (indices 9-13) "
-                             "during training to break is_child shortcut for content head")
-    parser.add_argument("--separate-content-encoder", action="store_true",
-                        help="Use separate content encoder instead of shared backbone for content head")
-    parser.add_argument("--content-encoder-features", type=str, default="content-only",
-                        choices=["content-only", "no-structural"],
-                        help="Which features the separate content encoder sees: "
-                             "'content-only' = [14,15,16] (3D), "
-                             "'no-structural' = [0-8,14-16] (12D, excludes hierarchy)")
+    parser.add_argument(
+        "--checkpoint-dir", type=str, default=str(Path(__file__).parent / "checkpoints")
+    )
+    parser.add_argument(
+        "--synthetic-data",
+        type=str,
+        default=None,
+        help="Path to synthetic groups JSON from generate_training_data.py",
+    )
+    parser.add_argument(
+        "--noise-std",
+        type=float,
+        default=0.01,
+        help="Gaussian noise std for feature augmentation",
+    )
+    parser.add_argument(
+        "--feature-dropout",
+        type=float,
+        default=0.1,
+        help="Probability of zeroing a feature during training",
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        default="card",
+        choices=["card", "email", "combined"],
+        help="Domain label saved in checkpoint and used for naming",
+    )
+    parser.add_argument(
+        "--feature-version",
+        type=int,
+        default=1,
+        choices=[1, 2, 3, 4, 5],
+        help="Feature version: 1=9D, 2=8D, 3=14D, 4=15D, 5=17D dual-head",
+    )
+    parser.add_argument(
+        "--model-type",
+        type=str,
+        default="single",
+        choices=["single", "dual"],
+        help="Model type: single (SimilarityScorerMW) or dual (DualHeadScorerMW)",
+    )
+    parser.add_argument(
+        "--form-weight",
+        type=float,
+        default=0.6,
+        help="Weight for form loss in dual-head training",
+    )
+    parser.add_argument(
+        "--content-weight",
+        type=float,
+        default=0.4,
+        help="Weight for content loss in dual-head training",
+    )
+    parser.add_argument(
+        "--head-dim",
+        type=int,
+        default=24,
+        help="Hidden dim for each head in dual-head model",
+    )
+    parser.add_argument(
+        "--structural-mask-prob",
+        type=float,
+        default=0.0,
+        help="Probability of zeroing structural features (indices 9-13) "
+        "during training to break is_child shortcut for content head",
+    )
+    parser.add_argument(
+        "--separate-content-encoder",
+        action="store_true",
+        help="Use separate content encoder instead of shared backbone for content head",
+    )
+    parser.add_argument(
+        "--content-encoder-features",
+        type=str,
+        default="content-only",
+        choices=["content-only", "no-structural"],
+        help="Which features the separate content encoder sees: "
+        "'content-only' = [14,15,16] (3D), "
+        "'no-structural' = [0-8,14-16] (12D, excludes hierarchy)",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -651,11 +706,15 @@ def main():
         except Exception as e:
             logger.warning(f"Qdrant groups unavailable: {e}")
     else:
-        logger.info(f"Skipping Qdrant groups for V{args.feature_version} (no structural features)")
+        logger.info(
+            f"Skipping Qdrant groups for V{args.feature_version} (no structural features)"
+        )
 
     # Synthetic groups (from generate_training_data.py)
     if args.synthetic_data:
-        synthetic_groups = load_synthetic_groups(args.synthetic_data, feature_version=args.feature_version)
+        synthetic_groups = load_synthetic_groups(
+            args.synthetic_data, feature_version=args.feature_version
+        )
         logger.info(f"Synthetic groups: {len(synthetic_groups)}")
         groups.extend(synthetic_groups)
 
@@ -664,7 +723,7 @@ def main():
     input_dim = input_dim_map.get(args.feature_version, 9)
     if groups:
         sample_cand = groups[0].candidates[0]
-        if hasattr(sample_cand, '_precomputed_features'):
+        if hasattr(sample_cand, "_precomputed_features"):
             input_dim = len(sample_cand._precomputed_features)
     is_dual = args.model_type == "dual"
     logger.info(
@@ -684,9 +743,12 @@ def main():
     logger.info(f"Split: {len(train_groups)} train / {len(val_groups)} val groups")
 
     # --- Datasets ---
-    max_k = max(max(len(g.labels) for g in train_groups), max(len(g.labels) for g in val_groups))
+    max_k = max(
+        max(len(g.labels) for g in train_groups), max(len(g.labels) for g in val_groups)
+    )
     train_ds = MWListwiseDataset(
-        train_groups, max_k,
+        train_groups,
+        max_k,
         noise_std=args.noise_std,
         feature_dropout=args.feature_dropout,
         training=True,
@@ -738,7 +800,9 @@ def main():
         )
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=1e-6)
+    scheduler = CosineAnnealingLR(
+        optimizer, T_max=args.epochs * len(train_loader), eta_min=1e-6
+    )
 
     # --- Training ---
     ckpt_dir = Path(args.checkpoint_dir)
@@ -847,9 +911,7 @@ def main():
             patience_counter = 0
             domain = getattr(args, "domain", "card")
             ckpt_name = (
-                f"best_model_{domain}.pt"
-                if domain != "card"
-                else "best_model_mw.pt"
+                f"best_model_{domain}.pt" if domain != "card" else "best_model_mw.pt"
             )
             ckpt = ckpt_dir / ckpt_name
             ckpt_data = {
@@ -897,16 +959,21 @@ def main():
     final_ckpt_path = ckpt_dir / ckpt_name
     if final_ckpt_path.exists():
         import torch as _torch
-        saved = _torch.load(str(final_ckpt_path), map_location="cpu", weights_only=False)
+
+        saved = _torch.load(
+            str(final_ckpt_path), map_location="cpu", weights_only=False
+        )
         saved["train_losses"] = train_losses
         saved["val_losses"] = val_losses
         saved["train_accs"] = train_accs
         saved["val_accs"] = val_accs
         _torch.save(saved, final_ckpt_path)
-        logger.info(f"Updated checkpoint with full loss history ({len(train_losses)} epochs)")
+        logger.info(
+            f"Updated checkpoint with full loss history ({len(train_losses)} epochs)"
+        )
 
     logger.info(f"\nBest validation accuracy: {best_val_acc:.3f}")
-    logger.info(f"(Random baseline for K={max_k}: {1/max_k:.3f})")
+    logger.info(f"(Random baseline for K={max_k}: {1 / max_k:.3f})")
 
 
 if __name__ == "__main__":

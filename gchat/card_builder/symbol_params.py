@@ -28,6 +28,7 @@ _CONTEXT_KEY_TO_PARAM: Dict[str, str] = {
 # Scalar param keys (value is a single string, not a list)
 _SCALAR_PARAMS = frozenset({"image_url"})
 
+
 def _resolve_param_key(
     component_name: str, wrapper: Optional[Any] = None
 ) -> Optional[str]:
@@ -41,6 +42,7 @@ def _resolve_param_key(
         context_key, _ = resource_info
         return _CONTEXT_KEY_TO_PARAM.get(context_key, context_key)
     return None
+
 
 def resolve_symbol_params(
     card_params: Dict[str, Any],
@@ -96,6 +98,7 @@ def resolve_symbol_params(
             )
 
     return result
+
 
 def _normalize_value(value: Any, flat_key: str) -> Any:
     """Normalize a symbol-keyed value to the format the builder expects.

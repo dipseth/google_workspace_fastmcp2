@@ -114,15 +114,27 @@ def multi_dimensional_search(
     """
     # Expand candidate pool
     comp_results = _search_vector(
-        client, collection_name, z_H, "components", candidate_pool,
+        client,
+        collection_name,
+        z_H,
+        "components",
+        candidate_pool,
         with_vectors=True,
     )
     rel_results = _search_vector(
-        client, collection_name, z_L, "relationships", candidate_pool,
+        client,
+        collection_name,
+        z_L,
+        "relationships",
+        candidate_pool,
         with_vectors=True,
     )
     inp_results = _search_vector(
-        client, collection_name, x, "inputs", candidate_pool,
+        client,
+        collection_name,
+        x,
+        "inputs",
+        candidate_pool,
         with_vectors=True,
     )
 
@@ -164,7 +176,9 @@ def multi_dimensional_search(
             scored[pid] = (sim_c + sim_r + sim_i) / 3.0
 
     sorted_ids = sorted(scored.keys(), key=lambda i: scored[i], reverse=True)
-    payloads = {pid: data["payload"] for pid, data in candidates.items() if data["payload"]}
+    payloads = {
+        pid: data["payload"] for pid, data in candidates.items() if data["payload"]
+    }
 
     return SearchResult(
         top_ids=sorted_ids[:top_k],
@@ -237,15 +251,27 @@ def recursive_search(
 
         # --- Step 2: Search with current states ---
         comp_results = _search_vector(
-            client, collection_name, z_H_injected, "components", top_k,
+            client,
+            collection_name,
+            z_H_injected,
+            "components",
+            top_k,
             with_vectors=True,
         )
         rel_results = _search_vector(
-            client, collection_name, z_L, "relationships", top_k,
+            client,
+            collection_name,
+            z_L,
+            "relationships",
+            top_k,
             with_vectors=True,
         )
         inp_results = _search_vector(
-            client, collection_name, x, "inputs", top_k,
+            client,
+            collection_name,
+            x,
+            "inputs",
+            top_k,
         )
 
         # --- Step 3: Refine states based on strategy ---
@@ -389,7 +415,9 @@ def _strategy_score_weighted(
     z_L_new = z_L
     rel_vecs = _extract_named_vectors(comp_results, "relationships")
     if rel_vecs.size > 0:
-        scores = np.array([r.score for r in comp_results[:len(rel_vecs)]], dtype=np.float32)
+        scores = np.array(
+            [r.score for r in comp_results[: len(rel_vecs)]], dtype=np.float32
+        )
         # Softmax-like weighting
         weights = np.exp(scores * 5)  # temperature=0.2
         weights /= weights.sum()
@@ -399,7 +427,9 @@ def _strategy_score_weighted(
     z_H_new = z_H
     comp_vecs = _extract_named_vectors(rel_results, "components")
     if comp_vecs.size > 0:
-        scores = np.array([r.score for r in rel_results[:len(comp_vecs)]], dtype=np.float32)
+        scores = np.array(
+            [r.score for r in rel_results[: len(comp_vecs)]], dtype=np.float32
+        )
         weights = np.exp(scores * 5)
         weights /= weights.sum()
         weighted_centroid = np.average(comp_vecs, axis=0, weights=weights)
@@ -432,12 +462,8 @@ def _strategy_consistency(
         best_id = None
         best_score = -1
         for pid in overlap:
-            comp_rank = next(
-                i for i, r in enumerate(comp_results) if r.id == pid
-            )
-            rel_rank = next(
-                i for i, r in enumerate(rel_results) if r.id == pid
-            )
+            comp_rank = next(i for i, r in enumerate(comp_results) if r.id == pid)
+            rel_rank = next(i for i, r in enumerate(rel_results) if r.id == pid)
             # Combined inverse rank
             score = 1 / (1 + comp_rank) + 1 / (1 + rel_rank)
             if score > best_score:

@@ -132,9 +132,7 @@ class EmbeddingService:
 
                     model = TextEmbedding(model_name=model_name)
 
-                logger.info(
-                    f"EmbeddingService: loaded {slot} model '{model_name}'"
-                )
+                logger.info(f"EmbeddingService: loaded {slot} model '{model_name}'")
                 return model
 
             except Exception as e:
@@ -234,7 +232,9 @@ class EmbeddingService:
 
     def get_dimension(self, slot: str) -> int:
         """Get the embedding dimension for a loaded slot."""
-        return self._dimensions.get(slot, {"minilm": 384, "colbert": 128, "bge-small": 384}.get(slot, 384))
+        return self._dimensions.get(
+            slot, {"minilm": 384, "colbert": 128, "bge-small": 384}.get(slot, 384)
+        )
 
     async def embed_dense(
         self, texts: List[str], model: str = "minilm"

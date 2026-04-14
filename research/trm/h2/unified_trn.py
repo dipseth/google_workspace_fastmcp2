@@ -31,11 +31,23 @@ from .domain_config import get_domain, get_domain_or_default
 
 # V5 feature names (17D) — domain-agnostic structural + content features
 FEATURE_NAMES_V5 = [
-    "sim_c_mean", "sim_c_max", "sim_c_std", "sim_c_coverage",
-    "sim_i_mean", "sim_i_max", "sim_i_std", "sim_i_coverage",
+    "sim_c_mean",
+    "sim_c_max",
+    "sim_c_std",
+    "sim_c_coverage",
+    "sim_i_mean",
+    "sim_i_max",
+    "sim_i_std",
+    "sim_i_coverage",
     "sim_relationships",
-    "is_parent", "is_child", "is_sibling", "depth_ratio", "n_shared_ancestors",
-    "sim_content", "content_density", "content_form_alignment",
+    "is_parent",
+    "is_child",
+    "is_sibling",
+    "depth_ratio",
+    "n_shared_ancestors",
+    "sim_content",
+    "content_density",
+    "content_form_alignment",
 ]
 
 STRUCTURAL_DIM = len(FEATURE_NAMES_V5)  # 17

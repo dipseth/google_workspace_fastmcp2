@@ -26,6 +26,7 @@ logger = setup_logger()
 # Lazy rustworkx import (reuse pattern from graph_mixin.py)
 _rustworkx = None
 
+
 def _get_rustworkx():
     """Lazy load rustworkx."""
     global _rustworkx
@@ -34,6 +35,7 @@ def _get_rustworkx():
 
         _rustworkx = rx
     return _rustworkx
+
 
 @dataclass
 class ToolNodeData:
@@ -51,6 +53,7 @@ class ToolNodeData:
             return 0.0
         return self.total_execution_ms / self.call_count
 
+
 @dataclass
 class ToolEdgeData:
     """Attributes stored on each co-occurrence edge."""
@@ -64,6 +67,7 @@ class ToolEdgeData:
         if self.co_occurrence_count == 0:
             return 0.0
         return self.total_time_delta_ms / self.co_occurrence_count
+
 
 class ToolRelationshipGraph:
     """
@@ -440,6 +444,7 @@ class ToolRelationshipGraph:
     def tool_names(self) -> Set[str]:
         """All tracked tool names."""
         return set(self._name_to_idx.keys())
+
 
 __all__ = [
     "ToolRelationshipGraph",

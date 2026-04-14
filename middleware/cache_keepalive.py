@@ -257,6 +257,7 @@ _MODULE_EXPLORATION_PROMPTS: Dict[str, List[str]] = {
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class KeepaliveModuleConfig:
     """Configuration for a module whose system prompts should be kept warm."""
@@ -277,10 +278,12 @@ class KeepaliveModuleConfig:
     total_full_price_usd: float = 0.0  # what it would cost without caching
     total_savings_usd: float = 0.0
 
+
 # ---------------------------------------------------------------------------
 # System prompt builders — reuse the exact same context that real tool
 # validation agents inject so the Anthropic cache prefix matches.
 # ---------------------------------------------------------------------------
+
 
 def _build_gchat_system_prompt() -> str:
     """Assemble the cacheable system prompt for Google Chat card DSL."""
@@ -305,6 +308,7 @@ def _build_gchat_system_prompt() -> str:
         pass
 
     return "\n\n".join(parts)
+
 
 def _build_email_system_prompt() -> str:
     """Assemble the cacheable system prompt for email DSL.
@@ -391,6 +395,7 @@ def _build_email_system_prompt() -> str:
     )
 
     return "\n\n".join(parts)
+
 
 def _build_qdrant_system_prompt() -> str:
     """Assemble the cacheable system prompt for Qdrant search DSL.
@@ -631,6 +636,7 @@ _MODULE_PROMPT_BUILDERS: Dict[str, Callable[[], str]] = {
 # Engine
 # ---------------------------------------------------------------------------
 
+
 class CacheKeepaliveEngine:
     """Manages periodic keepalive calls to keep Anthropic prompt cache warm.
 
@@ -722,9 +728,7 @@ class CacheKeepaliveEngine:
                 from middleware.payment.cost_tracker import is_budget_exceeded
 
                 if is_budget_exceeded():
-                    logger.info(
-                        "Cache keepalive: SKIPPED — monthly budget exceeded"
-                    )
+                    logger.info("Cache keepalive: SKIPPED — monthly budget exceeded")
                     await asyncio.sleep(max(60, interval))
                     continue
             except Exception:
@@ -1008,9 +1012,7 @@ class CacheKeepaliveEngine:
                 mod.total_cost_usd = stats.get("total_cost_usd", 0.0)
                 mod.total_full_price_usd = stats.get("total_full_price_usd", 0.0)
                 mod.total_savings_usd = stats.get("total_savings_usd", 0.0)
-            self._validation_total_cost_usd = data.get(
-                "validation_total_cost_usd", 0.0
-            )
+            self._validation_total_cost_usd = data.get("validation_total_cost_usd", 0.0)
             self._validation_total_calls = data.get("validation_total_calls", 0)
             # Restore monthly budget tracking state
             try:
@@ -1021,9 +1023,7 @@ class CacheKeepaliveEngine:
                 pass
             logger.info("Cache keepalive: loaded persisted stats from %s", path_str)
         except Exception as exc:
-            logger.warning(
-                "Cache keepalive: failed to load persisted stats: %s", exc
-            )
+            logger.warning("Cache keepalive: failed to load persisted stats: %s", exc)
 
     def _save_persisted_stats(self) -> None:
         """Atomically write cost stats to the persistence file."""
@@ -1058,9 +1058,7 @@ class CacheKeepaliveEngine:
                 raise
             logger.debug("Cache keepalive: persisted stats to %s", path_str)
         except Exception as exc:
-            logger.warning(
-                "Cache keepalive: failed to persist stats: %s", exc
-            )
+            logger.warning("Cache keepalive: failed to persist stats: %s", exc)
 
     # -- stats --------------------------------------------------------------
 
@@ -1111,9 +1109,11 @@ class CacheKeepaliveEngine:
             "validation_total_calls": self._validation_total_calls,
         }
 
+
 # ---------------------------------------------------------------------------
 # Default module registration
 # ---------------------------------------------------------------------------
+
 
 def register_default_modules(engine: CacheKeepaliveEngine, settings: Any) -> None:
     """Register keepalive modules based on ``settings.cache_keepalive_modules``."""

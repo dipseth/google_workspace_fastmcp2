@@ -26,6 +26,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 @runtime_checkable
 class RICTextProvider(Protocol):
     """Generates the 4 RIC text representations for a component type.
@@ -58,6 +59,7 @@ class RICTextProvider(Protocol):
         For instance_pattern points: returns concatenated actual content values.
         """
         ...
+
 
 class IntrospectionProvider:
     """Default RIC text provider for introspected Python components.
@@ -131,6 +133,7 @@ class IntrospectionProvider:
     def content_text(self, name: str, metadata: Dict[str, Any]) -> str:
         """Class points have no user content. Returns empty string -> zero vector."""
         return ""
+
 
 __all__ = [
     "RICTextProvider",

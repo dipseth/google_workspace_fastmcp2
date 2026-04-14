@@ -377,9 +377,13 @@ class FeedbackLoop:
                 from config.embedding_service import get_embedding_service
 
                 self._embedder = get_embedding_service().get_model_sync("colbert")
-                logger.info("ColBERT embedder acquired from EmbeddingService for feedback loop")
+                logger.info(
+                    "ColBERT embedder acquired from EmbeddingService for feedback loop"
+                )
             except Exception as e:
-                logger.warning(f"Failed to get ColBERT embedder from EmbeddingService: {e}")
+                logger.warning(
+                    f"Failed to get ColBERT embedder from EmbeddingService: {e}"
+                )
         return self._embedder
 
     def _get_relationship_embedder(self):
@@ -388,10 +392,16 @@ class FeedbackLoop:
             try:
                 from config.embedding_service import get_embedding_service
 
-                self._relationship_embedder = get_embedding_service().get_model_sync("minilm")
-                logger.info("MiniLM embedder acquired from EmbeddingService for relationships")
+                self._relationship_embedder = get_embedding_service().get_model_sync(
+                    "minilm"
+                )
+                logger.info(
+                    "MiniLM embedder acquired from EmbeddingService for relationships"
+                )
             except Exception as e:
-                logger.warning(f"Failed to get MiniLM embedder from EmbeddingService: {e}")
+                logger.warning(
+                    f"Failed to get MiniLM embedder from EmbeddingService: {e}"
+                )
         return self._relationship_embedder
 
     def _embed_description(
@@ -997,9 +1007,7 @@ class FeedbackLoop:
                 has_content = "content" in vectors_config
 
                 if has_inputs and has_relationships and has_content:
-                    logger.debug(
-                        "✅ inputs, relationships, and content vectors exist"
-                    )
+                    logger.debug("✅ inputs, relationships, and content vectors exist")
                     self._ensure_payload_indexes(client)
                     self._description_vector_ready = True
                     return True
@@ -2220,14 +2228,16 @@ class FeedbackLoop:
 
         try:
             # Use wrapper's search_hybrid_dispatch (respects ENABLE_MULTIDIM_SEARCH)
-            class_results, content_patterns, form_patterns = wrapper.search_hybrid_dispatch(
-                description=description,
-                component_paths=component_paths,
-                limit=limit,
-                token_ratio=token_ratio,
-                content_feedback="positive",  # Only get positive content patterns
-                form_feedback="positive",  # Only get positive form patterns
-                include_classes=True,
+            class_results, content_patterns, form_patterns = (
+                wrapper.search_hybrid_dispatch(
+                    description=description,
+                    component_paths=component_paths,
+                    limit=limit,
+                    token_ratio=token_ratio,
+                    content_feedback="positive",  # Only get positive content patterns
+                    form_feedback="positive",  # Only get positive form patterns
+                    include_classes=True,
+                )
             )
 
             logger.info(

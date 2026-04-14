@@ -71,8 +71,12 @@ def _score_state(
     all_candidates = {}
     for vec, vec_name in [(z_H, "components"), (z_L, "relationships"), (x, "inputs")]:
         points = _search_vector(
-            embedder.client, collection, vec, vec_name,
-            limit=candidate_pool, with_vectors=True,
+            embedder.client,
+            collection,
+            vec,
+            vec_name,
+            limit=candidate_pool,
+            with_vectors=True,
         )
         for p in points:
             if p.id not in all_candidates and p.vector and isinstance(p.vector, dict):
@@ -135,8 +139,11 @@ def lookahead_search(
     legal_moves = game.legal_moves(state)
     if not legal_moves:
         return LookaheadResult(
-            root_move_scores={}, best_move=-1,
-            best_avg_score=0.0, paths={}, depth=depth,
+            root_move_scores={},
+            best_move=-1,
+            best_avg_score=0.0,
+            paths={},
+            depth=depth,
         )
 
     move_scores: dict[int, list[float]] = {m: [] for m in legal_moves}
@@ -145,10 +152,18 @@ def lookahead_search(
     def _explore(s: GameState, remaining: int) -> PathNode:
         """Recursively score a state and its children."""
         score, pred_move = _score_state(
-            game, s, embedder, collection, model, candidate_pool,
+            game,
+            s,
+            embedder,
+            collection,
+            model,
+            candidate_pool,
         )
         node = PathNode(
-            move=-1, state=s, score=score, top_candidate_move=pred_move,
+            move=-1,
+            state=s,
+            score=score,
+            top_candidate_move=pred_move,
         )
 
         if remaining > 0 and not game.is_terminal(s):

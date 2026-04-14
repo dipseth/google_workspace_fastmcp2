@@ -25,6 +25,7 @@ TEMPLATES_DIR = os.path.join(
     os.path.dirname(__file__), "..", "card_framework", "patterns"
 )
 
+
 class TemplateComponent:
     """
     A component that wraps an approved card pattern.
@@ -233,6 +234,7 @@ class TemplateComponent:
 
         return card
 
+
 class TemplateRegistry:
     """
     Registry for loading and managing templates.
@@ -366,8 +368,10 @@ class TemplateRegistry:
 
         return TemplateComponent(template_data, module_wrapper, **params)
 
+
 # Global registry instance
 _registry: Optional[TemplateRegistry] = None
+
 
 def get_template_registry() -> TemplateRegistry:
     """Get the global TemplateRegistry instance."""

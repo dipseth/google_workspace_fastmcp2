@@ -36,6 +36,7 @@ sys.path.insert(0, str(_project_root))
 # Fix macOS SSL certificate issue
 try:
     import certifi
+
     if not os.environ.get("SSL_CERT_FILE"):
         os.environ["SSL_CERT_FILE"] = certifi.where()
 except ImportError:
@@ -61,7 +62,9 @@ class SyntheticPattern:
 
     # Content (V5+)
     content_text: str = ""  # generated content text for this pattern
-    content_vector: Optional[np.ndarray] = None  # MiniLM [384] embedding of content_text
+    content_vector: Optional[np.ndarray] = (
+        None  # MiniLM [384] embedding of content_text
+    )
 
 
 @dataclass
@@ -92,8 +95,16 @@ DESCRIPTION_TEMPLATES = [
 ]
 
 ADJECTIVES = [
-    "simple", "clean", "modern", "compact", "interactive",
-    "rich", "detailed", "minimal", "dynamic", "responsive",
+    "simple",
+    "clean",
+    "modern",
+    "compact",
+    "interactive",
+    "rich",
+    "detailed",
+    "minimal",
+    "dynamic",
+    "responsive",
 ]
 
 COMPONENT_DESCRIPTIONS = {
@@ -194,19 +205,23 @@ def generate_structures(count: int, seed: int = 42) -> List[dict]:
             )
             if structure.is_valid:
                 desc = describe_components(structure.components)
-                structures.append({
-                    "components": structure.components,
-                    "dsl": structure.dsl,
-                    "description": desc,
-                    "tree": structure.tree,
-                    "depth": structure.depth,
-                })
+                structures.append(
+                    {
+                        "components": structure.components,
+                        "dsl": structure.dsl,
+                        "description": desc,
+                        "tree": structure.tree,
+                        "depth": structure.depth,
+                    }
+                )
         except Exception as e:
             logger.debug(f"Structure generation failed: {e}")
             continue
 
         if (i + 1) % 100 == 0:
-            logger.info(f"Generated {i + 1}/{count} structures ({len(structures)} valid)")
+            logger.info(
+                f"Generated {i + 1}/{count} structures ({len(structures)} valid)"
+            )
 
     logger.info(f"Generated {len(structures)} valid structures from {count} attempts")
     return structures
@@ -238,13 +253,15 @@ def generate_variations(
                 if variation:
                     var = variation[0]
                     desc = describe_components(var.component_paths)
-                    all_structures.append({
-                        "components": var.component_paths,
-                        "dsl": var.dsl_notation or struct["dsl"],
-                        "description": desc,
-                        "tree": struct["tree"],  # approximate
-                        "depth": struct["depth"],
-                    })
+                    all_structures.append(
+                        {
+                            "components": var.component_paths,
+                            "dsl": var.dsl_notation or struct["dsl"],
+                            "description": desc,
+                            "tree": struct["tree"],  # approximate
+                            "depth": struct["depth"],
+                        }
+                    )
         except Exception as e:
             logger.debug(f"Structure variation failed: {e}")
 
@@ -307,17 +324,19 @@ def embed_patterns(
                         else None
                     )
 
-            patterns.append(SyntheticPattern(
-                pattern_id=f"synthetic_{i:04d}",
-                component_paths=struct["components"],
-                dsl=dsl,
-                description=desc,
-                comp_vectors=comp_np,
-                inp_vectors=inp_np,
-                rel_vector=rel_np,
-                content_text=content_text,
-                content_vector=content_np,
-            ))
+            patterns.append(
+                SyntheticPattern(
+                    pattern_id=f"synthetic_{i:04d}",
+                    component_paths=struct["components"],
+                    dsl=dsl,
+                    description=desc,
+                    comp_vectors=comp_np,
+                    inp_vectors=inp_np,
+                    rel_vector=rel_np,
+                    content_text=content_text,
+                    content_vector=content_np,
+                )
+            )
         except Exception as e:
             logger.warning(f"Embedding failed for pattern {i}: {e}")
 
@@ -349,7 +368,8 @@ def maxsim_score(query_multi: np.ndarray, doc_multi: np.ndarray) -> float:
 
 
 def maxsim_decomposed(
-    query_multi: np.ndarray, doc_multi: np.ndarray,
+    query_multi: np.ndarray,
+    doc_multi: np.ndarray,
     coverage_threshold: float = 0.4,
 ) -> tuple:
     """ColBERT MaxSim decomposed into (mean, max, std, coverage).
@@ -383,20 +403,45 @@ def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a.flatten(), b.flatten()) / (na * nb))
 
 
-def compute_features(query: SyntheticPattern, cand_comp, cand_inp, cand_rel) -> np.ndarray:
+def compute_features(
+    query: SyntheticPattern, cand_comp, cand_inp, cand_rel
+) -> np.ndarray:
     """Compute 9 similarity features (legacy — kept for backward compat)."""
     sim_c = maxsim_score(query.comp_vectors, cand_comp)
     sim_i = maxsim_score(query.inp_vectors, cand_inp)
     sim_r = cosine_sim(query.rel_vector, cand_rel)
 
-    q_c_norm = float(np.linalg.norm(query.comp_vectors)) if query.comp_vectors is not None else 0.0
-    q_i_norm = float(np.linalg.norm(query.inp_vectors)) if query.inp_vectors is not None else 0.0
-    q_r_norm = float(np.linalg.norm(query.rel_vector)) if query.rel_vector is not None else 0.0
+    q_c_norm = (
+        float(np.linalg.norm(query.comp_vectors))
+        if query.comp_vectors is not None
+        else 0.0
+    )
+    q_i_norm = (
+        float(np.linalg.norm(query.inp_vectors))
+        if query.inp_vectors is not None
+        else 0.0
+    )
+    q_r_norm = (
+        float(np.linalg.norm(query.rel_vector)) if query.rel_vector is not None else 0.0
+    )
     c_c_norm = float(np.linalg.norm(cand_comp)) if cand_comp is not None else 0.0
     c_i_norm = float(np.linalg.norm(cand_inp)) if cand_inp is not None else 0.0
     c_r_norm = float(np.linalg.norm(cand_rel)) if cand_rel is not None else 0.0
 
-    return np.array([sim_c, sim_i, sim_r, q_c_norm, q_i_norm, q_r_norm, c_c_norm, c_i_norm, c_r_norm], dtype=np.float32)
+    return np.array(
+        [
+            sim_c,
+            sim_i,
+            sim_r,
+            q_c_norm,
+            q_i_norm,
+            q_r_norm,
+            c_c_norm,
+            c_i_norm,
+            c_r_norm,
+        ],
+        dtype=np.float32,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -418,13 +463,22 @@ def _load_dag():
 
     try:
         from gchat.card_framework_wrapper import get_card_framework_wrapper
+
         wrapper = get_card_framework_wrapper()
 
         # Build parent/child maps from the wrapper's graph
         # Use _name_to_idx keys (component_names may be empty for loaded collections)
-        all_names = list(wrapper._name_to_idx.keys()) if hasattr(wrapper, '_name_to_idx') else []
+        all_names = (
+            list(wrapper._name_to_idx.keys())
+            if hasattr(wrapper, "_name_to_idx")
+            else []
+        )
         if not all_names:
-            all_names = list(wrapper.component_names) if hasattr(wrapper, 'component_names') else []
+            all_names = (
+                list(wrapper.component_names)
+                if hasattr(wrapper, "component_names")
+                else []
+            )
         logger.info(f"Building DAG from {len(all_names)} components")
         for comp_name in all_names:
             _dag_children[comp_name] = set(wrapper.get_children(comp_name))
@@ -447,7 +501,9 @@ def _load_dag():
         _dag_depth = visited
 
         _dag_loaded = True
-        logger.info(f"Loaded DAG: {len(_dag_children)} components, max depth={max(_dag_depth.values()) if _dag_depth else 0}")
+        logger.info(
+            f"Loaded DAG: {len(_dag_children)} components, max depth={max(_dag_depth.values()) if _dag_depth else 0}"
+        )
     except Exception as e:
         logger.warning(f"Could not load DAG: {e}")
         _dag_loaded = True  # prevent retries
@@ -466,15 +522,22 @@ def _get_ancestors(name: str) -> set:
 
 
 FEATURE_NAMES_V2 = [
-    "sim_components", "sim_inputs", "sim_relationships",
-    "is_parent", "is_child", "is_sibling",
-    "depth_ratio", "n_shared_ancestors",
+    "sim_components",
+    "sim_inputs",
+    "sim_relationships",
+    "is_parent",
+    "is_child",
+    "is_sibling",
+    "depth_ratio",
+    "n_shared_ancestors",
 ]
 
 
 def compute_features_v2(
     query: SyntheticPattern,
-    cand_comp, cand_inp, cand_rel,
+    cand_comp,
+    cand_inp,
+    cand_rel,
     cand_name: str,
 ) -> np.ndarray:
     """Compute V2 features: 3 similarities + 5 structural (no norms).
@@ -520,14 +583,26 @@ def compute_features_v2(
     for qc in query_components:
         query_ancestors.update(_get_ancestors(qc))
     n_shared = len(cand_ancestors & query_ancestors)
-    total_ancestors = len(cand_ancestors | query_ancestors) if (cand_ancestors or query_ancestors) else 1
+    total_ancestors = (
+        len(cand_ancestors | query_ancestors)
+        if (cand_ancestors or query_ancestors)
+        else 1
+    )
     n_shared_ratio = n_shared / total_ancestors
 
-    return np.array([
-        sim_c, sim_i, sim_r,
-        parent_overlap, child_overlap, sibling_overlap,
-        depth_ratio, n_shared_ratio,
-    ], dtype=np.float32)
+    return np.array(
+        [
+            sim_c,
+            sim_i,
+            sim_r,
+            parent_overlap,
+            child_overlap,
+            sibling_overlap,
+            depth_ratio,
+            n_shared_ratio,
+        ],
+        dtype=np.float32,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -535,17 +610,28 @@ def compute_features_v2(
 # ---------------------------------------------------------------------------
 
 FEATURE_NAMES_V3 = [
-    "sim_c_mean", "sim_c_max", "sim_c_std", "sim_c_coverage",
-    "sim_i_mean", "sim_i_max", "sim_i_std", "sim_i_coverage",
+    "sim_c_mean",
+    "sim_c_max",
+    "sim_c_std",
+    "sim_c_coverage",
+    "sim_i_mean",
+    "sim_i_max",
+    "sim_i_std",
+    "sim_i_coverage",
     "sim_relationships",
-    "is_parent", "is_child", "is_sibling",
-    "depth_ratio", "n_shared_ancestors",
+    "is_parent",
+    "is_child",
+    "is_sibling",
+    "depth_ratio",
+    "n_shared_ancestors",
 ]
 
 
 def compute_features_v3(
     query: SyntheticPattern,
-    cand_comp, cand_inp, cand_rel,
+    cand_comp,
+    cand_inp,
+    cand_rel,
     cand_name: str,
 ) -> np.ndarray:
     """Compute V3 features: decomposed ColBERT MaxSim (4 stats each) + structural.
@@ -602,16 +688,32 @@ def compute_features_v3(
     for qc in query_components:
         query_ancestors.update(_get_ancestors(qc))
     n_shared = len(cand_ancestors & query_ancestors)
-    total_ancestors = len(cand_ancestors | query_ancestors) if (cand_ancestors or query_ancestors) else 1
+    total_ancestors = (
+        len(cand_ancestors | query_ancestors)
+        if (cand_ancestors or query_ancestors)
+        else 1
+    )
     n_shared_ratio = n_shared / total_ancestors
 
-    return np.array([
-        sim_c_mean, sim_c_max, sim_c_std, sim_c_cov,
-        sim_i_mean, sim_i_max, sim_i_std, sim_i_cov,
-        sim_r,
-        parent_overlap, child_overlap, sibling_overlap,
-        depth_ratio, n_shared_ratio,
-    ], dtype=np.float32)
+    return np.array(
+        [
+            sim_c_mean,
+            sim_c_max,
+            sim_c_std,
+            sim_c_cov,
+            sim_i_mean,
+            sim_i_max,
+            sim_i_std,
+            sim_i_cov,
+            sim_r,
+            parent_overlap,
+            child_overlap,
+            sibling_overlap,
+            depth_ratio,
+            n_shared_ratio,
+        ],
+        dtype=np.float32,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -646,11 +748,17 @@ def _init_domain_content(domain_id: str = "gchat") -> None:
     domain = _get_domain(domain_id)
     _active_domain_config = domain
     CONTENT_AFFINITY = dict(domain.content_affinity) if domain.content_affinity else {}
-    CONTENT_TEXT_TEMPLATES = dict(domain.content_templates) if domain.content_templates else {}
+    CONTENT_TEXT_TEMPLATES = (
+        dict(domain.content_templates) if domain.content_templates else {}
+    )
     if not CONTENT_AFFINITY:
-        logger.warning(f"Domain '{domain_id}' has no content_affinity — content features will be zero")
+        logger.warning(
+            f"Domain '{domain_id}' has no content_affinity — content features will be zero"
+        )
     if not CONTENT_TEXT_TEMPLATES:
-        logger.warning(f"Domain '{domain_id}' has no content_templates — synthetic content text will be empty")
+        logger.warning(
+            f"Domain '{domain_id}' has no content_templates — synthetic content text will be empty"
+        )
 
 
 # Initialize with gchat defaults for backward compatibility when imported directly
@@ -790,7 +898,11 @@ def compute_features_v5(
     v3_feats = compute_features_v3(query, cand_comp, cand_inp, cand_rel, cand_name)
 
     # sim_content: query content vs candidate content
-    sim_content = cosine_sim(query_content_vector, cand_content_vector) if cand_has_content else 0.0
+    sim_content = (
+        cosine_sim(query_content_vector, cand_content_vector)
+        if cand_has_content
+        else 0.0
+    )
 
     # content_density: fraction of content fields populated
     content_density = (
@@ -800,12 +912,20 @@ def compute_features_v5(
     )
 
     # content_form_alignment: query content vs candidate relationship vector
-    content_form_alignment = cosine_sim(query_content_vector, cand_rel) if query_content_vector is not None else 0.0
+    content_form_alignment = (
+        cosine_sim(query_content_vector, cand_rel)
+        if query_content_vector is not None
+        else 0.0
+    )
 
-    return np.concatenate([
-        v3_feats,
-        np.array([sim_content, content_density, content_form_alignment], dtype=np.float32),
-    ])
+    return np.concatenate(
+        [
+            v3_feats,
+            np.array(
+                [sim_content, content_density, content_form_alignment], dtype=np.float32
+            ),
+        ]
+    )
 
 
 def extract_class_points(client, collection: str, limit: int = 500):
@@ -815,10 +935,15 @@ def extract_class_points(client, collection: str, limit: int = 500):
 
     while True:
         from qdrant_client import models
+
         batch, next_offset = client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(
-                must=[models.FieldCondition(key="type", match=models.MatchValue(value="class"))]
+                must=[
+                    models.FieldCondition(
+                        key="type", match=models.MatchValue(value="class")
+                    )
+                ]
             ),
             limit=min(limit, 100),
             offset=offset,
@@ -837,34 +962,39 @@ def extract_class_points(client, collection: str, limit: int = 500):
             comp_vec = np.array(comp_raw, dtype=np.float32) if comp_raw else None
             inp_vec = np.array(inp_raw, dtype=np.float32) if inp_raw else None
             rel_vec = np.array(rel_raw, dtype=np.float32) if rel_raw else None
-            content_vec = np.array(content_raw, dtype=np.float32) if content_raw else None
+            content_vec = (
+                np.array(content_raw, dtype=np.float32) if content_raw else None
+            )
 
             if comp_vec is not None and comp_vec.ndim == 1:
                 comp_vec = comp_vec.reshape(1, -1)
             if inp_vec is not None and inp_vec.ndim == 1:
                 inp_vec = inp_vec.reshape(1, -1)
 
-            has_content = (
-                payload.get("has_content_vector", False)
-                or (content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6)
+            has_content = payload.get("has_content_vector", False) or (
+                content_vec is not None and float(np.linalg.norm(content_vec)) > 1e-6
             )
 
-            points.append({
-                "name": payload.get("name", ""),
-                "full_path": payload.get("full_path", ""),
-                "comp_vectors": comp_vec,
-                "inp_vectors": inp_vec,
-                "rel_vector": rel_vec,
-                "content_vector": content_vec,
-                "has_content_vector": has_content,
-            })
+            points.append(
+                {
+                    "name": payload.get("name", ""),
+                    "full_path": payload.get("full_path", ""),
+                    "comp_vectors": comp_vec,
+                    "inp_vectors": inp_vec,
+                    "rel_vector": rel_vec,
+                    "content_vector": content_vec,
+                    "has_content_vector": has_content,
+                }
+            )
 
         if next_offset is None or len(points) >= limit:
             break
         offset = next_offset
 
     n_with_content = sum(1 for p in points if p["has_content_vector"])
-    logger.info(f"Extracted {len(points)} class points from Qdrant ({n_with_content} with content)")
+    logger.info(
+        f"Extracted {len(points)} class points from Qdrant ({n_with_content} with content)"
+    )
     return points
 
 
@@ -892,10 +1022,7 @@ def enrich_class_points_with_content(
     rng = random.Random(seed)
 
     # Find class points that need content vectors
-    needs_content = [
-        p for p in class_points
-        if not p.get("has_content_vector")
-    ]
+    needs_content = [p for p in class_points if not p.get("has_content_vector")]
 
     if not needs_content:
         logger.info("All class points already have content vectors")
@@ -931,6 +1058,7 @@ def enrich_class_points_with_content(
     # Embed all at once
     try:
         from config.embedding_service import EmbeddingService
+
         service = EmbeddingService()
         embeddings = service.embed_dense_sync(texts_to_embed)
     except Exception as e:
@@ -1001,7 +1129,9 @@ def build_synthetic_groups(
         n_neg_needed = top_k - len(selected_positives)
         hard_negatives = negatives[:n_neg_needed]
 
-        top_candidates = [c for c, _ in selected_positives] + [c for c, _ in hard_negatives]
+        top_candidates = [c for c, _ in selected_positives] + [
+            c for c, _ in hard_negatives
+        ]
 
         # Add random easy negatives from remaining
         used_names = {c["name"] for c in top_candidates}
@@ -1041,8 +1171,11 @@ def build_synthetic_groups(
                     cand_content_vec = cand.get("content_vector")
                     cand_has_content = cand.get("has_content_vector", False)
                     feats = compute_features_v5(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                         query_content_vector=query.content_vector,
                         cand_content_vector=cand_content_vec,
                         cand_has_content=cand_has_content,
@@ -1052,13 +1185,19 @@ def build_synthetic_groups(
                     )
                 elif feature_version == 3 or feature_version == 4:
                     feats = compute_features_v3(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                     )
                 else:
                     feats = compute_features_v2(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                     )
 
                 cand_data = {
@@ -1086,7 +1225,8 @@ def build_synthetic_groups(
                 "query_components": query.component_paths,
                 "n_candidates": len(candidates_data),
                 "n_positive": sum(
-                    1 for c in candidates_data
+                    1
+                    for c in candidates_data
                     if c.get("form_label", c.get("label", 0.0)) == 1.0
                 ),
                 "candidates": candidates_data,
@@ -1099,12 +1239,16 @@ def build_synthetic_groups(
             groups.append(group_data)
 
         if (i + 1) % 100 == 0:
-            logger.info(f"Built groups for {i + 1}/{len(patterns)} patterns ({len(groups)} groups)")
+            logger.info(
+                f"Built groups for {i + 1}/{len(patterns)} patterns ({len(groups)} groups)"
+            )
 
     logger.info(f"Built {len(groups)} synthetic groups")
     if groups:
         pos_rates = [g["n_positive"] / g["n_candidates"] for g in groups]
-        logger.info(f"  Positive rate: mean={np.mean(pos_rates):.3f}, median={np.median(pos_rates):.3f}")
+        logger.info(
+            f"  Positive rate: mean={np.mean(pos_rates):.3f}, median={np.median(pos_rates):.3f}"
+        )
 
     return groups
 
@@ -1174,6 +1318,7 @@ def generate_hard_negatives(
     # Need embedder for swapped content
     try:
         from config.embedding_service import EmbeddingService
+
         service = EmbeddingService()
     except Exception as e:
         logger.warning(f"Cannot create EmbeddingService for hard negatives: {e}")
@@ -1220,8 +1365,7 @@ def generate_hard_negatives(
         try:
             swap_vecs = service.embed_dense_sync([swap_content])
             swap_content_vec = (
-                np.array(swap_vecs, dtype=np.float32).flatten()
-                if swap_vecs else None
+                np.array(swap_vecs, dtype=np.float32).flatten() if swap_vecs else None
             )
         except Exception:
             continue
@@ -1264,8 +1408,10 @@ def generate_hard_negatives(
             # Recompute V5 features with swapped content
             feats = compute_features_v5(
                 swapped,
-                cp["comp_vectors"], cp["inp_vectors"],
-                cp["rel_vector"], cand_name,
+                cp["comp_vectors"],
+                cp["inp_vectors"],
+                cp["rel_vector"],
+                cand_name,
                 query_content_vector=swap_content_vec,
                 cand_content_vector=cp.get("content_vector"),
                 cand_has_content=cp.get("has_content_vector", False),
@@ -1290,30 +1436,30 @@ def generate_hard_negatives(
             n_content_pos = sum(
                 1 for c in candidates_data if c.get("content_label", 0.0) == 1.0
             )
-            hard_neg_groups.append({
-                "query_id": swapped.pattern_id,
-                "query_description": swapped.description,
-                "query_dsl": swapped.dsl,
-                "query_components": swapped.component_paths,
-                "content_text": swap_content,
-                "n_candidates": len(candidates_data),
-                "n_positive": sum(
-                    1 for c in candidates_data
-                    if c.get("form_label", 0.0) == 1.0
-                ),
-                "n_content_positive": n_content_pos,
-                "candidates": candidates_data,
-                "hard_negative": True,
-                "original_content_type": original_type,
-                "swapped_content_type": swap_type,
-            })
+            hard_neg_groups.append(
+                {
+                    "query_id": swapped.pattern_id,
+                    "query_description": swapped.description,
+                    "query_dsl": swapped.dsl,
+                    "query_components": swapped.component_paths,
+                    "content_text": swap_content,
+                    "n_candidates": len(candidates_data),
+                    "n_positive": sum(
+                        1 for c in candidates_data if c.get("form_label", 0.0) == 1.0
+                    ),
+                    "n_content_positive": n_content_pos,
+                    "candidates": candidates_data,
+                    "hard_negative": True,
+                    "original_content_type": original_type,
+                    "swapped_content_type": swap_type,
+                }
+            )
 
-    logger.info(
-        f"Generated {len(hard_neg_groups)} hard negative groups"
-    )
+    logger.info(f"Generated {len(hard_neg_groups)} hard negative groups")
     if hard_neg_groups:
         # Log swap statistics
         from collections import Counter
+
         swaps = Counter(
             f"{g['original_content_type']}->{g['swapped_content_type']}"
             for g in hard_neg_groups
@@ -1330,10 +1476,21 @@ def generate_hard_negatives(
 
 # Email component hierarchy (from gmail/email_wrapper_setup.py)
 EMAIL_CONTAINERS = {
-    "EmailSpec": ["HeroBlock", "TextBlock", "ButtonBlock", "ImageBlock",
-                  "ColumnsBlock", "SpacerBlock", "DividerBlock", "FooterBlock",
-                  "HeaderBlock", "SocialBlock", "TableBlock", "AccordionBlock",
-                  "CarouselBlock"],
+    "EmailSpec": [
+        "HeroBlock",
+        "TextBlock",
+        "ButtonBlock",
+        "ImageBlock",
+        "ColumnsBlock",
+        "SpacerBlock",
+        "DividerBlock",
+        "FooterBlock",
+        "HeaderBlock",
+        "SocialBlock",
+        "TableBlock",
+        "AccordionBlock",
+        "CarouselBlock",
+    ],
     "ColumnsBlock": ["Column"],
     "Column": ["TextBlock", "ButtonBlock", "ImageBlock", "SpacerBlock", "DividerBlock"],
 }
@@ -1437,13 +1594,15 @@ def generate_email_structures(count: int, seed: int = 42) -> List[dict]:
         desc = describe_email_components(components)
         dsl = f"ε[{', '.join(block_parts)}]"
 
-        structures.append({
-            "components": components,
-            "dsl": dsl,
-            "description": desc,
-            "tree": {"root": "EmailSpec", "children": block_parts},
-            "depth": 3 if "ColumnsBlock" in components else 2,
-        })
+        structures.append(
+            {
+                "components": components,
+                "dsl": dsl,
+                "description": desc,
+                "tree": {"root": "EmailSpec", "children": block_parts},
+                "depth": 3 if "ColumnsBlock" in components else 2,
+            }
+        )
 
         if (i + 1) % 100 == 0:
             logger.info(f"Generated {i + 1}/{count} email structures")
@@ -1460,20 +1619,36 @@ def _load_email_dag():
 
     try:
         from gmail.email_wrapper_setup import get_email_wrapper
+
         wrapper = get_email_wrapper()
 
-        all_names = list(wrapper._name_to_idx.keys()) if hasattr(wrapper, '_name_to_idx') else []
+        all_names = (
+            list(wrapper._name_to_idx.keys())
+            if hasattr(wrapper, "_name_to_idx")
+            else []
+        )
         if not all_names:
-            all_names = list(wrapper.component_names) if hasattr(wrapper, 'component_names') else []
+            all_names = (
+                list(wrapper.component_names)
+                if hasattr(wrapper, "component_names")
+                else []
+            )
 
         # If wrapper doesn't have components indexed yet, use hardcoded hierarchy
         if not all_names:
-            logger.info("Email wrapper has no indexed components, using hardcoded hierarchy")
+            logger.info(
+                "Email wrapper has no indexed components, using hardcoded hierarchy"
+            )
             for parent, children in EMAIL_CONTAINERS.items():
                 _dag_children[parent] = set(children)
                 for child in children:
                     _dag_parents.setdefault(child, set()).add(parent)
-            all_names = list(set(list(_dag_children.keys()) + [c for cs in _dag_children.values() for c in cs]))
+            all_names = list(
+                set(
+                    list(_dag_children.keys())
+                    + [c for cs in _dag_children.values() for c in cs]
+                )
+            )
         else:
             logger.info(f"Building email DAG from {len(all_names)} components")
             for comp_name in all_names:
@@ -1495,7 +1670,9 @@ def _load_email_dag():
                 queue.append((child, depth + 1))
         _dag_depth = visited
         _dag_loaded = True
-        logger.info(f"Loaded email DAG: {len(_dag_children)} components, max depth={max(_dag_depth.values()) if _dag_depth else 0}")
+        logger.info(
+            f"Loaded email DAG: {len(_dag_children)} components, max depth={max(_dag_depth.values()) if _dag_depth else 0}"
+        )
     except Exception as e:
         logger.warning(f"Could not load email DAG: {e}")
         _dag_loaded = True
@@ -1596,7 +1773,7 @@ def extract_real_user_groups(
 
         # Extract from input mapping
         input_map = resp_data.get("inputMapping") or {}
-        for mapping in (input_map.get("mappings") or []):
+        for mapping in input_map.get("mappings") or []:
             c = mapping.get("component")
             if c:
                 components.add(c)
@@ -1607,10 +1784,13 @@ def extract_real_user_groups(
                 desc_to_components[key] = set()
             desc_to_components[key].update(components)
 
-    logger.info(f"Extracted {len(desc_to_components)} unique description→component mappings")
+    logger.info(
+        f"Extracted {len(desc_to_components)} unique description→component mappings"
+    )
 
     # Build query groups from real data
     from config.embedding_service import EmbeddingService
+
     service = EmbeddingService()
 
     groups = []
@@ -1669,25 +1849,36 @@ def extract_real_user_groups(
                 if label > 0.5:
                     has_positive = True
                 feats = feat_fn(
-                    query, cand["comp_vectors"], cand["inp_vectors"],
-                    cand["rel_vector"], cand["name"],
+                    query,
+                    cand["comp_vectors"],
+                    cand["inp_vectors"],
+                    cand["rel_vector"],
+                    cand["name"],
                 )
-                cand_data = {"name": cand["name"], "full_path": cand["full_path"], "label": label}
+                cand_data = {
+                    "name": cand["name"],
+                    "full_path": cand["full_path"],
+                    "label": label,
+                }
                 for fname, fval in zip(feat_names, feats):
                     cand_data[fname] = round(float(fval), 4)
                 candidates_data.append(cand_data)
 
             if has_positive and len(candidates_data) >= 2:
-                groups.append({
-                    "query_id": query.pattern_id,
-                    "query_description": desc[:200],
-                    "query_dsl": "",
-                    "query_components": list(components),
-                    "n_candidates": len(candidates_data),
-                    "n_positive": sum(1 for c in candidates_data if c["label"] == 1.0),
-                    "candidates": candidates_data,
-                    "source": "real_user",
-                })
+                groups.append(
+                    {
+                        "query_id": query.pattern_id,
+                        "query_description": desc[:200],
+                        "query_dsl": "",
+                        "query_components": list(components),
+                        "n_candidates": len(candidates_data),
+                        "n_positive": sum(
+                            1 for c in candidates_data if c["label"] == 1.0
+                        ),
+                        "candidates": candidates_data,
+                        "source": "real_user",
+                    }
+                )
 
         except Exception as e:
             logger.debug(f"Failed to build group for real desc: {e}")
@@ -1733,7 +1924,8 @@ def extract_instance_pattern_groups(
             scroll_filter=qmodels.Filter(
                 must=[
                     qmodels.FieldCondition(
-                        key="type", match=qmodels.MatchValue(value="instance_pattern"),
+                        key="type",
+                        match=qmodels.MatchValue(value="instance_pattern"),
                     ),
                 ]
             ),
@@ -1749,8 +1941,7 @@ def extract_instance_pattern_groups(
 
     # Filter to content patterns (not feedback_ui) client-side
     content_points = [
-        p for p in all_points
-        if p.payload.get("pattern_type") == "content"
+        p for p in all_points if p.payload.get("pattern_type") == "content"
     ]
     logger.info(
         f"Found {len(all_points)} instance_patterns in {collection}, "
@@ -1762,6 +1953,7 @@ def extract_instance_pattern_groups(
 
     # Import embedding service for patterns without vectors
     from config.embedding_service import EmbeddingService
+
     service = EmbeddingService()
 
     # Import content text extractor
@@ -1781,9 +1973,7 @@ def extract_instance_pattern_groups(
             continue
 
         # Normalize to short names (strip module prefix)
-        component_names = list(set(
-            p.split(".")[-1] for p in parent_paths
-        ))
+        component_names = list(set(p.split(".")[-1] for p in parent_paths))
 
         desc = payload.get("card_description", "")
         if not desc or len(desc) < 3:
@@ -1793,9 +1983,7 @@ def extract_instance_pattern_groups(
         instance_params = payload.get("instance_params", {})
 
         # Build content text from instance params
-        content_text = extract_content_text_from_params(
-            instance_params, desc
-        )
+        content_text = extract_content_text_from_params(instance_params, desc)
         # Fallback: use title + description if no structured content
         if not content_text:
             parts = []
@@ -1811,7 +1999,9 @@ def extract_instance_pattern_groups(
             # Use existing vectors from Qdrant if available
             comp_raw = vectors.get("components") if isinstance(vectors, dict) else None
             inp_raw = vectors.get("inputs") if isinstance(vectors, dict) else None
-            rel_raw = vectors.get("relationships") if isinstance(vectors, dict) else None
+            rel_raw = (
+                vectors.get("relationships") if isinstance(vectors, dict) else None
+            )
 
             if comp_raw:
                 comp_np = np.array(comp_raw, dtype=np.float32)
@@ -1844,7 +2034,9 @@ def extract_instance_pattern_groups(
             content_np = None
             if content_text:
                 vecs = service.embed_dense_sync([content_text])
-                content_np = np.array(vecs, dtype=np.float32).flatten() if vecs else None
+                content_np = (
+                    np.array(vecs, dtype=np.float32).flatten() if vecs else None
+                )
 
             if comp_np is None:
                 skipped += 1
@@ -1895,17 +2087,18 @@ def extract_instance_pattern_groups(
 
                 if feature_version == 5:
                     feats = compute_features_v5(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                         query_content_vector=query.content_vector,
                         cand_content_vector=cand.get("content_vector"),
                         cand_has_content=cand.get("has_content_vector", False),
                         cand_n_content_fields=0,
                         cand_total_content_fields=5,
                     )
-                    content_label = compute_content_label(
-                        content_text, cand["name"]
-                    )
+                    content_label = compute_content_label(content_text, cand["name"])
                     cand_data = {
                         "name": cand["name"],
                         "full_path": cand["full_path"],
@@ -1914,8 +2107,11 @@ def extract_instance_pattern_groups(
                     }
                 elif feature_version in (3, 4):
                     feats = compute_features_v3(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                     )
                     cand_data = {
                         "name": cand["name"],
@@ -1924,8 +2120,11 @@ def extract_instance_pattern_groups(
                     }
                 else:
                     feats = compute_features_v2(
-                        query, cand["comp_vectors"], cand["inp_vectors"],
-                        cand["rel_vector"], cand["name"],
+                        query,
+                        cand["comp_vectors"],
+                        cand["inp_vectors"],
+                        cand["rel_vector"],
+                        cand["name"],
                     )
                     cand_data = {
                         "name": cand["name"],
@@ -1945,7 +2144,8 @@ def extract_instance_pattern_groups(
                     "query_components": component_names,
                     "n_candidates": len(candidates_data),
                     "n_positive": sum(
-                        1 for c in candidates_data
+                        1
+                        for c in candidates_data
                         if c.get("form_label", c.get("label", 0.0)) == 1.0
                     ),
                     "candidates": candidates_data,
@@ -1955,8 +2155,7 @@ def extract_instance_pattern_groups(
                 if feature_version == 5:
                     group_data["content_text"] = content_text
                     group_data["n_content_positive"] = sum(
-                        1 for c in candidates_data
-                        if c.get("content_label", 0.0) == 1.0
+                        1 for c in candidates_data if c.get("content_label", 0.0) == 1.0
                     )
                 groups.append(group_data)
 
@@ -1986,33 +2185,81 @@ def extract_instance_pattern_groups(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate synthetic training data for learned scorer")
-    parser.add_argument("--count", type=int, default=500, help="Number of random structures to generate")
-    parser.add_argument("--variations", type=int, default=3, help="Structural variations per pattern")
-    parser.add_argument("--top-k", type=int, default=20, help="Top-K candidates per query")
-    parser.add_argument("--n-random", type=int, default=5, help="Random negatives per query")
-    parser.add_argument("--collection", default=None, help="Qdrant collection for class points (auto-detected per domain)")
-    parser.add_argument("--output", default=None, help="Output path (auto-detected per domain/version)")
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic training data for learned scorer"
+    )
+    parser.add_argument(
+        "--count", type=int, default=500, help="Number of random structures to generate"
+    )
+    parser.add_argument(
+        "--variations", type=int, default=3, help="Structural variations per pattern"
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=20, help="Top-K candidates per query"
+    )
+    parser.add_argument(
+        "--n-random", type=int, default=5, help="Random negatives per query"
+    )
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help="Qdrant collection for class points (auto-detected per domain)",
+    )
+    parser.add_argument(
+        "--output", default=None, help="Output path (auto-detected per domain/version)"
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--skip-variations", action="store_true", help="Skip variation generation")
-    parser.add_argument("--skip-embed", action="store_true", help="Skip embedding (use pre-computed)")
-    parser.add_argument("--feature-version", type=int, default=3, choices=[2, 3, 5],
-                        help="Feature version: 2=V2 (8D), 3=V3 (14D decomposed), 5=V5 (17D dual-head)")
-    parser.add_argument("--domain", default="gchat",
-                        help="Domain ID from registry (e.g., 'gchat', 'email'). "
-                             "Also accepts legacy 'card' as alias for 'gchat'.")
-    parser.add_argument("--include-real", action="store_true",
-                        help="Also extract real user training data from mcp_tool_responses")
-    parser.add_argument("--include-instance-patterns", action="store_true",
-                        help="Extract real instance patterns from Qdrant (v7/v8)")
-    parser.add_argument("--instance-pattern-collection", default=None,
-                        help="Collection for instance patterns (default: mcp_gchat_cards_v7 for card)")
-    parser.add_argument("--skip-hard-negatives", action="store_true",
-                        help="Skip content-swapped hard negative generation")
-    parser.add_argument("--hard-negative-fraction", type=float, default=0.5,
-                        help="Fraction of groups to generate hard negatives for (default: 0.5)")
-    parser.add_argument("--max-positives", type=int, default=3,
-                        help="Max true positives per group (default: 3). Controls positive rate.")
+    parser.add_argument(
+        "--skip-variations", action="store_true", help="Skip variation generation"
+    )
+    parser.add_argument(
+        "--skip-embed", action="store_true", help="Skip embedding (use pre-computed)"
+    )
+    parser.add_argument(
+        "--feature-version",
+        type=int,
+        default=3,
+        choices=[2, 3, 5],
+        help="Feature version: 2=V2 (8D), 3=V3 (14D decomposed), 5=V5 (17D dual-head)",
+    )
+    parser.add_argument(
+        "--domain",
+        default="gchat",
+        help="Domain ID from registry (e.g., 'gchat', 'email'). "
+        "Also accepts legacy 'card' as alias for 'gchat'.",
+    )
+    parser.add_argument(
+        "--include-real",
+        action="store_true",
+        help="Also extract real user training data from mcp_tool_responses",
+    )
+    parser.add_argument(
+        "--include-instance-patterns",
+        action="store_true",
+        help="Extract real instance patterns from Qdrant (v7/v8)",
+    )
+    parser.add_argument(
+        "--instance-pattern-collection",
+        default=None,
+        help="Collection for instance patterns (default: mcp_gchat_cards_v7 for card)",
+    )
+    parser.add_argument(
+        "--skip-hard-negatives",
+        action="store_true",
+        help="Skip content-swapped hard negative generation",
+    )
+    parser.add_argument(
+        "--hard-negative-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of groups to generate hard negatives for (default: 0.5)",
+    )
+    parser.add_argument(
+        "--max-positives",
+        type=int,
+        default=3,
+        help="Max true positives per group (default: 3). Controls positive rate.",
+    )
     args = parser.parse_args()
 
     # Normalize legacy domain alias
@@ -2030,13 +2277,17 @@ def main():
 
     # Auto-detect collection and output based on domain
     if args.collection is None:
-        args.collection = "email_blocks" if args.domain == "email" else "mcp_gchat_cards_v8"
+        args.collection = (
+            "email_blocks" if args.domain == "email" else "mcp_gchat_cards_v8"
+        )
     if args.output is None:
         fv = args.feature_version
         domain = args.domain
         suffix = f"_v{fv}" if fv >= 2 else ""
         prefix = f"email_" if domain == "email" else "mw_"
-        args.output = str(Path(__file__).parent / f"{prefix}synthetic_groups{suffix}.json")
+        args.output = str(
+            Path(__file__).parent / f"{prefix}synthetic_groups{suffix}.json"
+        )
 
     # For email domain, load the email DAG instead of card DAG
     if args.domain == "email":
@@ -2058,15 +2309,23 @@ def main():
 
     # Step 2: Generate variations (cards only — email structures are simple enough)
     if not args.skip_variations and args.domain == "card":
-        logger.info(f"\n=== Step 2: Generating {args.variations} variations per structure ===")
+        logger.info(
+            f"\n=== Step 2: Generating {args.variations} variations per structure ==="
+        )
         try:
-            structures = generate_variations(structures, n_struct_variations=args.variations)
+            structures = generate_variations(
+                structures, n_struct_variations=args.variations
+            )
         except Exception as e:
-            logger.warning(f"Variation generation failed (continuing with originals): {e}")
+            logger.warning(
+                f"Variation generation failed (continuing with originals): {e}"
+            )
 
     # Step 3: Embed all patterns
     generate_content = args.feature_version >= 5
-    logger.info(f"\n=== Step 3: Embedding {len(structures)} patterns (content={generate_content}) ===")
+    logger.info(
+        f"\n=== Step 3: Embedding {len(structures)} patterns (content={generate_content}) ==="
+    )
     patterns = embed_patterns(structures, generate_content=generate_content)
 
     if not patterns:
@@ -2074,8 +2333,11 @@ def main():
         return
 
     # Step 4: Extract class points from Qdrant
-    logger.info(f"\n=== Step 4: Extracting class points from Qdrant ({args.collection}) ===")
+    logger.info(
+        f"\n=== Step 4: Extracting class points from Qdrant ({args.collection}) ==="
+    )
     from research.trm.h2.mw_extract import connect_qdrant
+
     client = connect_qdrant()
     class_points = extract_class_points(client, args.collection)
 
@@ -2092,21 +2354,31 @@ def main():
         enrich_class_points_with_content(class_points, seed=args.seed)
 
     # Step 5: Build query groups with ground-truth labels
-    logger.info(f"\n=== Step 5: Building query groups (domain={args.domain}, feature_version={fv}) ===")
+    logger.info(
+        f"\n=== Step 5: Building query groups (domain={args.domain}, feature_version={fv}) ==="
+    )
     groups = build_synthetic_groups(
-        patterns, class_points, args.top_k, args.n_random,
-        feature_version=fv, max_positives=args.max_positives,
+        patterns,
+        class_points,
+        args.top_k,
+        args.n_random,
+        feature_version=fv,
+        max_positives=args.max_positives,
     )
 
     # Step 5b: Extract real user training data if requested
     if args.include_real and args.domain == "card":
         logger.info(f"\n=== Step 5b: Extracting real user training data ===")
         real_groups = extract_real_user_groups(
-            client, collection="mcp_tool_responses",
-            class_points=class_points, feature_version=fv,
+            client,
+            collection="mcp_tool_responses",
+            class_points=class_points,
+            feature_version=fv,
         )
         if real_groups:
-            logger.info(f"Adding {len(real_groups)} real user groups to {len(groups)} synthetic groups")
+            logger.info(
+                f"Adding {len(real_groups)} real user groups to {len(groups)} synthetic groups"
+            )
             groups.extend(real_groups)
 
     # Step 5c: Extract instance pattern groups if requested
@@ -2132,9 +2404,7 @@ def main():
 
     # Step 5d: Generate content-swapped hard negatives (V5 only)
     if fv >= 5 and not args.skip_hard_negatives:
-        logger.info(
-            f"\n=== Step 5d: Generating content-swapped hard negatives ==="
-        )
+        logger.info(f"\n=== Step 5d: Generating content-swapped hard negatives ===")
         hard_neg_groups = generate_hard_negatives(
             groups=groups,
             class_points=class_points,
@@ -2162,9 +2432,9 @@ def main():
     total_candidates = sum(g["n_candidates"] for g in groups)
     total_positive = sum(g["n_positive"] for g in groups)
     unique_queries = len(set(g["query_dsl"] for g in groups))
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info(f"SYNTHETIC DATA SUMMARY")
-    logger.info(f"{'='*60}")
+    logger.info(f"{'=' * 60}")
     logger.info(f"Feature version:      V{fv}")
     logger.info(f"Structures generated: {len(structures)}")
     logger.info(f"Patterns embedded:    {len(patterns)}")
@@ -2172,16 +2442,16 @@ def main():
     logger.info(f"Unique DSL patterns:  {unique_queries}")
     logger.info(f"Total candidates:     {total_candidates}")
     logger.info(f"Total form positives: {total_positive}")
-    logger.info(f"Form positive rate:   {total_positive/total_candidates:.1%}")
+    logger.info(f"Form positive rate:   {total_positive / total_candidates:.1%}")
     if fv >= 5:
         total_content_pos = sum(g.get("n_content_positive", 0) for g in groups)
         n_with_content = sum(1 for g in groups if g.get("content_text"))
         logger.info(f"Content positives:    {total_content_pos}")
-        logger.info(f"Content pos rate:     {total_content_pos/total_candidates:.1%}")
+        logger.info(f"Content pos rate:     {total_content_pos / total_candidates:.1%}")
         logger.info(f"Queries with content: {n_with_content}/{len(groups)}")
         n_hard = sum(1 for g in groups if g.get("hard_negative"))
         if n_hard:
-            logger.info(f"Hard negatives:       {n_hard} ({n_hard/len(groups):.0%})")
+            logger.info(f"Hard negatives:       {n_hard} ({n_hard / len(groups):.0%})")
     logger.info(f"Output:               {output_path}")
 
 

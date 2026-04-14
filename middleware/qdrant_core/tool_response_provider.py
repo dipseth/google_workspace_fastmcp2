@@ -15,6 +15,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class ToolResponseProvider:
     """RIC text provider for tool response components.
 
@@ -94,6 +95,7 @@ class ToolResponseProvider:
         if session_id:
             parts.append(f"Session: {session_id}.")
         return " ".join(parts)
+
 
 __all__ = [
     "ToolResponseProvider",

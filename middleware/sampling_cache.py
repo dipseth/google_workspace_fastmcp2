@@ -16,6 +16,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class FastEmbedQdrantCache(QdrantSemanticCache):
     """Qdrant semantic cache using FastEmbed instead of litellm.embedding().
 
@@ -212,6 +213,7 @@ class FastEmbedQdrantCache(QdrantSemanticCache):
             )
             return self._get_cache_logic(cached_response=cached_value)
         return None
+
 
 def initialize_sampling_cache() -> bool:
     """Lazily initialize the FastEmbed Qdrant semantic cache for sampling.

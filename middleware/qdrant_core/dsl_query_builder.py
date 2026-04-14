@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+
 class QueryBuilder:
     """Builds qdrant_client.models objects from parsed DSL trees."""
 

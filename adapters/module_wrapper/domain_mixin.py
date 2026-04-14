@@ -23,6 +23,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 @dataclass
 class DomainConfig:
     """Declarative configuration for a ModuleWrapper domain.
@@ -55,6 +56,7 @@ class DomainConfig:
     def __post_init__(self):
         if not self.domain_label:
             self.domain_label = self.module_name
+
 
 class DomainMixin:
     """

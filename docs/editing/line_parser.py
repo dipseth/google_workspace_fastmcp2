@@ -75,9 +75,7 @@ def parse_document_lines(doc_data: Dict) -> List[DocumentLine]:
                     if (
                         line_text or i < len(text_lines) - 1
                     ):  # Include empty lines except trailing
-                        line_end = (
-                            current_pos + len(line_text) + 1
-                        )  # +1 for newline
+                        line_end = current_pos + len(line_text) + 1  # +1 for newline
 
                         lines.append(
                             DocumentLine(
@@ -90,15 +88,11 @@ def parse_document_lines(doc_data: Dict) -> List[DocumentLine]:
                         current_line_number += 1
                         current_pos = line_end
 
-    logger.info(
-        f"[parse_document_lines] Parsed {len(lines)} lines from document"
-    )
+    logger.info(f"[parse_document_lines] Parsed {len(lines)} lines from document")
     return lines
 
 
-def find_line_position(
-    lines: List[DocumentLine], target_line: int
-) -> Optional[int]:
+def find_line_position(lines: List[DocumentLine], target_line: int) -> Optional[int]:
     """
     Find the character index for a specific line number.
 
@@ -113,9 +107,7 @@ def find_line_position(
         if line.line_number == target_line:
             return line.start_index
 
-    logger.warning(
-        f"[find_line_position] Line {target_line} not found in document"
-    )
+    logger.warning(f"[find_line_position] Line {target_line} not found in document")
     return None
 
 

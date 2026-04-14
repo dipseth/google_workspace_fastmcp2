@@ -169,7 +169,11 @@ def build_payment_email(
                 f"&bull; <strong>Network:</strong> {network_name}<br/>"
                 f"&bull; <strong>Recipient:</strong> {recipient_wallet[:10]}...{recipient_wallet[-6:]}<br/>"
                 f"&bull; <strong>Protocol:</strong> x402 (EIP-3009, gasless)<br/>"
-                + ("&bull; <strong>Mode:</strong> <span style='color:#f59e0b;'>TESTNET</span><br/>" if testnet else "")
+                + (
+                    "&bull; <strong>Mode:</strong> <span style='color:#f59e0b;'>TESTNET</span><br/>"
+                    if testnet
+                    else ""
+                )
             ),
             padding="4px 24px 16px 24px",
             font_size="13px",
@@ -182,9 +186,7 @@ def build_payment_email(
             padding="16px 24px",
         ),
         TextBlock(
-            text=(
-                "<strong>Or scan with your mobile wallet:</strong>"
-            ),
+            text=("<strong>Or scan with your mobile wallet:</strong>"),
             padding="16px 24px 4px 24px",
             color="#888888",
             font_size="13px",
@@ -315,9 +317,7 @@ async def send_payment_email(
         message["subject"] = email_data["subject"]
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
-        service.users().messages().send(
-            userId="me", body={"raw": raw}
-        ).execute()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
 
         logger.info(
             "Payment email sent to %s for tool %s ($%s USDC)",

@@ -72,9 +72,7 @@ class TestGitHubStarCheck:
         """Invalid token should return False (401 from GitHub)."""
         from auth.alpha_gating import check_github_star
 
-        result = await check_github_star(
-            "invalid-token-xxx", "octocat/Hello-World"
-        )
+        result = await check_github_star("invalid-token-xxx", "octocat/Hello-World")
         assert result is False
 
 

@@ -70,13 +70,14 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
 
     # Priority 3-4: Default file paths — prefer UnifiedTRN, fall back to DualHead
     from pathlib import Path
+
     base_dirs = [
         Path(__file__).parent.parent.parent.parent,
         Path.cwd(),
     ]
     checkpoint_names = [
         "best_model_unified.pt",  # UnifiedTRN (preferred)
-        "best_model_mw.pt",       # DualHeadScorerMW (fallback)
+        "best_model_mw.pt",  # DualHeadScorerMW (fallback)
     ]
     for name in checkpoint_names:
         for base in base_dirs:
@@ -106,37 +107,45 @@ def _load_learned_model(cls, domain: str | None = None):
         import torch
         import torch.nn as nn
     except ImportError:
-        logger.warning(
-            "torch not installed -- learned scorer unavailable"
-        )
+        logger.warning("torch not installed -- learned scorer unavailable")
         return None
 
     class _ScorerMLP(nn.Module):
         """Single-head MLP (SimilarityScorerMW)."""
+
         def __init__(self, input_dim=9, hidden_dim=32, dropout=0.15):
             super().__init__()
             self.mlp = nn.Sequential(
                 nn.Linear(input_dim, hidden_dim),
-                nn.SiLU(), nn.Dropout(dropout),
+                nn.SiLU(),
+                nn.Dropout(dropout),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.SiLU(), nn.Dropout(dropout),
+                nn.SiLU(),
+                nn.Dropout(dropout),
                 nn.Linear(hidden_dim, 1),
             )
+
         def forward(self, x):
             return self.mlp(x)
 
     class _DualHeadMLP(nn.Module):
         """Dual-head MLP (DualHeadScorerMW)."""
+
         def __init__(
-            self, input_dim=17, hidden_dim=48,
-            head_dim=24, dropout=0.15,
+            self,
+            input_dim=17,
+            hidden_dim=48,
+            head_dim=24,
+            dropout=0.15,
         ):
             super().__init__()
             self.backbone = nn.Sequential(
                 nn.Linear(input_dim, hidden_dim),
-                nn.SiLU(), nn.Dropout(dropout),
+                nn.SiLU(),
+                nn.Dropout(dropout),
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.SiLU(), nn.Dropout(dropout),
+                nn.SiLU(),
+                nn.Dropout(dropout),
             )
             self.form_head = nn.Sequential(
                 nn.Linear(hidden_dim, head_dim),
@@ -148,12 +157,14 @@ def _load_learned_model(cls, domain: str | None = None):
                 nn.SiLU(),
                 nn.Linear(head_dim, 1),
             )
+
         def forward(self, x):
             shared = self.backbone(x)
             return self.form_head(shared), self.content_head(shared)
 
     # Resolve checkpoint path (supports registry, env var, or default)
     import os
+
     checkpoint_path = cls._resolve_checkpoint_path(domain=domain)
 
     if not checkpoint_path:
@@ -164,9 +175,7 @@ def _load_learned_model(cls, domain: str | None = None):
         return None
 
     try:
-        ckpt = torch.load(
-            checkpoint_path, map_location="cpu", weights_only=False
-        )
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         model_type = ckpt.get("model_type", "similarity_mw")
         cls._learned_feature_version = ckpt.get(
             "feature_version", 5 if model_type == "unified" else 1
@@ -230,8 +239,14 @@ def _ensure_learned_dag(self):
     try:
         # Use self (the wrapper instance) directly -- it has the graph
         # Force graph build if needed
-        graph = self.get_relationship_graph() if hasattr(self, 'get_relationship_graph') else None
-        all_names = list(self._name_to_idx.keys()) if hasattr(self, '_name_to_idx') else []
+        graph = (
+            self.get_relationship_graph()
+            if hasattr(self, "get_relationship_graph")
+            else None
+        )
+        all_names = (
+            list(self._name_to_idx.keys()) if hasattr(self, "_name_to_idx") else []
+        )
 
         if not all_names:
             # No graph data available -- structural features will be zero.
@@ -249,7 +264,9 @@ def _ensure_learned_dag(self):
         # BFS depth
         roots = [n for n in all_names if not cls._learned_dag_parents.get(n)]
         if not roots:
-            roots = [n for n in all_names if len(cls._learned_dag_parents.get(n, set())) <= 1]
+            roots = [
+                n for n in all_names if len(cls._learned_dag_parents.get(n, set())) <= 1
+            ]
         visited = {}
         queue = [(r, 0) for r in roots]
         while queue:
@@ -261,7 +278,9 @@ def _ensure_learned_dag(self):
                 queue.append((child, depth + 1))
         cls._learned_dag_depth = visited
         cls._learned_dag_loaded = True
-        logger.info(f"Loaded DAG for learned scorer: {len(all_names)} components, max_depth={max(visited.values()) if visited else 0}")
+        logger.info(
+            f"Loaded DAG for learned scorer: {len(all_names)} components, max_depth={max(visited.values()) if visited else 0}"
+        )
     except Exception as e:
         logger.warning(f"Could not load DAG for structural features: {e}")
         cls._learned_dag_loaded = True  # prevent retries

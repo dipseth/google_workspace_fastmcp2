@@ -67,6 +67,7 @@ def _get_domain_config():
         return _cached_domain_config
     # Fallback: gchat default
     from research.trm.h2.domain_config import GCHAT_DOMAIN
+
     return GCHAT_DOMAIN
 
 
@@ -101,6 +102,7 @@ def _load_slot_model():
     unified_path = None
     try:
         from lifespans import get_model_artifact_paths
+
         artifact_paths = get_model_artifact_paths()
         if artifact_paths:
             for key in ("gchat", "default"):
@@ -138,10 +140,13 @@ def _load_slot_model():
 
             # Resolve domain config from checkpoint metadata
             from research.trm.h2.domain_config import resolve_domain
+
             _cached_domain_config = resolve_domain(checkpoint=checkpoint)
             domain_id = _cached_domain_config.domain_id
 
-            pool_acc = checkpoint.get("best_pool_acc", checkpoint.get("val_pool_acc", 0))
+            pool_acc = checkpoint.get(
+                "best_pool_acc", checkpoint.get("val_pool_acc", 0)
+            )
             content_acc = checkpoint.get("best_content_top1", 0)
             logger.info(
                 f"Loaded UnifiedTRN (epoch {checkpoint.get('epoch')}, "
@@ -182,11 +187,14 @@ def _load_slot_model():
 
         # Resolve domain config from checkpoint metadata
         from research.trm.h2.domain_config import resolve_domain
+
         _cached_domain_config = resolve_domain(checkpoint=checkpoint)
 
         val_acc = checkpoint.get("val_accuracy", 0)
-        logger.info(f"Loaded SlotAffinityNet (epoch {checkpoint.get('epoch')}, "
-                     f"domain={_cached_domain_config.domain_id}, val_acc={val_acc:.1%})")
+        logger.info(
+            f"Loaded SlotAffinityNet (epoch {checkpoint.get('epoch')}, "
+            f"domain={_cached_domain_config.domain_id}, val_acc={val_acc:.1%})"
+        )
         return model
     except Exception as e:
         logger.warning(f"Failed to load slot assigner: {e}")
@@ -215,6 +223,7 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
 
         # Fallback: load embedder directly
         from fastembed import TextEmbedding
+
         embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
         embeddings = list(embedder.embed(texts))
         return torch.tensor(np.array(embeddings), dtype=torch.float32)

@@ -25,17 +25,21 @@ from middleware.privacy.vault import PrivacyVault
 
 logger = setup_logger()
 
+
 def _is_privacy_field(key: str) -> bool:
     """Check if a dict key matches a known PII field name."""
     return key in PRIVACY_FIELD_PATTERNS
+
 
 def _contains_pii_value(value: str) -> bool:
     """Check if a string value matches any PII regex pattern."""
     return any(p.search(value) for p in PRIVACY_VALUE_PATTERNS)
 
+
 def _encrypt_value(value: str, vault: PrivacyVault, type_hint: str = "") -> str:
     """Encrypt a single string value, returning the masked token."""
     return vault.encrypt_and_store(value, type_hint=type_hint)
+
 
 def _encrypt_value_structured(
     value: str, vault: PrivacyVault, type_hint: str = ""
@@ -51,9 +55,11 @@ def _encrypt_value_structured(
         ENCRYPTED_CIPHER_KEY: ct_b64 or "",
     }
 
+
 # ------------------------------------------------------------------
 # Phase B: scan_and_encrypt (outbound — tool response → masked)
 # ------------------------------------------------------------------
+
 
 def scan_and_encrypt_text(text: str, vault: PrivacyVault) -> str:
     """Replace PII values in a plain-text string with masked tokens."""
@@ -64,6 +70,7 @@ def scan_and_encrypt_text(text: str, vault: PrivacyVault) -> str:
             masked = _encrypt_value(pii_value, vault, type_hint="email")
             result = result.replace(pii_value, masked)
     return result
+
 
 def scan_and_encrypt_dict(
     data: dict,
@@ -124,6 +131,7 @@ def scan_and_encrypt_dict(
             out[key] = value
     return out
 
+
 def scan_and_encrypt_list(
     data: list,
     vault: PrivacyVault,
@@ -171,6 +179,7 @@ def scan_and_encrypt_list(
         else:
             out.append(item)
     return out
+
 
 def scan_and_encrypt_content(
     content: list,
@@ -225,6 +234,7 @@ def scan_and_encrypt_content(
 
     return masked
 
+
 def scan_and_encrypt_structured(
     data: Any,
     vault: PrivacyVault,
@@ -254,9 +264,11 @@ def scan_and_encrypt_structured(
             return _encrypt_value_structured(data, vault)
     return data
 
+
 # ------------------------------------------------------------------
 # Phase A: resolve_tokens (inbound — [PRIVATE:token_N] → plaintext)
 # ------------------------------------------------------------------
+
 
 def resolve_tokens_in_value(value: Any, vault: PrivacyVault) -> Any:
     """Recursively resolve ``[PRIVATE:token_N]`` tokens back to plaintext."""
@@ -267,6 +279,7 @@ def resolve_tokens_in_value(value: Any, vault: PrivacyVault) -> Any:
     if isinstance(value, list):
         return [resolve_tokens_in_value(item, vault) for item in value]
     return value
+
 
 def _resolve_string_tokens(text: str, vault: PrivacyVault) -> str:
     """Replace all ``[PRIVATE:token_N]`` in *text* with decrypted plaintext."""

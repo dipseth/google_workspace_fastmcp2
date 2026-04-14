@@ -42,9 +42,8 @@ def get_qdrant_models_wrapper(
     if not WrapperRegistry.is_registered("qdrant_models"):
         WrapperRegistry.register("qdrant_models", _create_wrapper)
 
-    return WrapperRegistry.get(
-        "qdrant_models", force_reinitialize=force_reinitialize
-    )
+    return WrapperRegistry.get("qdrant_models", force_reinitialize=force_reinitialize)
+
 
 def _create_wrapper() -> "ModuleWrapper":
     """Create and configure the ModuleWrapper for qdrant_client.models."""
@@ -81,10 +80,13 @@ def _create_wrapper() -> "ModuleWrapper":
 
     return wrapper
 
+
 def _register_qdrant_skill_templates(wrapper) -> None:
     """Register Qdrant-specific skill templates with the ModuleWrapper."""
     wrapper.register_skill_template("qdrant-dsl-syntax", _generate_qdrant_dsl_template)
-    wrapper.register_skill_template("qdrant-dsl-params", _generate_qdrant_dsl_params_template)
+    wrapper.register_skill_template(
+        "qdrant-dsl-params", _generate_qdrant_dsl_params_template
+    )
     logger.info("Registered Qdrant skill templates with ModuleWrapper")
 
 
@@ -96,12 +98,25 @@ def _generate_qdrant_dsl_template(wrapper) -> str:
 
     # Categorize symbols
     filter_names = [
-        "Filter", "FieldCondition", "MatchValue", "MatchAny", "MatchText",
-        "Range", "HasIdCondition", "IsNullCondition", "IsEmptyCondition",
+        "Filter",
+        "FieldCondition",
+        "MatchValue",
+        "MatchAny",
+        "MatchText",
+        "Range",
+        "HasIdCondition",
+        "IsNullCondition",
+        "IsEmptyCondition",
     ]
     query_names = [
-        "RecommendQuery", "DiscoverQuery", "FusionQuery",
-        "Prefetch", "OrderBy", "OrderByQuery", "ContextQuery", "SearchParams",
+        "RecommendQuery",
+        "DiscoverQuery",
+        "FusionQuery",
+        "Prefetch",
+        "OrderBy",
+        "OrderByQuery",
+        "ContextQuery",
+        "SearchParams",
     ]
 
     filter_rows = "\n".join(
@@ -144,9 +159,9 @@ def _generate_qdrant_dsl_template(wrapper) -> str:
         "",
         "## Examples",
         "",
-        f"- `{s('Filter')}{{must=[{s('FieldCondition')}{{key=\"tool_name\", match={s('MatchValue')}{{value=\"search\"}}}}]}}` — Filter by tool_name",
-        f"- `{s('Filter')}{{must=[{s('FieldCondition')}{{key=\"tool_name\", match={s('MatchAny')}{{any=[\"send_dynamic_card\", \"search\"]}}}}]}}` — Match any of multiple values",
-        f"- `{s('Filter')}{{must=[{s('FieldCondition')}{{key=\"score\", range={s('Range')}{{gte=0.5}}}}]}}` — Range filter",
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchValue")}{{value="search"}}}}]}}` — Filter by tool_name',
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="tool_name", match={s("MatchAny")}{{any=["send_dynamic_card", "search"]}}}}]}}` — Match any of multiple values',
+        f'- `{s("Filter")}{{must=[{s("FieldCondition")}{{key="score", range={s("Range")}{{gte=0.5}}}}]}}` — Range filter',
         "",
     ]
 
@@ -182,7 +197,7 @@ def _generate_qdrant_dsl_params_template(wrapper) -> str:
         "```",
         f"{s('Filter')}{{",
         f"  must=[",
-        f"    {s('FieldCondition')}{{key=\"field_name\", match={s('MatchValue')}{{value=\"exact_value\"}}}}",
+        f'    {s("FieldCondition")}{{key="field_name", match={s("MatchValue")}{{value="exact_value"}}}}',
         f"  ]",
         f"}}",
         "```",
@@ -205,7 +220,7 @@ def _generate_qdrant_dsl_params_template(wrapper) -> str:
         "",
         f"**Filter by service + date range:**",
         f"```",
-        f'{s("Filter")}{{must=[',
+        f"{s('Filter')}{{must=[",
         f'  {s("FieldCondition")}{{key="service", match={s("MatchValue")}{{value="gmail"}}}},',
         f'  {s("FieldCondition")}{{key="timestamp", range={s("Range")}{{gte="2026-03-01"}}}}',
         f"]}}",

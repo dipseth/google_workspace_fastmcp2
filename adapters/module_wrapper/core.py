@@ -49,6 +49,7 @@ DEFAULT_RELATIONSHIP_DEPTH = _DEFAULT_RELATIONSHIP_DEPTH
 PRIMITIVE_TYPES = _PRIMITIVE_TYPES
 BUILTIN_PREFIXES = _BUILTIN_PREFIXES
 
+
 def parse_qdrant_url(url: str) -> Dict[str, Union[str, int, bool]]:
     """
     Parse a Qdrant URL into components.
@@ -99,6 +100,7 @@ def parse_qdrant_url(url: str) -> Dict[str, Union[str, int, bool]]:
         logger.warning(f"Failed to parse Qdrant URL '{url}': {e}. Using defaults.")
         return {"host": "localhost", "port": 6333, "use_https": False, "url": url}
 
+
 def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
     """
     Get Qdrant configuration from centralized settings.
@@ -140,9 +142,11 @@ def get_qdrant_config_from_env() -> Dict[str, Union[str, int, bool, None]]:
                 "url": None,
             }
 
+
 # =============================================================================
 # MODULE COMPONENT
 # =============================================================================
+
 
 class ModuleComponent:
     """
@@ -282,9 +286,11 @@ class ModuleComponent:
     def __repr__(self) -> str:
         return f"<ModuleComponent {self.full_path} ({self.component_type})>"
 
+
 # =============================================================================
 # MODULE WRAPPER BASE
 # =============================================================================
+
 
 class ModuleWrapperBase:
     """

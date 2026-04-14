@@ -116,7 +116,10 @@ class GCSTransport:
 
         # Fallback: gsutil CLI
         proc = await asyncio.create_subprocess_exec(
-            "gsutil", "cp", uri, str(dest),
+            "gsutil",
+            "cp",
+            uri,
+            str(dest),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -161,9 +164,7 @@ class S3Transport:
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, self._download_sync, bucket_name, key, dest
-        )
+        await loop.run_in_executor(None, self._download_sync, bucket_name, key, dest)
 
     @staticmethod
     def _download_sync(bucket_name: str, key: str, dest: Path) -> None:
@@ -230,10 +231,12 @@ _DEFAULT_TRANSPORTS: list[BlobTransport] = [
 ]
 
 
-def _get_transport(uri: str, transports: list[BlobTransport] | None = None) -> BlobTransport:
+def _get_transport(
+    uri: str, transports: list[BlobTransport] | None = None
+) -> BlobTransport:
     """Resolve the transport for a given URI scheme."""
     scheme = urlparse(uri).scheme.lower()
-    for t in (transports or _DEFAULT_TRANSPORTS):
+    for t in transports or _DEFAULT_TRANSPORTS:
         if t.supports(scheme):
             return t
     raise ValueError(
@@ -262,6 +265,7 @@ async def _create_registry_store(backend: str, cache_dir: Path) -> Any:
     """
     if backend == "memory":
         from key_value.aio.stores.memory import MemoryStore
+
         store = MemoryStore()
         await store.setup()
         return store
@@ -272,6 +276,7 @@ async def _create_registry_store(backend: str, cache_dir: Path) -> Any:
             FileTreeV1CollectionSanitizationStrategy,
             FileTreeV1KeySanitizationStrategy,
         )
+
         registry_dir = cache_dir / ".registry"
         registry_dir.mkdir(parents=True, exist_ok=True)
         store = FileTreeStore(
@@ -286,6 +291,7 @@ async def _create_registry_store(backend: str, cache_dir: Path) -> Any:
 
     if backend == "redis":
         from key_value.aio.stores.redis import RedisStore
+
         redis_url = os.environ.get("REDIS_IO_URL_STRING", "")
         if not redis_url:
             logger.warning(
@@ -304,7 +310,9 @@ async def _create_registry_store(backend: str, cache_dir: Path) -> Any:
         await store.setup()
         return store
 
-    raise ValueError(f"Unknown registry backend: {backend!r} (use 'memory', 'file', or 'redis')")
+    raise ValueError(
+        f"Unknown registry backend: {backend!r} (use 'memory', 'file', or 'redis')"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -352,11 +360,15 @@ class ModelArtifactProvider:
 
         s = settings or _settings
 
-        cache_dir = Path(s.model_artifact_cache_dir) if s.model_artifact_cache_dir else (
-            Path(s.credentials_dir) / "model_cache"
+        cache_dir = (
+            Path(s.model_artifact_cache_dir)
+            if s.model_artifact_cache_dir
+            else (Path(s.credentials_dir) / "model_cache")
         )
 
-        store = await _create_registry_store(s.model_artifact_registry_backend, cache_dir)
+        store = await _create_registry_store(
+            s.model_artifact_registry_backend, cache_dir
+        )
         await store.setup_collection(collection=_COLLECTION)
 
         return cls(
@@ -370,7 +382,9 @@ class ModelArtifactProvider:
         filename = Path(urlparse(uri).path).name
         return self._cache_dir / domain / filename
 
-    async def get_registry_entry(self, domain: str, filename: str) -> Optional[Dict[str, Any]]:
+    async def get_registry_entry(
+        self, domain: str, filename: str
+    ) -> Optional[Dict[str, Any]]:
         """Get metadata for a cached artifact."""
         key = f"{domain}:{filename}"
         return await self._store.get(key, collection=_COLLECTION)
@@ -389,14 +403,18 @@ class ModelArtifactProvider:
                 "sha256": sha256,
                 "local_path": str(local_path),
                 "size_bytes": local_path.stat().st_size,
-                "downloaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "downloaded_at": datetime.datetime.now(
+                    datetime.timezone.utc
+                ).isoformat(),
                 "domain": domain,
             },
             collection=_COLLECTION,
         )
 
         # Maintain a key index (FileTreeStore lacks keys() method)
-        index = await self._store.get("__index__", collection=_COLLECTION) or {"keys": []}
+        index = await self._store.get("__index__", collection=_COLLECTION) or {
+            "keys": []
+        }
         if key not in index["keys"]:
             index["keys"].append(key)
             await self._store.put("__index__", index, collection=_COLLECTION)
@@ -470,8 +488,7 @@ class ModelArtifactProvider:
             {domain: local_path} mapping
         """
         tasks = {
-            domain: self.ensure_artifact(domain, uri)
-            for domain, uri in uri_map.items()
+            domain: self.ensure_artifact(domain, uri) for domain, uri in uri_map.items()
         }
         results = {}
         for domain, coro in tasks.items():
@@ -498,7 +515,9 @@ class ModelArtifactProvider:
         deleted = await self._store.delete(key, collection=_COLLECTION)
 
         # Update key index
-        index = await self._store.get("__index__", collection=_COLLECTION) or {"keys": []}
+        index = await self._store.get("__index__", collection=_COLLECTION) or {
+            "keys": []
+        }
         if key in index["keys"]:
             index["keys"].remove(key)
             await self._store.put("__index__", index, collection=_COLLECTION)

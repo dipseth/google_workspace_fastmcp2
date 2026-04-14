@@ -182,9 +182,7 @@ def cache_pattern(
     """
     # Evict oldest entries if cache is full
     if len(pattern_cache) >= pattern_cache_max_size:
-        oldest_key = min(
-            pattern_cache_timestamps, key=pattern_cache_timestamps.get
-        )
+        oldest_key = min(pattern_cache_timestamps, key=pattern_cache_timestamps.get)
         del pattern_cache[oldest_key]
         del pattern_cache_timestamps[oldest_key]
 
@@ -235,17 +233,25 @@ def query_wrapper_patterns(
                 from adapters.module_wrapper.pipeline_mixin import (
                     extract_content_text_from_params,
                 )
+
                 # Flatten symbol-keyed _items into standard keys for extraction
                 flat_params = {}
                 if isinstance(card_params, str):
                     import json
+
                     card_params = json.loads(card_params)
                 for k, v in card_params.items():
                     if isinstance(v, dict) and "_items" in v:
                         # Symbol key with _items — extract text from items
                         for item in v["_items"][:10]:
                             if isinstance(item, dict):
-                                for field in ("text", "title", "label", "top_label", "bottom_label"):
+                                for field in (
+                                    "text",
+                                    "title",
+                                    "label",
+                                    "top_label",
+                                    "bottom_label",
+                                ):
                                     val = item.get(field)
                                     if val and isinstance(val, str):
                                         flat_params.setdefault("items", []).append(item)
@@ -257,7 +263,9 @@ def query_wrapper_patterns(
                 if content_text:
                     logger.info(
                         "📝 Extracted content_text for search: %s",
-                        content_text[:80] + "..." if len(content_text) > 80 else content_text,
+                        content_text[:80] + "..."
+                        if len(content_text) > 80
+                        else content_text,
                     )
             except Exception:
                 pass
@@ -404,7 +412,10 @@ def query_qdrant_patterns(
         )
         if use_cache:
             cache_pattern(
-                ck, wrapper_result, pattern_cache, pattern_cache_timestamps,
+                ck,
+                wrapper_result,
+                pattern_cache,
+                pattern_cache_timestamps,
                 pattern_cache_max_size,
             )
         return wrapper_result
@@ -435,14 +446,15 @@ def query_qdrant_patterns(
             result = {
                 "component_paths": component_paths,
                 "instance_params": best_pattern.get("instance_params", {}),
-                "structure_description": best_pattern.get(
-                    "structure_description", ""
-                ),
+                "structure_description": best_pattern.get("structure_description", ""),
                 "score": best_pattern.get("score", 0),
             }
             if use_cache:
                 cache_pattern(
-                    ck, result, pattern_cache, pattern_cache_timestamps,
+                    ck,
+                    result,
+                    pattern_cache,
+                    pattern_cache_timestamps,
                     pattern_cache_max_size,
                 )
             return result
@@ -459,7 +471,10 @@ def query_qdrant_patterns(
             }
             if use_cache:
                 cache_pattern(
-                    ck, result, pattern_cache, pattern_cache_timestamps,
+                    ck,
+                    result,
+                    pattern_cache,
+                    pattern_cache_timestamps,
                     pattern_cache_max_size,
                 )
             return result
@@ -467,7 +482,10 @@ def query_qdrant_patterns(
         # Cache the "no result" case too (as empty dict)
         if use_cache:
             cache_pattern(
-                ck, {}, pattern_cache, pattern_cache_timestamps,
+                ck,
+                {},
+                pattern_cache,
+                pattern_cache_timestamps,
                 pattern_cache_max_size,
             )
         return None

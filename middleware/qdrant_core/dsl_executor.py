@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 logger = setup_logger()
 
+
 class SearchV2Executor:
     """Executes DSL-built queries against Qdrant."""
 
@@ -301,9 +302,7 @@ class SearchV2Executor:
     # Internal execution methods
     # -------------------------------------------------------------------------
 
-    async def _resolve_using_for_collection(
-        self, collection: str
-    ) -> Optional[str]:
+    async def _resolve_using_for_collection(self, collection: str) -> Optional[str]:
         """Detect if collection uses named vectors, return default vector name or None.
 
         Named-vector collections require ``using=<name>`` in query_points calls.
@@ -323,7 +322,11 @@ class SearchV2Executor:
             if isinstance(vectors_config, dict):
                 # Pick a reasonable default — 'inputs' is the general-purpose vector
                 # in RIC schema; fall back to first available key
-                default = "inputs" if "inputs" in vectors_config else next(iter(vectors_config))
+                default = (
+                    "inputs"
+                    if "inputs" in vectors_config
+                    else next(iter(vectors_config))
+                )
                 logger.debug(
                     f"Collection {collection} uses named vectors: {list(vectors_config.keys())}, "
                     f"default={default}"
@@ -459,6 +462,7 @@ class SearchV2Executor:
                 )
             )
         return items
+
 
 def _elapsed_ms(start: float) -> float:
     """Calculate elapsed milliseconds since start."""

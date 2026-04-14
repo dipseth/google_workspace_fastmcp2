@@ -46,6 +46,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class SkillsMixin:
     """
     Generic mixin for dynamic skill document generation from any wrapped module.
@@ -209,26 +210,34 @@ class SkillsMixin:
         resources: List[Dict[str, str]] = []
 
         # Core generated resources
-        resources.append({
-            "uri": f"skill://{skill_name}/symbols.md",
-            "purpose": "Complete symbol reference table",
-            "when_to_read": "When looking up component symbols",
-        })
-        resources.append({
-            "uri": f"skill://{skill_name}/containment-rules.md",
-            "purpose": "Parent-child component hierarchy",
-            "when_to_read": "When nesting components in complex layouts",
-        })
+        resources.append(
+            {
+                "uri": f"skill://{skill_name}/symbols.md",
+                "purpose": "Complete symbol reference table",
+                "when_to_read": "When looking up component symbols",
+            }
+        )
+        resources.append(
+            {
+                "uri": f"skill://{skill_name}/containment-rules.md",
+                "purpose": "Parent-child component hierarchy",
+                "when_to_read": "When nesting components in complex layouts",
+            }
+        )
 
         # Custom templates (e.g., dsl-syntax, card-params, jinja-filters)
         for template_name in self._skill_templates.keys():
             filename = f"{template_name}.md"
             hints = resource_hints.get(filename, {})
-            resources.append({
-                "uri": f"skill://{skill_name}/{filename}",
-                "purpose": hints.get("purpose", f"Guide: {template_name}"),
-                "when_to_read": hints.get("when_to_read", f"When using {template_name} features"),
-            })
+            resources.append(
+                {
+                    "uri": f"skill://{skill_name}/{filename}",
+                    "purpose": hints.get("purpose", f"Guide: {template_name}"),
+                    "when_to_read": hints.get(
+                        "when_to_read", f"When using {template_name} features"
+                    ),
+                }
+            )
 
         # Apply any overrides from resource_hints for core resources too
         for res in resources:
@@ -362,11 +371,7 @@ class SkillsMixin:
             if hasattr(comp, "fields") and comp.fields:
                 # Filter out internal/discriminator fields LLMs shouldn't supply
                 _skip = {"block_type", "component_type", "model_config"}
-                visible = {
-                    k: v
-                    for k, v in comp.fields.items()
-                    if k not in _skip
-                }
+                visible = {k: v for k, v in comp.fields.items() if k not in _skip}
                 if visible:
                     lines.append("## Fields\n")
                     lines.append("| Field | Type | Required | Default | Description |")
@@ -717,6 +722,7 @@ class SkillsMixin:
         """Clear the cached skill documents."""
         self._skills_cache.clear()
         logger.debug("Invalidated skills cache")
+
 
 # Export for convenience
 __all__ = [

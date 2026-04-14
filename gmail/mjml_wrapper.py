@@ -54,9 +54,7 @@ def render_email_spec(
             return MjmlRenderResult(
                 success=False,
                 mjml_source=mjml_source,
-                diagnostics=[
-                    MjmlDiagnostic(message=str(e)) for e in result.errors
-                ],
+                diagnostics=[MjmlDiagnostic(message=str(e)) for e in result.errors],
             )
         return MjmlRenderResult(
             success=True,
@@ -71,9 +69,7 @@ def render_email_spec(
         return MjmlRenderResult(
             success=False,
             mjml_source=mjml_source,
-            diagnostics=[
-                MjmlDiagnostic(message=f"mjml Python render error: {e}")
-            ],
+            diagnostics=[MjmlDiagnostic(message=f"mjml Python render error: {e}")],
         )
 
     # Strategy 2: MJML CLI
@@ -98,9 +94,7 @@ def render_email_spec(
                 success=False,
                 mjml_source=mjml_source,
                 diagnostics=[
-                    MjmlDiagnostic(
-                        message=f"MJML CLI error: {result.stderr}"
-                    )
+                    MjmlDiagnostic(message=f"MJML CLI error: {result.stderr}")
                 ],
             )
     except FileNotFoundError:

@@ -86,7 +86,8 @@ def extract_board_features(board: tuple | list, current_player: int) -> np.ndarr
             opp_pits[5 - i]
             for i, p in enumerate(own_pits)
             if p == 0 and opp_pits[5 - i] > 0
-        ) / norm,
+        )
+        / norm,
         # Game phase: how many total stones are in stores (0=early, 1=late)
         (own_store + opp_store) / norm,
         # Store ratio (own / total+1)
@@ -125,7 +126,11 @@ class QueryGroupV2:
 
 
 def generate_groups_v2(
-    game, embedder, collection, states, top_k=20,
+    game,
+    embedder,
+    collection,
+    states,
+    top_k=20,
 ) -> list[QueryGroupV2]:
     """Generate query groups with board features."""
     groups = []
@@ -141,11 +146,19 @@ def generate_groups_v2(
             (ric.relationships, "relationships"),
         ]:
             points = _search_vector(
-                embedder.client, collection, vec, vec_name,
-                limit=top_k, with_vectors=True,
+                embedder.client,
+                collection,
+                vec,
+                vec_name,
+                limit=top_k,
+                with_vectors=True,
             )
             for p in points:
-                if p.id not in all_candidates and p.vector and isinstance(p.vector, dict):
+                if (
+                    p.id not in all_candidates
+                    and p.vector
+                    and isinstance(p.vector, dict)
+                ):
                     all_candidates[p.id] = {"vector": p.vector, "payload": p.payload}
 
         cand_bfs, cand_cs, cand_is, cand_rs, labels = [], [], [], [], []
@@ -164,7 +177,11 @@ def generate_groups_v2(
             # Extract board features from candidate's stored board
             cand_board_str = payload.get("board", "")
             try:
-                cand_board = eval(cand_board_str) if isinstance(cand_board_str, str) else cand_board_str
+                cand_board = (
+                    eval(cand_board_str)
+                    if isinstance(cand_board_str, str)
+                    else cand_board_str
+                )
                 cand_player = payload.get("current_player", 1)
                 c_bf = extract_board_features(cand_board, cand_player)
             except Exception:
@@ -182,18 +199,20 @@ def generate_groups_v2(
                 has_positive = True
 
         if has_positive and len(labels) >= 2:
-            groups.append(QueryGroupV2(
-                query_board_features=q_bf,
-                query_comp=ric.components,
-                query_inp=ric.inputs,
-                query_rel=ric.relationships,
-                cand_board_features=cand_bfs,
-                cand_comps=cand_cs,
-                cand_inps=cand_is,
-                cand_rels=cand_rs,
-                labels=labels,
-                true_move=true_move,
-            ))
+            groups.append(
+                QueryGroupV2(
+                    query_board_features=q_bf,
+                    query_comp=ric.components,
+                    query_inp=ric.inputs,
+                    query_rel=ric.relationships,
+                    cand_board_features=cand_bfs,
+                    cand_comps=cand_cs,
+                    cand_inps=cand_is,
+                    cand_rels=cand_rs,
+                    labels=labels,
+                    true_move=true_move,
+                )
+            )
 
         if (idx + 1) % 100 == 0:
             logger.info(f"  [{idx + 1}/{len(states)}] {len(groups)} groups")
@@ -257,30 +276,53 @@ class SimilarityScorerV2(nn.Module):
         layers: list[nn.Module] = []
         prev = in_features
         for i in range(num_layers):
-            layers.extend([
-                nn.Linear(prev, hidden_dim),
-                nn.SiLU(),
-                nn.Dropout(dropout),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(prev, hidden_dim),
+                    nn.SiLU(),
+                    nn.Dropout(dropout),
+                ]
+            )
             prev = hidden_dim
         layers.append(nn.Linear(prev, 1))
         self.mlp = nn.Sequential(*layers)
         self.H_cycles = 1  # compatibility
 
-    def forward(self, query_comp, query_inp, query_rel, cand_comp, cand_inp, cand_rel,
-                query_bf=None, cand_bf=None):
+    def forward(
+        self,
+        query_comp,
+        query_inp,
+        query_rel,
+        cand_comp,
+        cand_inp,
+        cand_rel,
+        query_bf=None,
+        cand_bf=None,
+    ):
         # Cosine similarities
-        sim_c = F.cosine_similarity(query_comp, cand_comp, dim=-1, eps=1e-8).unsqueeze(-1)
+        sim_c = F.cosine_similarity(query_comp, cand_comp, dim=-1, eps=1e-8).unsqueeze(
+            -1
+        )
         sim_i = F.cosine_similarity(query_inp, cand_inp, dim=-1, eps=1e-8).unsqueeze(-1)
         sim_r = F.cosine_similarity(query_rel, cand_rel, dim=-1, eps=1e-8).unsqueeze(-1)
 
         # Norms
-        q_norms = torch.stack([
-            query_comp.norm(dim=-1), query_inp.norm(dim=-1), query_rel.norm(dim=-1),
-        ], dim=-1)
-        c_norms = torch.stack([
-            cand_comp.norm(dim=-1), cand_inp.norm(dim=-1), cand_rel.norm(dim=-1),
-        ], dim=-1)
+        q_norms = torch.stack(
+            [
+                query_comp.norm(dim=-1),
+                query_inp.norm(dim=-1),
+                query_rel.norm(dim=-1),
+            ],
+            dim=-1,
+        )
+        c_norms = torch.stack(
+            [
+                cand_comp.norm(dim=-1),
+                cand_inp.norm(dim=-1),
+                cand_rel.norm(dim=-1),
+            ],
+            dim=-1,
+        )
 
         parts = [sim_c, sim_i, sim_r, q_norms, c_norms]
 
@@ -361,11 +403,18 @@ def main():
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--qdrant-url", type=str, default=None,
-                        help="Qdrant URL for persistent storage (default: in-memory)")
+    parser.add_argument(
+        "--qdrant-url",
+        type=str,
+        default=None,
+        help="Qdrant URL for persistent storage (default: in-memory)",
+    )
     parser.add_argument("--qdrant-key", type=str, default=None)
-    parser.add_argument("--checkpoint-dir", type=str,
-                        default=str(Path(__file__).resolve().parent / "checkpoints"))
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=str(Path(__file__).resolve().parent / "checkpoints"),
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -381,9 +430,11 @@ def main():
     t0 = time.time()
     all_states = game.generate_states(total)
     np.random.shuffle(all_states)
-    train_states = all_states[:args.train_size]
-    val_states = all_states[args.train_size:args.train_size + args.val_size]
-    logger.info(f"Generated {len(train_states)} train + {len(val_states)} val in {time.time()-t0:.1f}s")
+    train_states = all_states[: args.train_size]
+    val_states = all_states[args.train_size : args.train_size + args.val_size]
+    logger.info(
+        f"Generated {len(train_states)} train + {len(val_states)} val in {time.time() - t0:.1f}s"
+    )
 
     # --- Qdrant setup (persistent or in-memory) ---
     qdrant_url = args.qdrant_url or os.environ.get("QDRANT_URL")
@@ -391,6 +442,7 @@ def main():
 
     if qdrant_url:
         from qdrant_client import QdrantClient
+
         client = QdrantClient(url=qdrant_url, api_key=qdrant_key, timeout=30)
         logger.info(f"Qdrant: persistent at {qdrant_url}")
     else:
@@ -404,14 +456,18 @@ def main():
     t0 = time.time()
     embedder.create_collection(collection, force_recreate=True)
     embedder.index_states(game, train_states, collection)
-    logger.info(f"Indexed in {time.time()-t0:.1f}s")
+    logger.info(f"Indexed in {time.time() - t0:.1f}s")
 
     # --- Generate query groups with board features ---
     logger.info("Generating v2 query groups...")
     t0 = time.time()
-    train_groups = generate_groups_v2(game, embedder, collection, train_states, args.top_k)
+    train_groups = generate_groups_v2(
+        game, embedder, collection, train_states, args.top_k
+    )
     val_groups = generate_groups_v2(game, embedder, collection, val_states, args.top_k)
-    logger.info(f"Generated {len(train_groups)} train + {len(val_groups)} val groups in {time.time()-t0:.1f}s")
+    logger.info(
+        f"Generated {len(train_groups)} train + {len(val_groups)} val groups in {time.time() - t0:.1f}s"
+    )
 
     # --- Dataloaders ---
     max_k = max(
@@ -426,12 +482,16 @@ def main():
     # --- Model ---
     device = get_device()
     model = SimilarityScorerV2(
-        hidden_dim=args.hidden_dim, num_layers=3, dropout=args.dropout,
+        hidden_dim=args.hidden_dim,
+        num_layers=3,
+        dropout=args.dropout,
     ).to(device)
     logger.info(f"Device: {device}, Model params: {model.count_parameters():,}")
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs * len(train_loader), eta_min=1e-6)
+    scheduler = CosineAnnealingLR(
+        optimizer, T_max=args.epochs * len(train_loader), eta_min=1e-6
+    )
 
     # --- Training ---
     ckpt_dir = Path(args.checkpoint_dir)
@@ -481,15 +541,18 @@ def main():
             best_val_acc = val_acc
             patience_counter = 0
             ckpt = ckpt_dir / "best_model_v2.pt"
-            torch.save({
-                "model_state_dict": model.state_dict(),
-                "model_type": "similarity_v2",
-                "hidden_dim": args.hidden_dim,
-                "dropout": args.dropout,
-                "epoch": epoch,
-                "val_accuracy": val_acc,
-                "game": game.name,
-            }, ckpt)
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "model_type": "similarity_v2",
+                    "hidden_dim": args.hidden_dim,
+                    "dropout": args.dropout,
+                    "epoch": epoch,
+                    "val_accuracy": val_acc,
+                    "game": game.name,
+                },
+                ckpt,
+            )
             logger.info(f"  New best val_acc={val_acc:.3f} → {ckpt}")
         else:
             patience_counter += 1

@@ -20,6 +20,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 def derive_privacy_vault_key(
     session_id: str,
     auth_material: bytes,
@@ -47,6 +48,7 @@ def derive_privacy_vault_key(
         info=b"privacy-vault-v1",
     )
     return base64.urlsafe_b64encode(hkdf.derive(auth_material))
+
 
 class PrivacyVault:
     """Per-session store mapping opaque tokens to Fernet-encrypted ciphertexts.

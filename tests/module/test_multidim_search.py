@@ -62,9 +62,7 @@ def _make_colbert_vecs(dim: int = 128, n_tokens: int = 3) -> List[List[float]]:
     return [_make_unit_vec(dim, i) for i in range(n_tokens)]
 
 
-def _make_scored_point(
-    point_id, payload, vectors=None, score=0.9
-):
+def _make_scored_point(point_id, payload, vectors=None, score=0.9):
     """Create a mock Qdrant ScoredPoint with vectors."""
     point = MagicMock()
     point.id = point_id
@@ -405,7 +403,9 @@ class TestSearchHybridMultidim:
         # Positive feedback pattern should have a higher score
         all_results = patterns + rels
         if len(all_results) >= 2:
-            pos_results = [r for r in all_results if r.get("content_feedback") == "positive"]
+            pos_results = [
+                r for r in all_results if r.get("content_feedback") == "positive"
+            ]
             neu_results = [r for r in all_results if r.get("content_feedback") is None]
             if pos_results and neu_results:
                 assert pos_results[0]["score"] > neu_results[0]["score"]

@@ -34,6 +34,7 @@ from gmail.mjml_types import ButtonBlock, DividerBlock, EmailBlock, TextBlock
 
 logger = setup_logger()
 
+
 class EmailFeedbackBuilder:
     """
     Builds email feedback blocks dynamically using the module wrapper's DAG
@@ -163,9 +164,7 @@ class EmailFeedbackBuilder:
         styles = list(BUTTON_STYLES.keys())
         return random.choice(styles)
 
-    def _select_prompt(
-        self, feedback_type: str
-    ) -> tuple[str, str]:
+    def _select_prompt(self, feedback_type: str) -> tuple[str, str]:
         """Select a random prompt template and keyword for the feedback type."""
         if feedback_type == "layout":
             prompts = LAYOUT_FEEDBACK_PROMPTS
@@ -173,9 +172,7 @@ class EmailFeedbackBuilder:
             prompts = CONTENT_FEEDBACK_PROMPTS
         return random.choice(prompts)
 
-    def _select_labels(
-        self, use_emoji: bool = False
-    ) -> tuple[str, str]:
+    def _select_labels(self, use_emoji: bool = False) -> tuple[str, str]:
         """Select random positive and negative button labels."""
         if use_emoji:
             return (
@@ -296,7 +293,9 @@ class EmailFeedbackBuilder:
         if not base_url:
             base_url = self._get_feedback_base_url()
         if not base_url:
-            logger.warning("No feedback base URL configured; cannot build feedback blocks")
+            logger.warning(
+                "No feedback base URL configured; cannot build feedback blocks"
+            )
             return []
         layout = layout or random.choice(LAYOUT_WRAPPERS)
         button_style = button_style or random.choice(list(BUTTON_STYLES.keys()))
@@ -442,8 +441,10 @@ class EmailFeedbackBuilder:
             logger.warning(f"Failed to store email feedback pattern: {e}")
             return None
 
+
 # Global singleton
 _email_feedback_builder: Optional[EmailFeedbackBuilder] = None
+
 
 def get_email_feedback_builder() -> EmailFeedbackBuilder:
     """Get the singleton EmailFeedbackBuilder instance."""
@@ -451,6 +452,7 @@ def get_email_feedback_builder() -> EmailFeedbackBuilder:
     if _email_feedback_builder is None:
         _email_feedback_builder = EmailFeedbackBuilder()
     return _email_feedback_builder
+
 
 __all__ = [
     "EmailFeedbackBuilder",

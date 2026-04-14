@@ -16,6 +16,7 @@ from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
+
 class SessionState(BaseModel):
     """Session state model for tracking authentication status."""
 
@@ -41,6 +42,7 @@ class SessionState(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Additional session metadata"
     )
+
 
 class UnifiedSession:
     """Unified session management for OAuth migration.
@@ -90,7 +92,9 @@ class UnifiedSession:
             )
 
             if self._enhanced_logging:
-                logger.info(f"📧 Extracted email from token: {redact_email(email) if email else None}")
+                logger.info(
+                    f"📧 Extracted email from token: {redact_email(email) if email else None}"
+                )
 
             return email
         except Exception as e:
@@ -264,12 +268,16 @@ class UnifiedSession:
         self._session_state.last_accessed = datetime.now(UTC)
 
         if self._enhanced_logging:
-            logger.info(f"🔄 Updated tokens for {redact_email(self._session_state.user_email)}")
+            logger.info(
+                f"🔄 Updated tokens for {redact_email(self._session_state.user_email)}"
+            )
 
     def clear_session(self):
         """Clear current session."""
         if self._session_state and self._enhanced_logging:
-            logger.info(f"🗑️ Clearing session for {redact_email(self._session_state.user_email)}")
+            logger.info(
+                f"🗑️ Clearing session for {redact_email(self._session_state.user_email)}"
+            )
         self._session_state = None
 
     # Helper methods

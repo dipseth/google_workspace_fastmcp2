@@ -50,6 +50,7 @@ logger = setup_logger()
 # Defines the interface for component metadata queries.
 # Any class implementing this protocol can be used as a metadata provider.
 
+
 @runtime_checkable
 class ComponentMetadataProvider(Protocol):
     """Protocol for component metadata queries.
@@ -86,11 +87,13 @@ class ComponentMetadataProvider(Protocol):
         """Check if component is empty (no content params)."""
         ...
 
+
 # Lazy import for Rustworkx
 _rustworkx = None
 
 # Type alias for graph return types
 GraphType = Any  # rx.PyDiGraph at runtime
+
 
 def _get_rustworkx():
     """Lazy load Rustworkx to avoid import overhead."""
@@ -107,6 +110,7 @@ def _get_rustworkx():
             )
             raise
     return _rustworkx
+
 
 class GraphMixin:
     """
@@ -1494,6 +1498,7 @@ class GraphMixin:
                 return intermediate
 
         return None
+
 
 # Export for convenience
 __all__ = [

@@ -23,6 +23,7 @@ from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
 
+
 class SessionAwareSamplingHandler:
     """Sampling handler that checks per-session config before falling back to default.
 

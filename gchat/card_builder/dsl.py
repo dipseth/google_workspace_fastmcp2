@@ -36,6 +36,7 @@ WIDGET_JSON_KEYS = frozenset(_JSON_KEY_TO_COMPONENT.keys())
 # COMPONENT PATH EXTRACTION
 # =============================================================================
 
+
 def extract_component_paths(card: JsonDict) -> ComponentPaths:
     """
     Extract component paths from a card structure.
@@ -78,9 +79,11 @@ def extract_component_paths(card: JsonDict) -> ComponentPaths:
 
     return paths
 
+
 # =============================================================================
 # DSL SUGGESTION
 # =============================================================================
+
 
 def suggest_dsl_for_params(
     card_params: JsonDict, symbols: SymbolMapping
@@ -157,9 +160,11 @@ def suggest_dsl_for_params(
 
     return f"{sec}[{', '.join(widgets)}]"
 
+
 # =============================================================================
 # DSL GENERATION FROM CARD
 # =============================================================================
+
 
 def _count_children(
     widget_data: JsonDict,
@@ -183,6 +188,7 @@ def _count_children(
     if not children_field:
         return 0
     return len(widget_data.get(children_field, []))
+
 
 def _widget_to_dsl(
     widget: JsonDict,
@@ -232,6 +238,7 @@ def _widget_to_dsl(
             return f"{symbol}[{nested}]"
 
     return symbol
+
 
 def generate_dsl_notation(
     card: JsonDict,
@@ -316,6 +323,7 @@ def generate_dsl_notation(
 
     # For multiple sections, join with separator
     return " | ".join(section_dsls)
+
 
 __all__ = [
     "WIDGET_JSON_KEYS",

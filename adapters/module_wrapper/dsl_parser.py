@@ -72,6 +72,7 @@ logger = setup_logger()
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class DSLToken:
     """A single token from DSL tokenization.
@@ -95,6 +96,7 @@ class DSLToken:
     type: str
     value: str
     position: int
+
 
 @dataclass
 class DSLNode:
@@ -199,6 +201,7 @@ class DSLNode:
                             counts[name] += count
         return dict(counts)
 
+
 def _params_to_dict(params: Dict[str, Any]) -> Dict[str, Any]:
     """Convert params dict to JSON-serializable form."""
     result = {}
@@ -212,6 +215,7 @@ def _params_to_dict(params: Dict[str, Any]) -> Dict[str, Any]:
         else:
             result[k] = v
     return result
+
 
 def _param_value_to_dsl(value: Any) -> str:
     """Convert a param value to DSL string representation."""
@@ -229,6 +233,7 @@ def _param_value_to_dsl(value: Any) -> str:
     else:
         return str(value)
 
+
 def _param_value_to_expanded(value: Any) -> str:
     """Convert a param value to expanded notation string."""
     if isinstance(value, DSLNode):
@@ -244,6 +249,7 @@ def _param_value_to_expanded(value: Any) -> str:
         return "null"
     else:
         return str(value)
+
 
 @dataclass
 class DSLParseResult:
@@ -272,6 +278,7 @@ class DSLParseResult:
             "resolved_symbols": self.resolved_symbols,
         }
 
+
 @dataclass
 class QdrantQuery:
     """A Qdrant query specification."""
@@ -292,9 +299,11 @@ class QdrantQuery:
             "limit": self.limit,
         }
 
+
 # =============================================================================
 # CONTENT DSL DATA CLASSES
 # =============================================================================
+
 
 @dataclass
 class StyleModifier:
@@ -311,6 +320,7 @@ class StyleModifier:
         if self.jinja_args:
             return f"{self.jinja_filter}({self.jinja_args})"
         return self.jinja_filter
+
 
 @dataclass
 class ContentLine:
@@ -346,6 +356,7 @@ class ContentLine:
             "url": self.url,
             "jinja": self.to_jinja(),
         }
+
 
 @dataclass
 class ContentBlock:
@@ -393,6 +404,7 @@ class ContentBlock:
             "line_count": len(self.all_lines),
         }
 
+
 @dataclass
 class ContentDSLResult:
     """Result of parsing Content DSL."""
@@ -419,6 +431,7 @@ class ContentDSLResult:
             "issues": self.issues,
             "jinja_expressions": self.to_jinja_list(),
         }
+
 
 # Style modifier registry - maps modifier names to Jinja filters
 STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
@@ -466,6 +479,7 @@ STYLE_MODIFIERS: Dict[str, Tuple[str, Optional[str]]] = {
 # =============================================================================
 # DSL PARSER
 # =============================================================================
+
 
 class DSLParser:
     """
@@ -1620,9 +1634,11 @@ class DSLParser:
 
         return params
 
+
 # =============================================================================
 # STANDALONE FUNCTIONS
 # =============================================================================
+
 
 def parse_dsl_to_qdrant_query(
     dsl_string: str,
@@ -1653,6 +1669,7 @@ def parse_dsl_to_qdrant_query(
     queries = parser.to_qdrant_queries(result, collection_name)
 
     return [q.to_dict() for q in queries]
+
 
 def extract_dsl_from_description(
     description: str,
@@ -1686,6 +1703,7 @@ def extract_dsl_from_description(
 
     return None, description
 
+
 def validate_dsl_structure(
     dsl_string: str,
     symbol_mapping: Dict[str, str],
@@ -1713,9 +1731,11 @@ def validate_dsl_structure(
     result = parser.parse(dsl_string)
     return result.is_valid, result.issues
 
+
 # =============================================================================
 # CONTENT DSL STANDALONE FUNCTIONS
 # =============================================================================
+
 
 def parse_content_dsl(
     text: str,
@@ -1744,6 +1764,7 @@ def parse_content_dsl(
 
     return parser.parse_content_dsl(text)
 
+
 def content_dsl_to_jinja(
     text: str,
     symbol_mapping: Dict[str, str],
@@ -1761,6 +1782,7 @@ def content_dsl_to_jinja(
     result = parse_content_dsl(text, symbol_mapping)
     return result.to_jinja_list()
 
+
 def get_style_modifiers() -> Dict[str, Tuple[str, Optional[str]]]:
     """
     Get the available style modifiers.
@@ -1769,6 +1791,7 @@ def get_style_modifiers() -> Dict[str, Tuple[str, Optional[str]]]:
         Dict mapping modifier names to (jinja_filter, args) tuples
     """
     return STYLE_MODIFIERS.copy()
+
 
 def add_style_modifier(
     name: str,
@@ -1785,9 +1808,11 @@ def add_style_modifier(
     """
     STYLE_MODIFIERS[name.lower()] = (jinja_filter, jinja_args)
 
+
 # =============================================================================
 # INTEGRATION WITH MODULE WRAPPER
 # =============================================================================
+
 
 def create_parser_from_wrapper(wrapper: "ModuleWrapper") -> DSLParser:
     """

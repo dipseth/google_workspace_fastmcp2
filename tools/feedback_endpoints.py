@@ -539,7 +539,7 @@ def _render_email_feedback_page(
         <div class="meta-grid">
             <div class="meta-item">
                 <span class="meta-label">Email ID</span>
-                <code class="meta-value">{_html.escape((email_id or '')[:16])}...</code>
+                <code class="meta-value">{_html.escape((email_id or "")[:16])}...</code>
             </div>
             <div class="meta-item">
                 <span class="meta-label">Source</span>

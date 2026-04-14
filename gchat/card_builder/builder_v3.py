@@ -114,7 +114,14 @@ class GchatCardBuilder:
                 supply_map[pool_key].extend(items)
 
         # Merge explicit content kwargs
-        for key in ("buttons", "chips", "columns", "grid_items", "carousel_cards", "content_texts"):
+        for key in (
+            "buttons",
+            "chips",
+            "columns",
+            "grid_items",
+            "carousel_cards",
+            "content_texts",
+        ):
             explicit = content_kwargs.get(key)
             if explicit and key in supply_map:
                 supply_map[key].extend(explicit)
@@ -130,9 +137,7 @@ class GchatCardBuilder:
         from gchat.card_builder.slot_assignment import reassign_supply_map
         from research.trm.h2.domain_config import GCHAT_DOMAIN
 
-        return reassign_supply_map(
-            supply_map, demands, domain_config=GCHAT_DOMAIN
-        )
+        return reassign_supply_map(supply_map, demands, domain_config=GCHAT_DOMAIN)
 
     def render_component(self, name: str, params: Dict[str, Any]) -> Any:
         """Render a gchat component via the wrapper's cached class loader."""
@@ -183,8 +188,9 @@ class GchatCardBuilder:
     def store_pattern(self, description: str, card: dict) -> None:
         """Store a card build as a reusable prepared pattern — gchat-specific."""
         v2 = self._get_v2()
-        if hasattr(v2, '_store_pattern_async'):
+        if hasattr(v2, "_store_pattern_async"):
             import asyncio
+
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():

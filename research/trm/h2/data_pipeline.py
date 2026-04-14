@@ -84,7 +84,11 @@ def generate_training_data(
                 with_vectors=True,
             )
             for p in points:
-                if p.id not in all_candidates and p.vector and isinstance(p.vector, dict):
+                if (
+                    p.id not in all_candidates
+                    and p.vector
+                    and isinstance(p.vector, dict)
+                ):
                     all_candidates[p.id] = {
                         "vector": p.vector,
                         "payload": p.payload,
@@ -124,9 +128,12 @@ def generate_training_data(
             for _ in range(noise_augments):
                 samples.append(
                     TrainingSample(
-                        query_comp=q_comp + rng.normal(0, noise_sigma, q_comp.shape).astype(np.float32),
-                        query_inp=q_inp + rng.normal(0, noise_sigma, q_inp.shape).astype(np.float32),
-                        query_rel=q_rel + rng.normal(0, noise_sigma, q_rel.shape).astype(np.float32),
+                        query_comp=q_comp
+                        + rng.normal(0, noise_sigma, q_comp.shape).astype(np.float32),
+                        query_inp=q_inp
+                        + rng.normal(0, noise_sigma, q_inp.shape).astype(np.float32),
+                        query_rel=q_rel
+                        + rng.normal(0, noise_sigma, q_rel.shape).astype(np.float32),
                         cand_comp=c_comp,
                         cand_inp=c_inp,
                         cand_rel=c_rel,
@@ -216,11 +223,19 @@ def generate_query_groups(
             (ric.relationships, "relationships"),
         ]:
             points = _search_vector(
-                embedder.client, collection_name, vec, vec_name,
-                limit=top_k, with_vectors=True,
+                embedder.client,
+                collection_name,
+                vec,
+                vec_name,
+                limit=top_k,
+                with_vectors=True,
             )
             for p in points:
-                if p.id not in all_candidates and p.vector and isinstance(p.vector, dict):
+                if (
+                    p.id not in all_candidates
+                    and p.vector
+                    and isinstance(p.vector, dict)
+                ):
                     all_candidates[p.id] = {
                         "vector": p.vector,
                         "payload": p.payload,
@@ -246,16 +261,18 @@ def generate_query_groups(
 
         # Only include groups that have at least one positive candidate
         if has_positive and len(cand_comps) >= 2:
-            groups.append(QueryGroup(
-                query_comp=ric.components,
-                query_inp=ric.inputs,
-                query_rel=ric.relationships,
-                cand_comps=cand_comps,
-                cand_inps=cand_inps,
-                cand_rels=cand_rels,
-                labels=labels,
-                true_move=true_move,
-            ))
+            groups.append(
+                QueryGroup(
+                    query_comp=ric.components,
+                    query_inp=ric.inputs,
+                    query_rel=ric.relationships,
+                    cand_comps=cand_comps,
+                    cand_inps=cand_inps,
+                    cand_rels=cand_rels,
+                    labels=labels,
+                    true_move=true_move,
+                )
+            )
 
         if (idx + 1) % 100 == 0:
             logger.info(f"  [{idx + 1}/{total}] {len(groups)} groups")
@@ -298,14 +315,14 @@ class ListwiseDataset(Dataset):
         mask = torch.cat([torch.ones(K), torch.zeros(pad)])  # 1 = real, 0 = pad
 
         return {
-            "query_comp": torch.from_numpy(g.query_comp),   # [384]
-            "query_inp": torch.from_numpy(g.query_inp),     # [384]
-            "query_rel": torch.from_numpy(g.query_rel),     # [384]
+            "query_comp": torch.from_numpy(g.query_comp),  # [384]
+            "query_inp": torch.from_numpy(g.query_inp),  # [384]
+            "query_rel": torch.from_numpy(g.query_rel),  # [384]
             "cand_comp": cand_comp,  # [max_k, 384]
-            "cand_inp": cand_inp,    # [max_k, 384]
-            "cand_rel": cand_rel,    # [max_k, 384]
-            "labels": labels,        # [max_k]
-            "mask": mask,            # [max_k]
+            "cand_inp": cand_inp,  # [max_k, 384]
+            "cand_rel": cand_rel,  # [max_k, 384]
+            "labels": labels,  # [max_k]
+            "mask": mask,  # [max_k]
         }
 
 

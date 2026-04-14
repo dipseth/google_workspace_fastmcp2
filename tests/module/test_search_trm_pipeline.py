@@ -158,7 +158,9 @@ class TestFullSearchPipeline:
 
         with torch.no_grad():
             out = model(structural, content, mode="search")
-            combined = 0.6 * out["form_score"].squeeze(-1) + 0.4 * out["content_score"].squeeze(-1)
+            combined = 0.6 * out["form_score"].squeeze(-1) + 0.4 * out[
+                "content_score"
+            ].squeeze(-1)
 
         # We can't guarantee candidate 0 is top (random weights), but
         # the pipeline should produce valid scores for all candidates
@@ -203,7 +205,9 @@ class TestHaltHeadConvergence:
                 halt_probs.append(torch.sigmoid(out["halt_prob"]).item())
 
         # Should have at least some spread
-        assert len(set(round(h, 2) for h in halt_probs)) > 3, "Halt probs lack diversity"
+        assert len(set(round(h, 2) for h in halt_probs)) > 3, (
+            "Halt probs lack diversity"
+        )
 
 
 class TestAllMode:

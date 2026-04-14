@@ -20,6 +20,7 @@ logger = setup_logger()
 # RELATIONSHIP STRATEGY PROTOCOL
 # =============================================================================
 
+
 @runtime_checkable
 class RelationshipStrategy(Protocol):
     """Base protocol for relationship extraction strategies."""
@@ -46,9 +47,11 @@ class RelationshipStrategy(Protocol):
         """
         ...
 
+
 # =============================================================================
 # STRUCTURAL STRATEGY (wrapper around existing logic)
 # =============================================================================
+
 
 class StructuralRelationshipStrategy:
     """Extracts relationships from class field type hints (containment).
@@ -87,9 +90,11 @@ class StructuralRelationshipStrategy:
         comp_type = comp.component_type if comp else "class"
         return build_compact_relationship_text(component_name, rels, comp_type)
 
+
 # =============================================================================
 # BEHAVIORAL STRATEGY (graph-based)
 # =============================================================================
+
 
 class BehavioralRelationshipStrategy:
     """Extracts relationships from ToolRelationshipGraph co-occurrence patterns.
@@ -192,6 +197,7 @@ class BehavioralRelationshipStrategy:
             user_email=user_email,
             session_id=session_id,
         )
+
 
 __all__ = [
     "RelationshipStrategy",

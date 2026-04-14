@@ -389,7 +389,9 @@ class QdrantUnifiedMiddleware(Middleware):
 
                 user_email = await get_user_email_context()
                 if user_email:
-                    logger.debug(f"📧 User email from auth context: {redact_email(user_email)}")
+                    logger.debug(
+                        f"📧 User email from auth context: {redact_email(user_email)}"
+                    )
             except Exception as e:
                 logger.debug(f"Could not get user email from auth context: {e}")
 

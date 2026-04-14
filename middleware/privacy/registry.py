@@ -17,6 +17,7 @@ logger = setup_logger()
 _vault_registry: dict[str, PrivacyVault] = {}
 _registry_lock = threading.Lock()
 
+
 def get_or_create_vault(session_id: str, fernet_key: bytes) -> PrivacyVault:
     """Return existing vault for *session_id* or create a new one."""
     with _registry_lock:
@@ -28,10 +29,12 @@ def get_or_create_vault(session_id: str, fernet_key: bytes) -> PrivacyVault:
         logger.info("Privacy vault created for session %s", session_id)
         return vault
 
+
 def get_vault(session_id: str) -> Optional[PrivacyVault]:
     """Return the vault for *session_id* if it exists, else ``None``."""
     with _registry_lock:
         return _vault_registry.get(session_id)
+
 
 def destroy_vault(session_id: str) -> None:
     """Destroy and remove the vault for *session_id*."""
@@ -40,6 +43,7 @@ def destroy_vault(session_id: str) -> None:
     if vault is not None:
         vault.destroy()
         logger.info("Privacy vault destroyed for session %s", session_id)
+
 
 def cleanup_expired_vaults(active_session_ids: set[str]) -> int:
     """Remove vaults whose sessions are no longer active.

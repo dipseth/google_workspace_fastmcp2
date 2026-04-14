@@ -136,8 +136,9 @@ def main():
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--val-split", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--checkpoint-dir", type=str,
-                        default=str(Path(__file__).parent / "checkpoints"))
+    parser.add_argument(
+        "--checkpoint-dir", type=str, default=str(Path(__file__).parent / "checkpoints")
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -158,7 +159,9 @@ def main():
 
     # Check embeddings exist
     if not pairs or "content_embedding" not in pairs[0]:
-        logger.error("Pairs missing content_embedding — run generate_slot_training_data.py first")
+        logger.error(
+            "Pairs missing content_embedding — run generate_slot_training_data.py first"
+        )
         return
 
     # Create dataset (deduplicates to unique positive items)
@@ -172,7 +175,8 @@ def main():
     n_val = max(5, int(len(full_dataset) * args.val_split))
     n_train = len(full_dataset) - n_val
     train_ds, val_ds = torch.utils.data.random_split(
-        full_dataset, [n_train, n_val],
+        full_dataset,
+        [n_train, n_val],
         generator=torch.Generator().manual_seed(args.seed),
     )
     # Disable noise for validation
@@ -195,8 +199,10 @@ def main():
     ).to(device)
 
     n_params = sum(p.numel() for p in model.parameters())
-    logger.info(f"Model: {n_params:,} parameters (content_dim={content_dim}, "
-                f"slot_embed_dim={args.slot_embed_dim}, hidden={args.hidden_dim})")
+    logger.info(
+        f"Model: {n_params:,} parameters (content_dim={content_dim}, "
+        f"slot_embed_dim={args.slot_embed_dim}, hidden={args.hidden_dim})"
+    )
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -274,7 +280,9 @@ def main():
         else:
             patience_counter += 1
             if patience_counter >= args.patience:
-                logger.info(f"Early stopping at epoch {epoch} (patience={args.patience})")
+                logger.info(
+                    f"Early stopping at epoch {epoch} (patience={args.patience})"
+                )
                 break
 
     # Final summary

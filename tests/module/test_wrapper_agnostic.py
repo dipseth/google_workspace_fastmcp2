@@ -69,9 +69,7 @@ def _collect_violations() -> list[str]:
 
         for module_name, lineno in _get_imports(py_file):
             if _is_domain_import(module_name):
-                violations.append(
-                    f"{py_file.name}:{lineno} imports '{module_name}'"
-                )
+                violations.append(f"{py_file.name}:{lineno} imports '{module_name}'")
 
     return violations
 

@@ -68,9 +68,7 @@ class ConsumedTokenStore:
         ttl = ttl or self._default_ttl
         if _redis_client is not None:
             try:
-                await _redis_client.setex(
-                    self._redis_key(token_key), ttl, b"1"
-                )
+                await _redis_client.setex(self._redis_key(token_key), ttl, b"1")
                 return
             except Exception as e:
                 logger.debug("Redis setex failed, falling back to memory: %s", e)

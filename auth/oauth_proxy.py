@@ -18,6 +18,7 @@ from config.settings import settings
 
 logger = setup_logger()
 
+
 @dataclass
 class ProxyClient:
     """Represents a proxied OAuth client with temporary credentials."""
@@ -47,6 +48,7 @@ class ProxyClient:
         """Store PKCE parameters from authorization request."""
         self.code_challenge = code_challenge
         self.code_challenge_method = code_challenge_method
+
 
 class OAuthProxy:
     """
@@ -347,8 +349,10 @@ class OAuthProxy:
                 ),
             }
 
+
 # Global OAuth Proxy instance
 oauth_proxy = OAuthProxy()
+
 
 def handle_token_exchange(
     auth_code: str,
@@ -440,6 +444,7 @@ def handle_token_exchange(
         if hasattr(e, "response") and e.response:
             logger.error(f"   Response status: {e.response.status_code}")
         raise ValueError(f"Token exchange failed: {str(e)}")
+
 
 def refresh_access_token(
     refresh_token: str, client_id: str, client_secret: str

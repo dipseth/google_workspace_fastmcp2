@@ -30,12 +30,12 @@ from .slot_assigner import POOL_VOCAB
 
 # Map document content_type → pool (for enrichment from external collections)
 CONTENT_TYPE_TO_POOL: dict[str, str] = {
-    "list": "grid_items",              # Lists → grid items
-    "table": "grid_items",             # Tables → structured grid
-    "pricing_table": "grid_items",     # Pricing → structured grid
-    "prose": "content_texts",          # Prose → text content
+    "list": "grid_items",  # Lists → grid items
+    "table": "grid_items",  # Tables → structured grid
+    "pricing_table": "grid_items",  # Pricing → structured grid
+    "prose": "content_texts",  # Prose → text content
     "objection_response": "content_texts",  # Responses → text
-    "compliance_checklist": "chips",   # Checklists → chip-like tags
+    "compliance_checklist": "chips",  # Checklists → chip-like tags
     "merchant_archetype": "carousel_cards",  # Profiles → card-like
 }
 
@@ -43,6 +43,7 @@ CONTENT_TYPE_TO_POOL: dict[str, str] = {
 def extract_qdrant_build_pairs(collection: str) -> list[dict]:
     """Extract content + embeddings from a Qdrant document collection as build training pairs."""
     import os
+
     try:
         from qdrant_client import QdrantClient
     except ImportError:
@@ -62,8 +63,11 @@ def extract_qdrant_build_pairs(collection: str) -> list[dict]:
     offset = None
     while True:
         points, next_offset = client.scroll(
-            collection_name=collection, limit=100, offset=offset,
-            with_payload=True, with_vectors=True,
+            collection_name=collection,
+            limit=100,
+            offset=offset,
+            with_payload=True,
+            with_vectors=True,
         )
         for p in points:
             payload = p.payload or {}
@@ -87,14 +91,18 @@ def extract_qdrant_build_pairs(collection: str) -> list[dict]:
                 continue
 
             pool_id = POOL_VOCAB[pool]
-            pairs.append({
-                "content_text": snippet,
-                "content_embedding": list(vec) if not isinstance(vec, list) else vec,
-                "slot_type": pool,
-                "slot_type_id": pool_id,
-                "label": 1.0,
-                "source": f"qdrant_{collection}",
-            })
+            pairs.append(
+                {
+                    "content_text": snippet,
+                    "content_embedding": list(vec)
+                    if not isinstance(vec, list)
+                    else vec,
+                    "slot_type": pool,
+                    "slot_type_id": pool_id,
+                    "label": 1.0,
+                    "source": f"qdrant_{collection}",
+                }
+            )
 
         if next_offset is None:
             break
@@ -104,18 +112,21 @@ def extract_qdrant_build_pairs(collection: str) -> list[dict]:
 
     # Add negatives
     import random as rng_mod
+
     all_pools = list(POOL_VOCAB.keys())
     negatives = []
     for p in pairs:
         neg_pool = rng_mod.choice([x for x in all_pools if x != p["slot_type"]])
-        negatives.append({
-            "content_text": p["content_text"],
-            "content_embedding": p["content_embedding"],
-            "slot_type": neg_pool,
-            "slot_type_id": POOL_VOCAB[neg_pool],
-            "label": 0.0,
-            "source": f"qdrant_{collection}_neg",
-        })
+        negatives.append(
+            {
+                "content_text": p["content_text"],
+                "content_embedding": p["content_embedding"],
+                "slot_type": neg_pool,
+                "slot_type_id": POOL_VOCAB[neg_pool],
+                "label": 0.0,
+                "source": f"qdrant_{collection}_neg",
+            }
+        )
     pairs.extend(negatives)
 
     return pairs
@@ -139,6 +150,7 @@ def add_content_embeddings(groups: list[dict]) -> list[dict]:
     logger.info(f"Embedding {len(texts_to_embed)} content texts...")
     try:
         from fastembed import TextEmbedding
+
         embedder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
         embeddings = list(embedder.embed(texts_to_embed))
     except ImportError:
@@ -148,7 +160,9 @@ def add_content_embeddings(groups: list[dict]) -> list[dict]:
     for idx, emb in zip(group_indices, embeddings):
         groups[idx]["content_embedding"] = emb.tolist()
 
-    logger.info(f"Added content embeddings to {len(group_indices)}/{len(groups)} groups")
+    logger.info(
+        f"Added content embeddings to {len(group_indices)}/{len(groups)} groups"
+    )
     return groups
 
 
@@ -159,16 +173,32 @@ def extract_structural_features(candidate: dict) -> list[float]:
 
 def main():
     parser = argparse.ArgumentParser(description="Generate UnifiedTRN training data")
-    parser.add_argument("--search-data", type=str, required=True,
-                        help="MWQueryGroups JSON (mw_synthetic_groups_v5_hard2.json)")
-    parser.add_argument("--build-data", type=str, required=True,
-                        help="Slot training data JSON (slot_training_data.json)")
-    parser.add_argument("--output", type=str, required=True,
-                        help="Output unified JSON path")
-    parser.add_argument("--skip-embeddings", action="store_true",
-                        help="Skip embedding (use if content_embedding already present)")
-    parser.add_argument("--enrich-collection", type=str, default=None,
-                        help="Qdrant collection to enrich build data (e.g., dev_playbook_cosmetic_injections)")
+    parser.add_argument(
+        "--search-data",
+        type=str,
+        required=True,
+        help="MWQueryGroups JSON (mw_synthetic_groups_v5_hard2.json)",
+    )
+    parser.add_argument(
+        "--build-data",
+        type=str,
+        required=True,
+        help="Slot training data JSON (slot_training_data.json)",
+    )
+    parser.add_argument(
+        "--output", type=str, required=True, help="Output unified JSON path"
+    )
+    parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Skip embedding (use if content_embedding already present)",
+    )
+    parser.add_argument(
+        "--enrich-collection",
+        type=str,
+        default=None,
+        help="Qdrant collection to enrich build data (e.g., dev_playbook_cosmetic_injections)",
+    )
     args = parser.parse_args()
 
     # Load search data
@@ -184,7 +214,9 @@ def main():
     # Verify structural features exist
     sample_cand = search_groups[0]["candidates"][0]
     feat_keys = [f for f in FEATURE_NAMES_V5 if f in sample_cand]
-    logger.info(f"Found {len(feat_keys)}/{len(FEATURE_NAMES_V5)} feature keys in candidates")
+    logger.info(
+        f"Found {len(feat_keys)}/{len(FEATURE_NAMES_V5)} feature keys in candidates"
+    )
 
     # Load build data
     with open(args.build_data) as f:
@@ -193,7 +225,9 @@ def main():
 
     # Verify build data has embeddings
     if build_pairs and "content_embedding" not in build_pairs[0]:
-        logger.error("Build data missing content_embedding — run generate_slot_training_data.py first")
+        logger.error(
+            "Build data missing content_embedding — run generate_slot_training_data.py first"
+        )
         return
 
     # Optionally enrich with Qdrant document collection
@@ -201,7 +235,9 @@ def main():
         qdrant_build = extract_qdrant_build_pairs(args.enrich_collection)
         if qdrant_build:
             build_pairs.extend(qdrant_build)
-            logger.info(f"Enriched with {len(qdrant_build)} Qdrant build pairs, total: {len(build_pairs)}")
+            logger.info(
+                f"Enriched with {len(qdrant_build)} Qdrant build pairs, total: {len(build_pairs)}"
+            )
 
     # Package into unified format
     unified = {
@@ -209,7 +245,9 @@ def main():
         "build_pairs": build_pairs,
         "metadata": {
             "n_search_groups": len(search_groups),
-            "n_search_with_content": sum(1 for g in search_groups if g.get("content_embedding")),
+            "n_search_with_content": sum(
+                1 for g in search_groups if g.get("content_embedding")
+            ),
             "n_build_pairs": len(build_pairs),
             "structural_dim": len(FEATURE_NAMES_V5),
             "content_dim": 384,
@@ -221,7 +259,9 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(unified, f)
-    logger.info(f"Saved to {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
+    logger.info(
+        f"Saved to {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f} MB)"
+    )
 
 
 if __name__ == "__main__":

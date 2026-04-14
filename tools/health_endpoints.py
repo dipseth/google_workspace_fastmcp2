@@ -60,11 +60,7 @@ def setup_health_endpoints(
             )
 
             # Use 503 for unhealthy (critical memory) so orchestrators can act
-            http_status = (
-                503
-                if health_status.status == "unhealthy"
-                else 200
-            )
+            http_status = 503 if health_status.status == "unhealthy" else 200
 
             return JSONResponse(
                 status_code=http_status,
@@ -114,9 +110,5 @@ def setup_health_endpoints(
             )
 
     logger.info("✅ Health check endpoints registered:")
-    logger.info(
-        "   • /health - Comprehensive health status (for liveness probe)"
-    )
-    logger.info(
-        "   • /ready - Readiness check (for readiness probe)"
-    )
+    logger.info("   • /health - Comprehensive health status (for liveness probe)")
+    logger.info("   • /ready - Readiness check (for readiness probe)")

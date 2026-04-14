@@ -86,9 +86,7 @@ class TestArgumentRecovery:
         call_next = AsyncMock(return_value=expected_result)
 
         with (
-            patch(
-                "middleware.sampling_middleware.SamplingContext"
-            ) as MockSamplingCtx,
+            patch("middleware.sampling_middleware.SamplingContext") as MockSamplingCtx,
             patch(
                 "config.settings.settings",
                 SimpleNamespace(sampling_argument_recovery_enabled=True),
@@ -117,9 +115,7 @@ class TestArgumentRecovery:
         mock_sample_result.text = "this is not json"
 
         with (
-            patch(
-                "middleware.sampling_middleware.SamplingContext"
-            ) as MockSamplingCtx,
+            patch("middleware.sampling_middleware.SamplingContext") as MockSamplingCtx,
             patch(
                 "config.settings.settings",
                 SimpleNamespace(sampling_argument_recovery_enabled=True),
@@ -169,9 +165,7 @@ class TestArgumentRecovery:
         call_next = AsyncMock(side_effect=Exception("still broken"))
 
         with (
-            patch(
-                "middleware.sampling_middleware.SamplingContext"
-            ) as MockSamplingCtx,
+            patch("middleware.sampling_middleware.SamplingContext") as MockSamplingCtx,
             patch(
                 "config.settings.settings",
                 SimpleNamespace(sampling_argument_recovery_enabled=True),
@@ -204,9 +198,7 @@ class TestArgumentRecovery:
         call_next = AsyncMock(return_value=expected_result)
 
         with (
-            patch(
-                "middleware.sampling_middleware.SamplingContext"
-            ) as MockSamplingCtx,
+            patch("middleware.sampling_middleware.SamplingContext") as MockSamplingCtx,
             patch(
                 "config.settings.settings",
                 SimpleNamespace(sampling_argument_recovery_enabled=True),

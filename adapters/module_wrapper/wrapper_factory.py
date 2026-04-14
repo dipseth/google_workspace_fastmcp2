@@ -158,9 +158,7 @@ def generate_dsl_quick_reference(
     # Symbols by category
     lines.append("### Symbols")
     for category, components in categories.items():
-        mappings = [
-            f"{symbols.get(c, '?')}={c}" for c in components if c in symbols
-        ]
+        mappings = [f"{symbols.get(c, '?')}={c}" for c in components if c in symbols]
         if mappings:
             lines.append(f"**{category}:** {', '.join(mappings)}")
 

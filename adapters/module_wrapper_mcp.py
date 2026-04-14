@@ -34,6 +34,7 @@ from .module_wrapper import ModuleWrapper
 
 logger = setup_logger()
 
+
 class ModuleWrapperMiddleware(Middleware):
     """
     Middleware for integrating ModuleWrapper with MCP using proper hooks.
@@ -307,6 +308,7 @@ class ModuleWrapperMiddleware(Middleware):
             List of module names
         """
         return list(self.wrappers.keys())
+
 
 def setup_module_wrapper_tools(mcp):
     """Setup MCP tools for ModuleWrapper using FastMCP context pattern."""
@@ -664,6 +666,7 @@ def setup_module_wrapper_tools(mcp):
             return WrappedModulesResponse(
                 modules=[], count=0, error=f"Error listing modules: {str(e)}"
             )
+
 
 def setup_module_wrapper_middleware(mcp, modules_to_wrap=None, tool_pushdown=False):
     """

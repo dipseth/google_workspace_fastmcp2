@@ -26,6 +26,7 @@ logger = setup_logger()
 # SYMBOLS MIXIN
 # =============================================================================
 
+
 class SymbolsMixin:
     """
     Mixin providing advanced symbol functionality.
@@ -759,6 +760,7 @@ class SymbolsMixin:
     # both SymbolsMixin and SearchMixin, the methods are available through
     # the SearchMixin. No wrapper methods needed here as Python's MRO will
     # resolve to the SearchMixin implementations.
+
 
 # Export for convenience
 __all__ = [

@@ -189,7 +189,9 @@ def set_user_email_context_in_session(user_email: str, session_id: str = None) -
             )
             with open(oauth_auth_file, "w") as f:
                 json.dump({"authenticated_email": user_email}, f)
-            logger.debug(f"Set user email in OAuth auth file: {redact_email(user_email)}")
+            logger.debug(
+                f"Set user email in OAuth auth file: {redact_email(user_email)}"
+            )
         except Exception as e:
             logger.debug(f"Could not store user email in OAuth auth file: {e}")
 
@@ -251,7 +253,9 @@ def get_user_email_from_oauth() -> Optional[str]:
         if latest_file.suffix == ".enc":
             safe_email = latest_file.stem.replace("_credentials", "")
             user_email = safe_email.replace("_at_", "@").replace("_", ".")
-            logger.info(f"✅ Extracted user email from .enc filename: {redact_email(user_email)}")
+            logger.info(
+                f"✅ Extracted user email from .enc filename: {redact_email(user_email)}"
+            )
             return user_email
 
         # For .json files, read the content
@@ -260,7 +264,9 @@ def get_user_email_from_oauth() -> Optional[str]:
 
         user_email = creds_data.get("user_email")
         if user_email:
-            logger.info(f"✅ Retrieved user email from credential file: {redact_email(user_email)}")
+            logger.info(
+                f"✅ Retrieved user email from credential file: {redact_email(user_email)}"
+            )
             return user_email
         else:
             logger.warning(
@@ -294,7 +300,9 @@ async def get_user_email_context() -> Optional[str]:
         ctx = get_context()
         email = await ctx.get_state("user_email")
         if email:
-            logger.debug(f"Retrieved user email from FastMCP context: {redact_email(email)}")
+            logger.debug(
+                f"Retrieved user email from FastMCP context: {redact_email(email)}"
+            )
             return email
     except RuntimeError:
         logger.debug("Cannot get user email context - not in a FastMCP request context")
@@ -303,7 +311,9 @@ async def get_user_email_context() -> Optional[str]:
     logger.debug("Attempting OAuth file-based authentication fallback")
     email = get_user_email_from_oauth()
     if email:
-        logger.info(f"🔄 Using OAuth file-based authentication fallback for: {redact_email(email)}")
+        logger.info(
+            f"🔄 Using OAuth file-based authentication fallback for: {redact_email(email)}"
+        )
     return email
 
 
@@ -1370,7 +1380,9 @@ def restore_session_tool_state_by_email(new_session_id: str, user_email: str) ->
     """
     old_session_id = find_session_id_by_email(user_email)
     if not old_session_id:
-        logger.debug(f"No previous session found for user {redact_email(user_email)} to restore from")
+        logger.debug(
+            f"No previous session found for user {redact_email(user_email)} to restore from"
+        )
         return False
 
     if old_session_id == new_session_id:

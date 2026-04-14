@@ -37,7 +37,12 @@ def _build_email_registry() -> ComponentRegistry:
 
     # Map block types to their key fields
     block_fields = {
-        "HeroBlock": {"title": "str", "subtitle": "str", "cta_text": "str", "cta_url": "str"},
+        "HeroBlock": {
+            "title": "str",
+            "subtitle": "str",
+            "cta_text": "str",
+            "cta_url": "str",
+        },
         "TextBlock": {"text": "str", "font_size": "str", "align": "str"},
         "ButtonBlock": {"text": "str", "url": "str", "background_color": "str"},
         "ImageBlock": {"src": "str", "alt": "str", "width": "str"},
@@ -102,10 +107,7 @@ class EmailBuilder:
         if not result or not result.is_valid:
             return None
 
-        components = [
-            (name, count)
-            for name, count in result.component_counts.items()
-        ]
+        components = [(name, count) for name, count in result.component_counts.items()]
 
         return ParsedStructure(
             components=components,
@@ -146,9 +148,7 @@ class EmailBuilder:
         from gchat.card_builder.slot_assignment import reassign_supply_map
         from research.trm.h2.domain_config import EMAIL_DOMAIN
 
-        return reassign_supply_map(
-            supply_map, demands, domain_config=EMAIL_DOMAIN
-        )
+        return reassign_supply_map(supply_map, demands, domain_config=EMAIL_DOMAIN)
 
     def render_component(self, name: str, params: Dict[str, Any]) -> Any:
         """Render an email block to MJML markup.
@@ -210,20 +210,24 @@ class EmailBuilder:
         header_title = kwargs.get("header_title")
         header_logo = kwargs.get("header_logo_url")
         if header_title or header_logo:
-            blocks.append(mt.HeaderBlock(
-                title=header_title,
-                logo_url=header_logo,
-            ))
+            blocks.append(
+                mt.HeaderBlock(
+                    title=header_title,
+                    logo_url=header_logo,
+                )
+            )
 
         # Hero section
         hero_title = kwargs.get("hero_title")
         if hero_title:
-            blocks.append(mt.HeroBlock(
-                title=hero_title,
-                subtitle=kwargs.get("hero_subtitle"),
-                cta_text=kwargs.get("hero_cta_text"),
-                cta_url=kwargs.get("hero_cta_url"),
-            ))
+            blocks.append(
+                mt.HeroBlock(
+                    title=hero_title,
+                    subtitle=kwargs.get("hero_subtitle"),
+                    cta_text=kwargs.get("hero_cta_text"),
+                    cta_url=kwargs.get("hero_cta_url"),
+                )
+            )
 
         # Main text content
         text_content = kwargs.get("text", description)
@@ -233,10 +237,12 @@ class EmailBuilder:
         # Image
         image_src = kwargs.get("image_src")
         if image_src:
-            blocks.append(mt.ImageBlock(
-                src=image_src,
-                alt=kwargs.get("image_alt", ""),
-            ))
+            blocks.append(
+                mt.ImageBlock(
+                    src=image_src,
+                    alt=kwargs.get("image_alt", ""),
+                )
+            )
 
         # Button CTA
         button_text = kwargs.get("button_text")
@@ -258,8 +264,7 @@ class EmailBuilder:
         table_rows = kwargs.get("table_rows")
         if table_headers and table_rows:
             rows = [
-                mt.TableRow(cells=r) if isinstance(r, list) else r
-                for r in table_rows
+                mt.TableRow(cells=r) if isinstance(r, list) else r for r in table_rows
             ]
             blocks.append(mt.TableBlock(headers=table_headers, rows=rows))
 
@@ -293,10 +298,12 @@ class EmailBuilder:
         # Footer (always last)
         footer_text = kwargs.get("footer_text")
         if footer_text:
-            blocks.append(mt.FooterBlock(
-                text=footer_text,
-                unsubscribe_url=kwargs.get("unsubscribe_url"),
-            ))
+            blocks.append(
+                mt.FooterBlock(
+                    text=footer_text,
+                    unsubscribe_url=kwargs.get("unsubscribe_url"),
+                )
+            )
 
         spec_kwargs = {"subject": subject, "blocks": blocks}
         if preheader:
