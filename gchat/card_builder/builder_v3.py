@@ -115,7 +115,7 @@ class GchatCardBuilder:
                 supply_map[pool_key].extend(items)
 
         # Merge explicit content kwargs
-        for key in ("buttons", "chips", "grid_items", "carousel_cards", "content_texts"):
+        for key in ("buttons", "chips", "columns", "grid_items", "carousel_cards", "content_texts"):
             explicit = content_kwargs.get(key)
             if explicit and key in supply_map:
                 supply_map[key].extend(explicit)
