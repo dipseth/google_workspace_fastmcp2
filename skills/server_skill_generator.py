@@ -107,25 +107,39 @@ chat cards, sandboxed code execution, Jinja2 macros, privacy middleware, and \
 Qdrant-backed response history. Not all tools are active at any given time — use \
 `manage_tools(action="list")` to see what's currently enabled."""
 
-_EMAIL_PARAMS_TABLE = """\
+def _email_params_table(symbols: Dict[str, str]) -> str:
+    """Generate email parameter table with dynamic symbols."""
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+    spec = s("EmailSpec")
+    hero = s("HeroBlock")
+    text = s("TextBlock")
+    return f"""\
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `email_description` | str | required | DSL structure string — see Email DSL Symbols table |
-| `email_params` | dict/str | None | Block content keyed by symbol. Supports `_shared`/`_items` merging |
+| `email_description` | str | required | DSL structure ONLY + optional subject. Text after the DSL becomes the email subject (e.g., `{spec}[{hero}, {text}] Welcome aboard`) |
+| `email_params` | dict/str | None | **REQUIRED for content** — block text/titles/URLs go here, keyed by symbol. `email_description` is structure ONLY. Also accepts `subject` and `preheader` keys. Supports `_shared`/`_items` merging |
 | `to` | str/list | "myself" | Recipients: "myself", comma-separated string, or list of emails |
+| `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `action` | "send"/"draft" | "draft" | Draft is safe default; "send" delivers immediately |
 | `cc` / `bcc` | str | None | Optional CC/BCC recipients |"""
 
-_CARD_PARAMS_TABLE = """\
+
+def _card_params_table(symbols: Dict[str, str]) -> str:
+    """Generate card parameter table with dynamic symbols."""
+    s = lambda name, fallback="?": symbols.get(name, fallback)  # noqa: E731
+    section = s("Section")
+    dtext = s("DecoratedText")
+    return f"""\
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `card_description` | str | required | DSL structure string — see Card DSL Symbols table |
-| `card_params` | dict/str | None | Widget content keyed by symbol. Supports `_shared`/`_items` merging |
+| `card_description` | str | required | DSL structure string — see Card DSL Symbols table. Supports both Structure DSL (`{section}[{dtext}x2]`) and Content DSL (`{dtext} 'text' success bold`) |
+| `card_params` | dict/str | None | Widget content keyed by symbol. Supports `_shared`/`_items` merging. Takes priority over Content DSL in `card_description` |
 | `space_id` | str | None | Chat space ID. Required only for API mode (no webhook) |
+| `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `webhook_url` | str | None | Webhook URL. Defaults to `MCP_CHAT_WEBHOOK` env var |
 | `thread_key` | str | None | Thread key for replies |"""
 
@@ -561,7 +575,7 @@ def generate_server_skill(
         "",
         "Composes responsive HTML emails via DSL notation, then sends or saves as draft.",
         "",
-        _EMAIL_PARAMS_TABLE,
+        _email_params_table(email_symbols),
         "",
         _email_symbol_table(email_symbols),
         "",
@@ -580,7 +594,7 @@ def generate_server_skill(
         "",
         "Sends a card to Google Chat using DSL notation for structure control.",
         "",
-        _CARD_PARAMS_TABLE,
+        _card_params_table(card_symbols),
         "",
         _card_symbol_table(card_symbols),
         "",

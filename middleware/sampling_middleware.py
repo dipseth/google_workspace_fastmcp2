@@ -1413,10 +1413,45 @@ class EnhancedSamplingMiddleware(Middleware):
         # Start OTEL parent span for this tool's sampling phases
         _tool_span = None
         _tool_span_token = None
+        _tool_output_summary = ""
         try:
             from middleware.langfuse_integration import start_tool_span
 
-            _tool_span, _tool_span_token = start_tool_span(tool_name)
+            # Build input summary from tool arguments for Langfuse display.
+            # context.message is CallToolRequestParams with .name: str, .arguments: dict | None
+            _tool_input_summary = ""
+            try:
+                import json as _json
+
+                _tool_input_summary = _json.dumps(
+                    context.message.arguments or {}, default=str
+                )[:1000]
+            except Exception:
+                pass
+
+            # Extract user/session for Langfuse root span attributes
+            _tool_user_id = ""
+            _tool_session_id = ""
+            try:
+                from auth.context import (
+                    get_session_context_sync,
+                    get_user_email_context_sync,
+                )
+
+                _tool_user_id = get_user_email_context_sync() or ""
+                _tool_session_id = get_session_context_sync() or ""
+            except Exception:
+                pass
+
+            _tool_args = context.message.arguments or {}
+            _tool_span, _tool_span_token = start_tool_span(
+                tool_name,
+                input_summary=_tool_input_summary,
+                user_id=_tool_user_id,
+                session_id=_tool_session_id,
+                tags=["mcp", "sampling"],
+                tool_args=_tool_args,
+            )
         except Exception:
             pass
 
@@ -1469,7 +1504,10 @@ class EnhancedSamplingMiddleware(Middleware):
                         and not validation.is_valid
                         and validation.validated_input
                     ):
-                        context.message.arguments.update(validation.validated_input)
+                        # Reassign to avoid mutating the caller's dict in-place
+                        merged = dict(context.message.arguments)
+                        merged.update(validation.validated_input)
+                        context.message.arguments = merged
                         if self.enable_debug:
                             logger.debug(
                                 f"Validation agent applied corrections for {tool_name}: "
@@ -1538,6 +1576,12 @@ class EnhancedSamplingMiddleware(Middleware):
             if validation is not None:
                 result = self._attach_validation_metadata(result, validation)
 
+            # Capture output summary for Langfuse span before returning
+            try:
+                _tool_output_summary = str(result)[:1000]
+            except Exception:
+                pass
+
             return result
 
         except Exception as e:
@@ -1556,7 +1600,11 @@ class EnhancedSamplingMiddleware(Middleware):
             try:
                 from middleware.langfuse_integration import end_span
 
-                end_span(_tool_span, _tool_span_token)
+                end_span(
+                    _tool_span,
+                    _tool_span_token,
+                    output_summary=_tool_output_summary,
+                )
             except Exception:
                 pass
 
@@ -1804,9 +1852,10 @@ class EnhancedSamplingMiddleware(Middleware):
                 list(corrected_args.keys()),
             )
 
-            # Apply corrected arguments and retry once
-            context.message.arguments.clear()
-            context.message.arguments.update(corrected_args)
+            # Apply corrected arguments and retry once.
+            # IMPORTANT: Reassign the dict instead of mutating in-place (.clear/.update)
+            # to avoid corrupting the original params dict that the sandbox caller holds.
+            context.message.arguments = dict(corrected_args)
 
             try:
                 return await call_next(context)
@@ -1817,8 +1866,7 @@ class EnhancedSamplingMiddleware(Middleware):
                     retry_exc,
                 )
                 # Restore original args so error message makes sense
-                context.message.arguments.clear()
-                context.message.arguments.update(original_args)
+                context.message.arguments = dict(original_args)
                 return None
 
         except Exception as exc:

@@ -496,6 +496,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
         get_tool_examples,
     )
 
+    from tools.common_types import UserGoogleEmail
+
     dsl_field_desc = _get_dsl_field_description()
     dsl_full_doc = get_dsl_documentation(include_examples=True, include_hierarchy=True)
     tool_examples = get_tool_examples(max_examples=5)
@@ -724,14 +726,11 @@ def setup_card_tools(mcp: FastMCP) -> None:
         },
     )
     async def send_dynamic_card(
-        user_google_email: Annotated[
-            str,
-            Field(description="Google email for authentication"),
-        ],
         card_description: Annotated[
             str,
             Field(description=card_description_help),
         ],
+        user_google_email: UserGoogleEmail = None,
         space_id: Annotated[
             Optional[str],
             Field(

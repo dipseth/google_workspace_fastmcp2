@@ -128,6 +128,7 @@ class QdrantMixin:
             logger.info("ModuleWrapper using centralized Qdrant client")
 
         except Exception as e:
+            self.client = None
             logger.error(f"Failed to get Qdrant client: {e}")
             raise
 

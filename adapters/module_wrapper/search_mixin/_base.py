@@ -83,6 +83,29 @@ class SearchMixin:
     _has_content_vector: Optional[bool] = None  # Cached result
 
     # =========================================================================
+    # DEGRADED-MODE GUARD
+    # =========================================================================
+
+    def _require_qdrant(self, caller: str = "") -> bool:
+        """Check if Qdrant is available, attempting lazy reconnect if degraded.
+
+        Returns True if Qdrant + embeddings are ready.  Returns False
+        (and logs at DEBUG level) when the wrapper is in degraded mode
+        and reconnection fails.  Search methods should return ``[]``
+        when this returns False.
+        """
+        if not getattr(self, "_degraded", False):
+            return True
+        # Attempt lazy reconnect
+        if hasattr(self, "_try_reconnect") and self._try_reconnect():
+            return True
+        logger.debug(
+            f"Qdrant unavailable for {caller or 'search'} "
+            f"— returning empty results (degraded mode)"
+        )
+        return False
+
+    # =========================================================================
     # COLLECTION SCHEMA DETECTION
     # =========================================================================
 

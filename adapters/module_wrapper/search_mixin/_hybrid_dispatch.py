@@ -32,6 +32,9 @@ def search_hybrid_dispatch(
     Falls back to ENABLE_MULTIDIM_SEARCH for backwards compatibility.
     Same signature as search_hybrid / search_hybrid_multidim / search_hybrid_learned.
     """
+    if not self._require_qdrant("search_hybrid_dispatch"):
+        return [], [], []
+
     search_mode = "rrf"
     settings = None
     try:

@@ -74,14 +74,20 @@ async def embedding_lifespan(server: Any):
 
     service = get_embedding_service()
 
-    # Preload configured slots
+    # Preload configured slots (non-blocking — failure enters degraded mode)
     eager = getattr(settings, "embedding_eager_load", "")
     if eager:
         slots = [s.strip() for s in eager.split(",") if s.strip()]
         if slots:
-            logger.info(f"Embedding lifespan: preloading {slots}...")
-            await service.preload(*slots)
-            logger.info(f"Embedding lifespan: preloaded {slots}")
+            try:
+                logger.info(f"Embedding lifespan: preloading {slots}...")
+                await service.preload(*slots)
+                logger.info(f"Embedding lifespan: preloaded {slots}")
+            except Exception as e:
+                logger.warning(
+                    f"Embedding lifespan: preload failed (degraded mode): {e} "
+                    f"— models will attempt lazy loading on first use"
+                )
 
     try:
         yield {"embedding_service": service}
