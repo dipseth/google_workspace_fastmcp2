@@ -495,7 +495,6 @@ def setup_card_tools(mcp: FastMCP) -> None:
         get_gchat_symbols,
         get_tool_examples,
     )
-
     from tools.common_types import UserGoogleEmail
 
     dsl_field_desc = _get_dsl_field_description()

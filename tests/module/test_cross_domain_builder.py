@@ -4,8 +4,9 @@ Tests that the same description can produce valid output in both gchat and email
 domains, with correct pool routing, supply maps, and output format validation.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from adapters.module_wrapper.builder_base import (
     BuilderProtocol,
@@ -13,7 +14,6 @@ from adapters.module_wrapper.builder_base import (
     ParsedStructure,
 )
 from research.trm.h2.domain_config import EMAIL_DOMAIN, GCHAT_DOMAIN
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

@@ -31,7 +31,6 @@ logger = setup_logger()
 def _build_gchat_registry() -> ComponentRegistry:
     """Build a ComponentRegistry from the gchat COMPONENT_PARAMS constant."""
     from gchat.card_builder.constants import COMPONENT_PARAMS
-
     from research.trm.h2.domain_config import GCHAT_DOMAIN
 
     registry = ComponentRegistry(domain_id="gchat")
