@@ -165,8 +165,8 @@ def setup_skills_provider(
 
             logger.info(f"Generated skills for {module_name} -> {skill_dir}")
 
-        except Exception as e:
-            logger.error(f"Failed to generate skills for {module_name}: {e}")
+        except Exception:
+            logger.exception(f"Failed to generate skills for {module_name}")
             continue
 
     # Generate cross-module server skill (combines card + email symbol maps)
@@ -184,8 +184,8 @@ def setup_skills_provider(
         if card_w and email_w:
             write_server_skill(skills_root, card_w, email_w)
             skills_generated = True
-    except Exception as e:
-        logger.error(f"Failed to generate server skill: {e}")
+    except Exception:
+        logger.exception("Failed to generate server skill")
 
     if not skills_generated:
         logger.warning("No skills were generated")
@@ -196,11 +196,12 @@ def setup_skills_provider(
         provider = SkillsDirectoryProvider(
             roots=skills_root,
             reload=auto_regenerate,  # Re-scan on each request if regenerating
+            supporting_files="resources",  # Expose every file in list_resources for remote clients that don't follow the manifest->template flow
         )
         mcp.add_provider(provider)
         logger.info(f"Skills provider registered: {skills_root}")
-    except Exception as e:
-        logger.error(f"Failed to register skills provider: {e}")
+    except Exception:
+        logger.exception("Failed to register skills provider")
         return None
 
     return skills_root
