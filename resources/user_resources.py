@@ -27,6 +27,7 @@ from auth.context import (
     list_sessions,
 )
 from auth.google_auth import get_valid_credentials
+from auth.types import SessionKey
 from config.enhanced_logging import setup_logger
 from tools.server_tools import _get_globally_disabled_tools
 
@@ -73,6 +74,22 @@ class UserEmailResponse(TypedDict):
     suggestion: NotRequired[
         Optional[str]
     ]  # Suggested action to resolve authentication issues
+
+
+class UserIdentityResponse(TypedDict):
+    """Response model for user://current/identity — lightweight active-account summary.
+
+    Designed as the subscription target for clients that want to know when the
+    server's active Google account changes. AuthMiddleware emits
+    `notifications/resources/updated` for this URI whenever the resolved session
+    identity changes between tool calls.
+    """
+
+    email: NotRequired[Optional[str]]  # Resolved Google account email, or None if unauthenticated
+    session_id: NotRequired[Optional[str]]  # Session identifier the identity is bound to
+    auth_provenance: NotRequired[Optional[str]]  # How identity was resolved (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    authenticated: bool  # True if an email is resolved for the current session
+    timestamp: str  # ISO 8601 timestamp when this response was generated
 
 
 class UserProfileResponse(TypedDict):
@@ -471,6 +488,48 @@ def setup_user_resources(mcp: FastMCP) -> None:
             session_id=await get_session_context(),
             timestamp=datetime.now().isoformat(),
             authenticated=True,
+        )
+        return [ResourceContent(response, mime_type="application/json")]
+
+    @mcp.resource(
+        uri="user://current/identity",
+        name="Current User Identity",
+        description=(
+            "Lightweight active-account identity: email, session, and auth provenance. "
+            "Optimized for client subscriptions — AuthMiddleware fires "
+            "notifications/resources/updated for this URI when the active Google "
+            "account changes between tool calls."
+        ),
+        mime_type="application/json",
+        tags={"authentication", "user", "identity", "session", "subscribe"},
+        meta={
+            "template_accessible": True,
+            "property_paths": [
+                "email",
+                "session_id",
+                "auth_provenance",
+                "authenticated",
+                "timestamp",
+            ],
+            "response_model": "UserIdentityResponse",
+            "supports_subscription": True,
+        },
+    )
+    async def get_current_user_identity(ctx: Context) -> list[ResourceContent]:
+        """Return the current session's resolved identity for subscription clients."""
+        user_email = await get_user_email_context()
+        session_id = await get_session_context()
+        auth_provenance = (
+            get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
+            if session_id
+            else None
+        )
+        response = UserIdentityResponse(
+            email=user_email,
+            session_id=session_id,
+            auth_provenance=auth_provenance,
+            authenticated=bool(user_email),
+            timestamp=datetime.now().isoformat(),
         )
         return [ResourceContent(response, mime_type="application/json")]
 

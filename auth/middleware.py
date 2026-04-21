@@ -244,6 +244,12 @@ class AuthMiddleware(Middleware):
         else:
             logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
 
+        # Capture prior identity before extraction so we can fire
+        # notifications/resources/updated for user://current/* if it changes.
+        previous_email = (
+            get_session_data(session_id, SessionKey.USER_EMAIL) if session_id else None
+        )
+
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
@@ -395,6 +401,16 @@ class AuthMiddleware(Middleware):
                         await self._auto_inject_email_parameter(context, user_email)
             except Exception as e:
                 logger.debug(f"Credential cross-check failed: {e}")
+
+        # Emit notifications/resources/updated for user://current/* when the
+        # resolved identity changes (including None -> email and email -> None).
+        # Clients subscribed via resources/subscribe will re-read the resources.
+        if (user_email or None) != (previous_email or None):
+            await self._notify_identity_changed(
+                context,
+                previous_email=previous_email,
+                new_email=user_email,
+            )
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
         # they created via start_google_auth in this session.
@@ -2734,6 +2750,56 @@ class AuthMiddleware(Middleware):
     # CodeMode meta-tools use strict Pydantic schemas — skip user_google_email injection.
     # Actual tool names: tags, search, get_schema, execute
     _CODE_MODE_TOOLS = frozenset({"tags", "search", "get_schema", "execute"})
+
+    # Resources that reflect active-account identity — clients can `resources/subscribe`
+    # to any of these and will get `notifications/resources/updated` on account change.
+    _IDENTITY_RESOURCE_URIS = (
+        "user://current/identity",
+        "user://current/email",
+        "user://current/profile",
+    )
+
+    async def _notify_identity_changed(
+        self,
+        context: MiddlewareContext,
+        previous_email: Optional[str],
+        new_email: Optional[str],
+    ) -> None:
+        """Fire notifications/resources/updated for user://current/* on identity change.
+
+        Notifications only flow inside an active MCP request context, so this is a
+        best-effort emit — failures are logged at debug level and never block the
+        tool call. Emits one notification per identity-sensitive resource URI so
+        clients subscribed to any of them will re-read.
+        """
+        try:
+            from mcp.types import (
+                ResourceUpdatedNotification,
+                ResourceUpdatedNotificationParams,
+            )
+
+            fmcp_ctx = getattr(context, "fastmcp_context", None)
+            if fmcp_ctx is None:
+                logger.debug(
+                    "Skipping identity-changed notifications: no fastmcp_context"
+                )
+                return
+
+            for uri in self._IDENTITY_RESOURCE_URIS:
+                await fmcp_ctx.send_notification(
+                    ResourceUpdatedNotification(
+                        params=ResourceUpdatedNotificationParams(uri=uri)
+                    )
+                )
+
+            logger.info(
+                "📡 Identity changed %s -> %s; sent resources/updated for %d URIs",
+                redact_email(previous_email) if previous_email else "None",
+                redact_email(new_email) if new_email else "None",
+                len(self._IDENTITY_RESOURCE_URIS),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send identity-changed notifications: {e}")
 
     async def _auto_inject_email_parameter(
         self, context: MiddlewareContext, user_email: str
