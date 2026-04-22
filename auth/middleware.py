@@ -244,12 +244,6 @@ class AuthMiddleware(Middleware):
         else:
             logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
 
-        # Capture prior identity before extraction so we can fire
-        # notifications/resources/updated for user://current/* if it changes.
-        previous_email = (
-            get_session_data(session_id, SessionKey.USER_EMAIL) if session_id else None
-        )
-
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
@@ -402,15 +396,26 @@ class AuthMiddleware(Middleware):
             except Exception as e:
                 logger.debug(f"Credential cross-check failed: {e}")
 
-        # Emit notifications/resources/updated for user://current/* when the
-        # resolved identity changes (including None -> email and email -> None).
-        # Clients subscribed via resources/subscribe will re-read the resources.
-        if (user_email or None) != (previous_email or None):
+        # Emit notifications/resources/updated for user://current/* only when
+        # the identity we're *notifying about* changes. `IDENTITY_NOTIFIED`
+        # records the last email we emitted for on this session, so steady
+        # state is zero emits and a stray identity oscillation within one
+        # session still only fires once per actual change.
+        last_notified = (
+            get_session_data(session_id, SessionKey.IDENTITY_NOTIFIED)
+            if session_id
+            else None
+        )
+        if (user_email or None) != (last_notified or None):
             await self._notify_identity_changed(
                 context,
-                previous_email=previous_email,
+                previous_email=last_notified,
                 new_email=user_email,
             )
+            if session_id:
+                store_session_data(
+                    session_id, SessionKey.IDENTITY_NOTIFIED, user_email or ""
+                )
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
         # they created via start_google_auth in this session.

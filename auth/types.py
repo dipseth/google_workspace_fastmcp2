@@ -32,6 +32,7 @@ class SessionKey(str, Enum):
 
     USER_EMAIL = "user_email"
     AUTH_PROVENANCE = "auth_provenance"
+    IDENTITY_NOTIFIED = "identity_notified"  # Last email we sent resources/updated for (dedup)
     API_KEY_OWNED_ACCOUNTS = "api_key_owned_accounts"
     SESSION_AUTHED_EMAILS = "session_authed_emails"
     SESSION_DISABLED_TOOLS = "session_disabled_tools"
