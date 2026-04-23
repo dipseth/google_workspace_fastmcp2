@@ -246,6 +246,10 @@ class AuthMiddleware(Middleware):
 
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
+        # Track which extraction path won — mirrors on_read_resource for parity.
+        # Stored as SessionKey.IDENTITY_SOURCE so user://current/identity can
+        # surface "jwt" vs "session" vs "oauth_file" for dual-auth diagnostics.
+        _identity_source: Optional[str] = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
 
         # Detect auth provenance (api_key vs oauth) and store in session
@@ -256,6 +260,7 @@ class AuthMiddleware(Middleware):
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
+            _identity_source = "jwt"
             logger.debug(
                 f"🎫 Extracted user from JWT token for tool {tool_name}: {user_email}"
             )
@@ -275,6 +280,7 @@ class AuthMiddleware(Middleware):
         if not user_email and auth_provenance == AuthProvenance.GITHUB_OAUTH:
             user_email = self._extract_user_from_github_token(session_id)
             if user_email:
+                _identity_source = "github_oauth"
                 logger.debug(
                     f"🐙 Extracted GitHub user for tool {tool_name}: {user_email}"
                 )
@@ -287,6 +293,7 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
+                _identity_source = "google_provider"
                 logger.debug(
                     f"🔑 Extracted user from GoogleProvider for tool {tool_name}: {user_email}"
                 )
@@ -306,6 +313,7 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
+                _identity_source = "session"
                 logger.debug(
                     f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}"
                 )
@@ -326,6 +334,7 @@ class AuthMiddleware(Middleware):
         ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
+                _identity_source = "oauth_file"
                 logger.debug(
                     f"✅ Retrieved user email from OAuth authentication file for tool {tool_name}: {user_email}"
                 )
@@ -365,10 +374,17 @@ class AuthMiddleware(Middleware):
                     )
                 elif session_id:
                     store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
+            if user_email:
+                _identity_source = "tool_args"
             else:
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
+
+        # Persist which extraction path resolved the identity — read back by
+        # user://current/identity to expose jwt/session/oauth_file/tool_args.
+        if _identity_source and session_id:
+            store_session_data(session_id, SessionKey.IDENTITY_SOURCE, _identity_source)
 
         # CREDENTIAL CROSS-CHECK: If per-user API key resolves to an email
         # with no credentials on disk, fall back to .oauth_authentication.json
@@ -407,14 +423,22 @@ class AuthMiddleware(Middleware):
             else None
         )
         if (user_email or None) != (last_notified or None):
+            # NOTE: emit fires before the credential-isolation block below.
+            # If isolation later rejects this call, the client will receive an
+            # identity notification for a session it can't use.  This is
+            # intentional — the identity *did* resolve in session storage, so
+            # the client re-reading user://current/identity will see accurate
+            # state; the failed tool call is an orthogonal error.
             await self._notify_identity_changed(
                 context,
                 previous_email=last_notified,
                 new_email=user_email,
             )
             if session_id:
+                # Store None (not "") so the dedup key is cleanly absent for
+                # unauthenticated states rather than holding a falsy sentinel.
                 store_session_data(
-                    session_id, SessionKey.IDENTITY_NOTIFIED, user_email or ""
+                    session_id, SessionKey.IDENTITY_NOTIFIED, user_email
                 )
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials

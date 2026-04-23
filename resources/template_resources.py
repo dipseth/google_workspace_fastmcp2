@@ -37,6 +37,7 @@ from fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
 from typing_extensions import Annotated
 
+from auth.context import get_user_email_context
 from config.enhanced_logging import setup_logger
 
 logger = setup_logger()
@@ -278,6 +279,51 @@ This resource is handled by EnhancedTemplateMiddleware.""",
 
         # FastMCP 3.0: Return JSON string instead of Pydantic model
         return response.model_dump_json()
+
+    @mcp.resource(
+        uri="template://user_email",
+        name="User Email Template",
+        description="Simple template resource that returns just the user email string - the most basic resource for tools that need only the email address",
+        mime_type="text/plain",
+        tags={"template", "user", "email", "simple", "authentication", "string"},
+    )
+    async def get_template_user_email(ctx: Context) -> str:
+        """Get the authenticated user's email as a simple string for template usage.
+
+        This is the most basic resource for tools that need only the email address without
+        additional metadata. Returns a plain string rather than a JSON object, making it
+        ideal for template substitution and simple email parameter injection.
+
+        Args:
+            ctx: FastMCP Context object providing access to server state and logging
+
+        Returns:
+            str: The authenticated user's email address as a plain string, or an error
+            message string if no user is authenticated. This resource always returns
+            a string (never raises exceptions) to maintain template compatibility.
+
+        Authentication:
+            Requires active user authentication via start_google_auth tool. Returns
+            helpful error message if no authenticated user is found.
+
+        Example Response (Authenticated):
+            "user@company.com"
+
+        Example Response (Not Authenticated):
+            "❌ Authentication error: No authenticated user found in current session. Use start_google_auth tool first."
+
+        Usage:
+            This resource is primarily used by other resources and tools that need to
+            inject the current user's email into API calls or template strings without
+            dealing with complex JSON response parsing.
+        """
+        user_email = await get_user_email_context()
+        if not user_email:
+            # Return a helpful error message as string instead of raising exception
+            # This follows FastMCP2 resource patterns - resources should return data gracefully
+            return "❌ Authentication error: No authenticated user found in current session. Use start_google_auth tool first."
+
+        return user_email
 
     logger.info(
         "✅ Registered 2 template macro resources (all handled by EnhancedTemplateMiddleware)"

@@ -51,11 +51,12 @@ Examples:
 - service://gmail/filters/123 → Specific filter details
 """
 
+from datetime import datetime
 from typing import List
 
 from fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
-from typing_extensions import Annotated
+from typing_extensions import Annotated, NotRequired, Optional, TypedDict
 
 from auth.context import get_user_email_context
 from config.enhanced_logging import setup_logger
@@ -66,6 +67,26 @@ from middleware.service_list_response import (
 )
 
 logger = setup_logger()
+
+
+class ServiceScopesResponse(TypedDict):
+    """Response model for Google service scopes resource (google://services/scopes/{service}).
+
+    Provides OAuth scope information, API version, and configuration details for
+    specific Google services including Drive, Gmail, Calendar, and other Workspace APIs.
+    """
+
+    service: str  # Name of the Google service (e.g., "gmail", "drive", "calendar")
+    default_scopes: List[str]  # List of OAuth scopes required for this service
+    version: str  # API version used for this service (e.g., "v1", "v3")
+    description: str  # Human-readable description of the service
+    timestamp: str  # ISO 8601 timestamp when this response was generated
+    error: NotRequired[
+        Optional[str]
+    ]  # Error message if service information retrieval failed
+    available_services: NotRequired[
+        List[str]
+    ]  # List of all available services if service lookup failed
 
 
 def get_supported_services() -> List[str]:
@@ -472,6 +493,122 @@ This resource is handled by TagBasedResourceMiddleware.""",
 
             return json.dumps(cached_result)
         return str(cached_result)
+
+    @mcp.resource(
+        uri="google://services/scopes/{service}",
+        name="Google Service Scopes",
+        description="Get the required OAuth scopes, API version, and configuration details for a specific Google service including Drive, Gmail, Calendar, and other Workspace APIs",
+        mime_type="application/json",
+        tags={
+            "google",
+            "services",
+            "scopes",
+            "oauth",
+            "api",
+            "configuration",
+            "workspace",
+        },
+        meta={
+            "response_model": "ServiceScopesResponse",
+            "detailed": True,
+            "supports_lookup": True,
+        },
+    )
+    async def get_service_scopes(
+        service: Annotated[
+            str,
+            Field(
+                description="Google service name to get OAuth scope and API configuration information for. Supported services include gmail, drive, calendar, docs, sheets, slides, forms, chat, photos.",
+                examples=[
+                    "gmail",
+                    "drive",
+                    "calendar",
+                    "docs",
+                    "sheets",
+                    "slides",
+                    "forms",
+                    "chat",
+                    "photos",
+                ],
+                min_length=3,
+                max_length=20,
+                pattern=r"^[a-z][a-z0-9_]*$",
+                title="Google Service Name",
+            ),
+        ],
+        ctx: Context,
+    ) -> ServiceScopesResponse:
+        """Get OAuth scopes, API version, and configuration details for a Google service.
+
+        Retrieves comprehensive configuration information for Google Workspace and related
+        services, including required OAuth scopes, API versions, and service descriptions.
+        Essential for understanding authentication requirements and API capabilities.
+
+        Args:
+            service: Name of the Google service to lookup. Must be lowercase and match
+                one of the supported services: gmail, drive, calendar, docs, sheets,
+                slides, forms, chat, photos. Invalid service names return available
+                services list with error details.
+            ctx: FastMCP Context object providing access to server state and logging
+
+        Returns:
+            ServiceScopesResponse: Complete service configuration including:
+            - Required OAuth scopes for API access
+            - API version and endpoint information
+            - Service description and capabilities
+            - Error details and available services if lookup fails
+
+        Example Usage:
+            await get_service_scopes("gmail", ctx)
+            await get_service_scopes("drive", ctx)
+
+        Example Response (Gmail Service):
+            {
+                "service": "gmail",
+                "default_scopes": [
+                    "https://www.googleapis.com/auth/gmail.modify",
+                    "https://www.googleapis.com/auth/gmail.send"
+                ],
+                "version": "v1",
+                "description": "Gmail API for email management",
+                "timestamp": "2024-01-15T10:30:00Z"
+            }
+
+        Example Response (Unknown Service):
+            {
+                "service": "unknown_service",
+                "error": "Unknown Google service: unknown_service",
+                "available_services": ["gmail", "drive", "calendar", "docs"],
+                "default_scopes": [],
+                "version": "unknown",
+                "description": "Service not found",
+                "timestamp": "2024-01-15T10:30:00Z"
+            }
+        """
+        # Import here to avoid circular imports
+        from auth.service_helpers import SERVICE_DEFAULTS
+
+        service_info = SERVICE_DEFAULTS.get(service.lower())
+        if not service_info:
+            return ServiceScopesResponse(
+                service=service,
+                error=f"Unknown Google service: {service}",
+                available_services=list(SERVICE_DEFAULTS.keys()),
+                default_scopes=[],
+                version="unknown",
+                description="Service not found",
+                timestamp=datetime.now().isoformat(),
+            )
+
+        return ServiceScopesResponse(
+            service=service,
+            default_scopes=service_info.get("default_scopes", []),
+            version=service_info.get("version", "v1"),
+            description=service_info.get(
+                "description", f"Google {service.title()} API"
+            ),
+            timestamp=datetime.now().isoformat(),
+        )
 
     logger.info(
         "✅ Registered 3 enhanced service resources (all handled by TagBasedResourceMiddleware)"

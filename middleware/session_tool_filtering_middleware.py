@@ -49,7 +49,7 @@ from auth.context import (
     set_effective_session_id,
     was_minimal_startup_applied,
 )
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -651,7 +651,7 @@ class SessionToolFilteringMiddleware(Middleware):
                     self._processed_sessions.add(effective_session_id)
                     logger.info(
                         f"🔄 Restored session {effective_session_id[:8]}... from previous "
-                        f"session for user {user_email}"
+                        f"session for user {redact_email(user_email)}"
                     )
                     return effective_session_id, True
 
