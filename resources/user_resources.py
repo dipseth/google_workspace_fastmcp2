@@ -87,7 +87,9 @@ class UserIdentityResponse(TypedDict):
 
     email: NotRequired[Optional[str]]  # Resolved Google account email, or None if unauthenticated
     session_id: NotRequired[Optional[str]]  # Session identifier the identity is bound to
-    auth_provenance: NotRequired[Optional[str]]  # How identity was resolved (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    auth_provenance: NotRequired[Optional[str]]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    identity_source: NotRequired[Optional[str]]  # Where this email was resolved from: "jwt" (Bearer claim), "context" (FastMCP state), "session" (session storage), "oauth_file" (disk fallback), or None
+    linked_accounts: NotRequired[List[str]]  # Other Google emails this session can access (dual-auth: client-side OAuth + server-side start_google_auth)
     authenticated: bool  # True if an email is resolved for the current session
     timestamp: str  # ISO 8601 timestamp when this response was generated
 
@@ -508,6 +510,8 @@ def setup_user_resources(mcp: FastMCP) -> None:
                 "email",
                 "session_id",
                 "auth_provenance",
+                "identity_source",
+                "linked_accounts",
                 "authenticated",
                 "timestamp",
             ],
@@ -524,10 +528,32 @@ def setup_user_resources(mcp: FastMCP) -> None:
             if session_id
             else None
         )
+        identity_source = (
+            get_session_data(session_id, SessionKey.IDENTITY_SOURCE)
+            if session_id
+            else None
+        )
+
+        # Dual-auth visibility: enumerate all Google accounts this session can
+        # reach via account linking (client-side OAuth identity + any server-side
+        # accounts authenticated through start_google_auth).
+        linked_accounts: List[str] = []
+        if user_email:
+            try:
+                from auth.user_api_keys import get_accessible_emails
+
+                linked_accounts = sorted(
+                    e for e in get_accessible_emails(user_email) if e != user_email
+                )
+            except Exception as e:
+                logger.debug(f"Could not resolve linked accounts: {e}")
+
         response = UserIdentityResponse(
             email=user_email,
             session_id=session_id,
             auth_provenance=auth_provenance,
+            identity_source=identity_source,
+            linked_accounts=linked_accounts,
             authenticated=bool(user_email),
             timestamp=datetime.now().isoformat(),
         )

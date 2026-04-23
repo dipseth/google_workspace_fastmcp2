@@ -33,6 +33,7 @@ class SessionKey(str, Enum):
     USER_EMAIL = "user_email"
     AUTH_PROVENANCE = "auth_provenance"
     IDENTITY_NOTIFIED = "identity_notified"  # Last email we sent resources/updated for (dedup)
+    IDENTITY_SOURCE = "identity_source"  # Which extraction path resolved the identity: "jwt" | "google_provider" | "session" | "oauth_file"
     API_KEY_OWNED_ACCOUNTS = "api_key_owned_accounts"
     SESSION_AUTHED_EMAILS = "session_authed_emails"
     SESSION_DISABLED_TOOLS = "session_disabled_tools"

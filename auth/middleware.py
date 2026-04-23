@@ -696,13 +696,26 @@ class AuthMiddleware(Middleware):
 
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
+        # Track which extraction path won so we can record it as IDENTITY_SOURCE
+        # after the chain — makes dual-auth (client-side OAuth vs
+        # server-side start_google_auth) distinguishable on the resource read.
+        _identity_source: Optional[str] = None
         logger.debug(f"🔍 Starting user extraction for resource {resource_uri}")
+
+        # Detect auth provenance and store in session so clients inspecting
+        # `user://current/identity` on resource-only sessions can see whether
+        # the client is api-key vs oauth — previously only recorded during
+        # tool calls, which left resource-only sessions reporting null.
+        auth_provenance = self._detect_auth_provenance()
+        if auth_provenance and session_id:
+            store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
+            _identity_source = "jwt"
             logger.debug(
-                f"🎫 Extracted user from JWT token for resource {resource_uri}: {user_email}"
+                f"🎫 Extracted user from JWT token for resource {resource_uri}: {redact_email(user_email)}"
             )
             # Store in session for future use
             if session_id:
@@ -718,8 +731,9 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
+                _identity_source = "google_provider"
                 logger.debug(
-                    f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {user_email}"
+                    f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Store in session for future use
                 if session_id:
@@ -735,8 +749,9 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
+                _identity_source = "session"
                 logger.debug(
-                    f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}"
+                    f"✅ Retrieved user email from session storage for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Also set it in context for immediate use
                 await set_user_email_context(user_email)
@@ -758,8 +773,9 @@ class AuthMiddleware(Middleware):
         ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
+                _identity_source = "oauth_file"
                 logger.debug(
-                    f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {user_email}"
+                    f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Store in session for future use
                 if session_id:
@@ -770,6 +786,10 @@ class AuthMiddleware(Middleware):
                 logger.debug(
                     f"No OAuth authentication file found for resource {resource_uri}"
                 )
+
+        # Record which path won — exposed via user://current/identity
+        if _identity_source and session_id:
+            store_session_data(session_id, SessionKey.IDENTITY_SOURCE, _identity_source)
 
         # Set user email context if found
         if user_email:
