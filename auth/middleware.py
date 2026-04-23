@@ -446,9 +446,7 @@ class AuthMiddleware(Middleware):
             if session_id:
                 # Store None (not "") so the dedup key is cleanly absent for
                 # unauthenticated states rather than holding a falsy sentinel.
-                store_session_data(
-                    session_id, SessionKey.IDENTITY_NOTIFIED, user_email
-                )
+                store_session_data(session_id, SessionKey.IDENTITY_NOTIFIED, user_email)
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
         # they created via start_google_auth in this session.
@@ -1321,7 +1319,9 @@ class AuthMiddleware(Middleware):
             return True
 
         except Exception as e:
-            logger.warning(f"CEK reuse failed for {redact_email(normalized_email)}: {e}")
+            logger.warning(
+                f"CEK reuse failed for {redact_email(normalized_email)}: {e}"
+            )
             return False
 
     def _setup_encryption(self):
@@ -2906,11 +2906,7 @@ class AuthMiddleware(Middleware):
             # CRITICAL FIX: Resolve 'me'/'myself'/None to OAuth email BEFORE injection
             final_email = user_email
 
-            if (
-                is_me_alias(current_value)
-                or user_email is None
-                or not user_email
-            ):
+            if is_me_alias(current_value) or user_email is None or not user_email:
                 # Skip OAuth file fallback for API key sessions
                 from .context import get_session_data
 

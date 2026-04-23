@@ -84,13 +84,27 @@ class UserIdentityResponse(TypedDict):
     identity changes between tool calls.
     """
 
-    email: NotRequired[Optional[str]]  # Resolved Google account email, or None if unauthenticated
-    session_id: NotRequired[Optional[str]]  # Session identifier the identity is bound to
-    auth_provenance: NotRequired[Optional[str]]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
-    identity_source: NotRequired[Optional[str]]  # Where this email was resolved from: "jwt" (Bearer claim), "context" (FastMCP state), "session" (session storage), "oauth_file" (disk fallback), or None
-    linked_accounts: NotRequired[List[str]]  # Other Google emails this session can access (dual-auth: client-side OAuth + server-side start_google_auth)
-    mcp_client_id: NotRequired[Optional[str]]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
-    mcp_client_name: NotRequired[Optional[str]]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
+    email: NotRequired[
+        Optional[str]
+    ]  # Resolved Google account email, or None if unauthenticated
+    session_id: NotRequired[
+        Optional[str]
+    ]  # Session identifier the identity is bound to
+    auth_provenance: NotRequired[
+        Optional[str]
+    ]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    identity_source: NotRequired[
+        Optional[str]
+    ]  # Where this email was resolved from: "jwt" (Bearer claim), "context" (FastMCP state), "session" (session storage), "oauth_file" (disk fallback), or None
+    linked_accounts: NotRequired[
+        List[str]
+    ]  # Other Google emails this session can access (dual-auth: client-side OAuth + server-side start_google_auth)
+    mcp_client_id: NotRequired[
+        Optional[str]
+    ]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
+    mcp_client_name: NotRequired[
+        Optional[str]
+    ]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
     authenticated: bool  # True if an email is resolved for the current session
     timestamp: str  # ISO 8601 timestamp when this response was generated
 
@@ -108,12 +122,24 @@ class UserProfileResponse(TypedDict):
 
     email: NotRequired[Optional[str]]  # The user's email address
     session_id: NotRequired[Optional[str]]  # Current session identifier
-    authenticated: NotRequired[bool]  # Whether a user is currently authenticated (top-level)
-    auth_provenance: NotRequired[Optional[str]]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
-    identity_source: NotRequired[Optional[str]]  # Where this email was resolved from: "jwt", "context", "session", "oauth_file", etc.
-    linked_accounts: NotRequired[List[str]]  # Other Google emails this session can access via account linking
-    mcp_client_id: NotRequired[Optional[str]]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
-    mcp_client_name: NotRequired[Optional[str]]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
+    authenticated: NotRequired[
+        bool
+    ]  # Whether a user is currently authenticated (top-level)
+    auth_provenance: NotRequired[
+        Optional[str]
+    ]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    identity_source: NotRequired[
+        Optional[str]
+    ]  # Where this email was resolved from: "jwt", "context", "session", "oauth_file", etc.
+    linked_accounts: NotRequired[
+        List[str]
+    ]  # Other Google emails this session can access via account linking
+    mcp_client_id: NotRequired[
+        Optional[str]
+    ]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
+    mcp_client_name: NotRequired[
+        Optional[str]
+    ]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
     auth_status: NotRequired[
         AuthenticationStatus
     ]  # Detailed OAuth credential status (scopes, expires_at, refresh token, etc.)
@@ -373,24 +399,16 @@ async def _build_current_user(include_credentials: bool = True) -> Dict[str, Any
     session_id = await get_session_context()
 
     auth_provenance = (
-        get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
-        if session_id
-        else None
+        get_session_data(session_id, SessionKey.AUTH_PROVENANCE) if session_id else None
     )
     identity_source = (
-        get_session_data(session_id, SessionKey.IDENTITY_SOURCE)
-        if session_id
-        else None
+        get_session_data(session_id, SessionKey.IDENTITY_SOURCE) if session_id else None
     )
     mcp_client_id = (
-        get_session_data(session_id, SessionKey.MCP_CLIENT_ID)
-        if session_id
-        else None
+        get_session_data(session_id, SessionKey.MCP_CLIENT_ID) if session_id else None
     )
     mcp_client_name = (
-        get_session_data(session_id, SessionKey.MCP_CLIENT_NAME)
-        if session_id
-        else None
+        get_session_data(session_id, SessionKey.MCP_CLIENT_NAME) if session_id else None
     )
 
     linked_accounts: List[str] = []
@@ -535,7 +553,15 @@ def setup_user_resources(mcp: FastMCP) -> None:
             "(credential validity, scopes, expiry). Subscription target."
         ),
         mime_type="application/json",
-        tags={"authentication", "user", "profile", "credentials", "session", "google", "subscribe"},
+        tags={
+            "authentication",
+            "user",
+            "profile",
+            "credentials",
+            "session",
+            "google",
+            "subscribe",
+        },
         meta={
             "template_accessible": True,
             "property_paths": [

@@ -42,7 +42,9 @@ class SessionKey(str, Enum):
 
     USER_EMAIL = "user_email"
     AUTH_PROVENANCE = "auth_provenance"
-    IDENTITY_NOTIFIED = "identity_notified"  # Last email we sent resources/updated for (dedup)
+    IDENTITY_NOTIFIED = (
+        "identity_notified"  # Last email we sent resources/updated for (dedup)
+    )
     IDENTITY_SOURCE = "identity_source"  # Which extraction path resolved the identity: "jwt" | "google_provider" | "session" | "oauth_file"
     MCP_CLIENT_ID = "mcp_client_id"  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
     MCP_CLIENT_NAME = "mcp_client_name"  # Human-friendly client_name from the CIMD document (e.g. "Claude Code"), if resolvable
