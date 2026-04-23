@@ -7,7 +7,6 @@ google_auth, and tool implementations to prevent typo-prone string literals.
 from enum import Enum
 from typing import Any
 
-
 # Aliases a caller can pass in place of their own email. Case/whitespace-insensitive —
 # always match via is_me_alias() below, never via raw literal comparison.
 ME_ALIASES = frozenset({"me", "myself"})
