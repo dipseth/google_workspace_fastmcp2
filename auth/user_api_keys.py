@@ -447,7 +447,9 @@ def link_accounts(email_a: str, email_b: str, method: str = "session") -> None:
             }
         _save_link_metadata(meta)
 
-    logger.info(f"🔗 Linked accounts: {a} ↔ {b} (method={method})")
+    logger.info(
+        f"🔗 Linked accounts: {redact_email(a)} ↔ {redact_email(b)} (method={method})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +509,8 @@ def request_link(source_email: str, target_email: str, method: str = "session") 
         _save_pending_links(pending)
 
     logger.info(
-        f"🔗 Pending link request: {s} → {t} (method={method}, awaiting OAuth completion)"
+        f"🔗 Pending link request: {redact_email(s)} → {redact_email(t)} "
+        f"(method={method}, awaiting OAuth completion)"
     )
 
 
@@ -539,12 +542,15 @@ def consume_pending_links(completed_email: str) -> None:
     for source, method in source_methods.items():
         if source not in registered_emails:
             logger.warning(
-                f"🔗 Skipping pending link {source} → {e}: "
+                f"🔗 Skipping pending link {redact_email(source)} → {redact_email(e)}: "
                 f"source has no registered per-user key"
             )
             continue
         link_accounts(source, e, method=method)
-        logger.info(f"🔗 Executed deferred link: {source} ↔ {e} (method={method})")
+        logger.info(
+            f"🔗 Executed deferred link: {redact_email(source)} ↔ {redact_email(e)} "
+            f"(method={method})"
+        )
 
 
 def get_accessible_emails(email: str) -> Set[str]:
@@ -726,7 +732,7 @@ def set_oauth_linkage(
         _save_oauth_linkage_prefs(prefs)
 
     logger.info(
-        f"OAuth linkage for {normalized}: enabled={enabled}, "
+        f"OAuth linkage for {redact_email(normalized)}: enabled={enabled}, "
         f"password={'set' if password else 'none'}, "
         f"google_sub={'set' if google_sub else 'preserved' if entry.get('google_sub') else 'none'}"
     )

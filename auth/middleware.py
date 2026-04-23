@@ -458,7 +458,7 @@ class AuthMiddleware(Middleware):
                                 list(owned_accounts),
                             )
                         logger.info(
-                            f"🔑 Registered API key owned account (session-scoped): {effective_email}"
+                            f"🔑 Registered API key owned account (session-scoped): {redact_email(effective_email)}"
                         )
                     elif effective_email not in owned_accounts:
                         # Auto-register if credentials exist on disk for this
@@ -570,7 +570,8 @@ class AuthMiddleware(Middleware):
                     if prev != target_email and _link_allowed:
                         request_link(prev, target_email, method=_link_method)
                         logger.info(
-                            f"🔗 {_link_method} link: {prev} → {target_email} (deferred until OAuth completes)"
+                            f"🔗 {_link_method} link: {redact_email(prev)} → {redact_email(target_email)} "
+                            f"(deferred until OAuth completes)"
                         )
 
                 # Record this email in the session's authenticated set
@@ -1129,7 +1130,7 @@ class AuthMiddleware(Middleware):
                 additional_keys=all_additional if all_additional else None,
             )
             logger.info(
-                f"🔐 Saved per-user encrypted credentials for {normalized_email}"
+                f"🔐 Saved per-user encrypted credentials for {redact_email(normalized_email)}"
                 + (" (+OAuth recipient)" if oauth_recipient_key else "")
             )
         elif oauth_recipient_key and path.exists():
@@ -1258,7 +1259,7 @@ class AuthMiddleware(Middleware):
             return True
 
         except Exception as e:
-            logger.warning(f"CEK reuse failed for {normalized_email}: {e}")
+            logger.warning(f"CEK reuse failed for {redact_email(normalized_email)}: {e}")
             return False
 
     def _setup_encryption(self):
@@ -2068,7 +2069,9 @@ class AuthMiddleware(Middleware):
             encrypted_sa = self._fernet.encrypt(sa_json_str.encode())
             with open(sa_path, "w") as f:
                 f.write(base64.urlsafe_b64encode(encrypted_sa).decode())
-            logger.info(f"Saved server-encrypted Chat SA for {normalized_email}")
+            logger.info(
+                f"Saved server-encrypted Chat SA for {redact_email(normalized_email)}"
+            )
         else:
             cek = Fernet.generate_key()
             try:
@@ -2186,7 +2189,9 @@ class AuthMiddleware(Middleware):
             return None
 
         except Exception as e:
-            logger.warning(f"Failed to load Chat SA for {normalized_email}: {e}")
+            logger.warning(
+                f"Failed to load Chat SA for {redact_email(normalized_email)}: {e}"
+            )
             return None
 
     # ── Sampling configuration envelope (per-user encrypted) ─────────
@@ -2372,7 +2377,7 @@ class AuthMiddleware(Middleware):
 
         if cfg_path.exists():
             cfg_path.unlink()
-            logger.info(f"Deleted sampling config for {normalized_email}")
+            logger.info(f"Deleted sampling config for {redact_email(normalized_email)}")
             return True
         return False
 
@@ -2527,7 +2532,7 @@ class AuthMiddleware(Middleware):
             cred_path.unlink()
             # Also purge from memory cache
             self._memory_credentials.pop(normalized_email, None)
-            logger.info(f"Deleted credential file for {normalized_email}")
+            logger.info(f"Deleted credential file for {redact_email(normalized_email)}")
             return True
         return False
 
@@ -2544,7 +2549,9 @@ class AuthMiddleware(Middleware):
 
         if sa_path.exists():
             sa_path.unlink()
-            logger.info(f"Deleted chat service account for {normalized_email}")
+            logger.info(
+                f"Deleted chat service account for {redact_email(normalized_email)}"
+            )
             return True
         return False
 
@@ -2561,7 +2568,7 @@ class AuthMiddleware(Middleware):
 
         if bak_path.exists():
             bak_path.unlink()
-            logger.info(f"Deleted backup file for {normalized_email}")
+            logger.info(f"Deleted backup file for {redact_email(normalized_email)}")
             return True
         return False
 

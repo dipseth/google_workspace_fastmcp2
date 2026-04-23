@@ -334,7 +334,7 @@ def _update_oauth_session_marker(
             pass
 
         logger.info(
-            f"✅ Updated .oauth_authentication.json for {user_email} (provider: {auth_provider})"
+            f"✅ Updated .oauth_authentication.json for {redact_email(user_email)} (provider: {auth_provider})"
         )
 
     except Exception as e:
@@ -1102,7 +1102,7 @@ async def initiate_oauth_flow(
     normalized_email = _normalize_email(user_email)
 
     logger.info(
-        f"Initiating OAuth flow for {normalized_email} (auth_method: {auth_method}, PKCE: {'enabled' if use_pkce else 'disabled'})"
+        f"Initiating OAuth flow for {redact_email(normalized_email)} (auth_method: {auth_method}, PKCE: {'enabled' if use_pkce else 'disabled'})"
     )
 
     # If no services selected and service selection is enabled, return selection URL
@@ -1732,7 +1732,7 @@ async def handle_oauth_callback(
                 )
             else:
                 logger.warning(
-                    f"No session context available - falling back to file storage for {user_email}"
+                    f"No session context available - falling back to file storage for {redact_email(user_email)}"
                 )
                 _save_credentials(user_email, credentials)
         else:
@@ -1740,7 +1740,7 @@ async def handle_oauth_callback(
             _save_credentials(user_email, credentials)
 
         logger.info(
-            f"Successfully authenticated {user_email} (auth_method: {auth_method})"
+            f"Successfully authenticated {redact_email(user_email)} (auth_method: {auth_method})"
         )
         return user_email, credentials
 

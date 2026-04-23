@@ -149,4 +149,6 @@ async def enforce_alpha_access(
                 "Contact the server administrator for access.",
                 provider,
             )
-        logger.info(f"Google user {google_email} passed alpha allowlist check")
+        logger.info(
+            f"Google user {redact_email(google_email)} passed alpha allowlist check"
+        )
