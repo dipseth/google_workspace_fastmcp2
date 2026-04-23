@@ -89,27 +89,38 @@ class UserIdentityResponse(TypedDict):
     auth_provenance: NotRequired[Optional[str]]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
     identity_source: NotRequired[Optional[str]]  # Where this email was resolved from: "jwt" (Bearer claim), "context" (FastMCP state), "session" (session storage), "oauth_file" (disk fallback), or None
     linked_accounts: NotRequired[List[str]]  # Other Google emails this session can access (dual-auth: client-side OAuth + server-side start_google_auth)
+    mcp_client_id: NotRequired[Optional[str]]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
+    mcp_client_name: NotRequired[Optional[str]]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
     authenticated: bool  # True if an email is resolved for the current session
     timestamp: str  # ISO 8601 timestamp when this response was generated
 
 
 class UserProfileResponse(TypedDict):
-    """Response model for user profile resources (user://current/profile, user://profile/{email}).
+    """Canonical response model for user://current/profile — superset of email + identity + profile.
 
-    Comprehensive user profile information including authentication status, credential
-    validity, and session details. Supports both current user and email-specific lookups.
+    As of the consolidation of user://current/{email,identity,profile}, this resource
+    returns a union of the three prior shapes so any property-path previously valid
+    against user://current/email.X or user://current/identity.X remains valid here.
+
+    user://profile/{email} (admin lookup by email) also uses this model but only
+    populates email + auth_status + is_current_user + timestamp.
     """
 
     email: NotRequired[Optional[str]]  # The user's email address
     session_id: NotRequired[Optional[str]]  # Current session identifier
+    authenticated: NotRequired[bool]  # Whether a user is currently authenticated (top-level)
+    auth_provenance: NotRequired[Optional[str]]  # How the client authed (api_key, user_api_key, github_oauth, or None for Google OAuth)
+    identity_source: NotRequired[Optional[str]]  # Where this email was resolved from: "jwt", "context", "session", "oauth_file", etc.
+    linked_accounts: NotRequired[List[str]]  # Other Google emails this session can access via account linking
+    mcp_client_id: NotRequired[Optional[str]]  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
+    mcp_client_name: NotRequired[Optional[str]]  # Human-friendly client_name from the CIMD document (e.g. "Claude Code")
     auth_status: NotRequired[
         AuthenticationStatus
-    ]  # Detailed authentication status information
+    ]  # Detailed OAuth credential status (scopes, expires_at, refresh token, etc.)
     timestamp: str  # ISO 8601 timestamp when this response was generated
-    authenticated: NotRequired[bool]  # Whether the user is currently authenticated
     is_current_user: NotRequired[
         bool
-    ]  # Whether this profile matches the current session user
+    ]  # Whether this profile matches the current session user (user://profile/{email} only)
     error: NotRequired[Optional[str]]  # Error message if profile retrieval failed
     debug_info: NotRequired[
         Optional[Dict[str, Any]]
@@ -336,214 +347,78 @@ class GmailContentSuggestionsResponse(TypedDict):
     error: NotRequired[Optional[str]]  # Error message if suggestion generation failed
 
 
-def setup_user_resources(mcp: FastMCP) -> None:
-    """Setup all user and authentication resources."""
+# ============================================================================
+# CURRENT-USER BUILDER + PROJECTIONS (shared by the three user://current/* resources)
+# ============================================================================
+#
+# Three URIs serve three distinct purposes backed by one builder:
+#   - user://current/email    — slim "who's authenticated right now?"
+#   - user://current/identity — subscription target; identity-change signal
+#   - user://current/profile  — canonical superset (adds credential auth_status)
+#
+# All three read from _build_current_user() so the shapes stay consistent.
 
-    @mcp.resource(
-        uri="user://current/email",
-        name="Current User Email",
-        description="Get the currently authenticated user's email address for session-based authentication",
-        mime_type="application/json",
-        tags={"authentication", "user", "email", "session", "template"},
-        meta={
-            "template_accessible": True,
-            "property_paths": ["email", "session_id", "timestamp"],
-            "response_model": "UserEmailResponse",
-            "detailed": True,
-        },
+
+async def _build_current_user(include_credentials: bool = True) -> Dict[str, Any]:
+    """Single source of truth for user://current/* resources.
+
+    Resolves email, session, auth provenance, identity source, linked accounts,
+    and (optionally) live Google OAuth credentials into one superset dict.
+    Lazy-fetches credentials only when needed so slim projections stay cheap.
+
+    Returned keys are always present (values may be None/empty). `auth_status`
+    is present only when include_credentials=True and an email is resolved.
+    """
+    user_email = await get_user_email_context()
+    session_id = await get_session_context()
+
+    auth_provenance = (
+        get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
+        if session_id
+        else None
     )
-    async def get_current_user_email(ctx: Context) -> list[ResourceContent]:
-        """Get the currently authenticated user's email address for session-based authentication.
+    identity_source = (
+        get_session_data(session_id, SessionKey.IDENTITY_SOURCE)
+        if session_id
+        else None
+    )
+    mcp_client_id = (
+        get_session_data(session_id, SessionKey.MCP_CLIENT_ID)
+        if session_id
+        else None
+    )
+    mcp_client_name = (
+        get_session_data(session_id, SessionKey.MCP_CLIENT_NAME)
+        if session_id
+        else None
+    )
 
-        This resource provides the foundational authentication information needed by other
-        resources and tools. It returns the email address of the user who has completed
-        OAuth authentication via the start_google_auth tool.
+    linked_accounts: List[str] = []
+    if user_email:
+        try:
+            from auth.user_api_keys import get_accessible_emails
 
-        Args:
-            ctx: FastMCP Context object providing access to server state and logging
-
-        Returns:
-            list[ResourceContent]: JSON content containing the authenticated user's email,
-            session ID, and authentication status. If no user is authenticated, returns
-            error information with suggestions for resolving authentication issues.
-
-        Example Response (Success):
-            {
-                "email": "user@example.com",
-                "session_id": "session_12345",
-                "timestamp": "2024-01-15T10:30:00Z",
-                "authenticated": true
-            }
-
-        Example Response (No Authentication):
-            {
-                "error": "No authenticated user found in current session",
-                "suggestion": "Use start_google_auth tool to authenticate first",
-                "authenticated": false,
-                "timestamp": "2024-01-15T10:30:00Z"
-            }
-        """
-        user_email = await get_user_email_context()
-        if not user_email:
-            response = UserEmailResponse(
-                error="No authenticated user found in current session",
-                suggestion="Use start_google_auth tool to authenticate first",
-                authenticated=False,
-                timestamp=datetime.now().isoformat(),
+            linked_accounts = sorted(
+                e for e in get_accessible_emails(user_email) if e != user_email
             )
-            return [ResourceContent(response, mime_type="application/json")]
+        except Exception as e:
+            logger.debug(f"Could not resolve linked accounts: {e}")
 
-        response = UserEmailResponse(
-            email=user_email,
-            session_id=await get_session_context(),
-            timestamp=datetime.now().isoformat(),
-            authenticated=True,
-        )
-        return [ResourceContent(response, mime_type="application/json")]
+    state: Dict[str, Any] = {
+        "email": user_email,
+        "session_id": session_id,
+        "authenticated": bool(user_email),
+        "auth_provenance": auth_provenance,
+        "identity_source": identity_source,
+        "linked_accounts": linked_accounts,
+        "mcp_client_id": mcp_client_id,
+        "mcp_client_name": mcp_client_name,
+        "timestamp": datetime.now().isoformat(),
+    }
 
-    @mcp.resource(
-        uri="user://current/identity",
-        name="Current User Identity",
-        description=(
-            "Lightweight active-account identity: email, session, and auth provenance. "
-            "Optimized for client subscriptions — AuthMiddleware fires "
-            "notifications/resources/updated for this URI when the active Google "
-            "account changes between tool calls."
-        ),
-        mime_type="application/json",
-        tags={"authentication", "user", "identity", "session", "subscribe"},
-        meta={
-            "template_accessible": True,
-            "property_paths": [
-                "email",
-                "session_id",
-                "auth_provenance",
-                "identity_source",
-                "linked_accounts",
-                "authenticated",
-                "timestamp",
-            ],
-            "response_model": "UserIdentityResponse",
-            "supports_subscription": True,
-        },
-    )
-    async def get_current_user_identity(ctx: Context) -> list[ResourceContent]:
-        """Return the current session's resolved identity for subscription clients."""
-        user_email = await get_user_email_context()
-        session_id = await get_session_context()
-        auth_provenance = (
-            get_session_data(session_id, SessionKey.AUTH_PROVENANCE)
-            if session_id
-            else None
-        )
-        identity_source = (
-            get_session_data(session_id, SessionKey.IDENTITY_SOURCE)
-            if session_id
-            else None
-        )
-
-        # Dual-auth visibility: enumerate all Google accounts this session can
-        # reach via account linking (client-side OAuth identity + any server-side
-        # accounts authenticated through start_google_auth).
-        linked_accounts: List[str] = []
-        if user_email:
-            try:
-                from auth.user_api_keys import get_accessible_emails
-
-                linked_accounts = sorted(
-                    e for e in get_accessible_emails(user_email) if e != user_email
-                )
-            except Exception as e:
-                logger.debug(f"Could not resolve linked accounts: {e}")
-
-        response = UserIdentityResponse(
-            email=user_email,
-            session_id=session_id,
-            auth_provenance=auth_provenance,
-            identity_source=identity_source,
-            linked_accounts=linked_accounts,
-            authenticated=bool(user_email),
-            timestamp=datetime.now().isoformat(),
-        )
-        return [ResourceContent(response, mime_type="application/json")]
-
-    @mcp.resource(
-        uri="user://current/profile",
-        name="Current User Profile",
-        description="Comprehensive profile information including authentication status, credential validity, and available Google services for the current session user",
-        mime_type="application/json",
-        tags={"authentication", "user", "profile", "credentials", "session", "google"},
-        meta={
-            "response_model": "UserProfileResponse",
-            "detailed": True,
-            "includes_debug": True,
-        },
-    )
-    async def get_current_user_profile(ctx: Context) -> list[ResourceContent]:
-        """Get comprehensive profile information for the current session user.
-
-        Provides detailed authentication status, credential validity, and available Google
-        services for the currently authenticated user. Includes debugging information to
-        help troubleshoot OAuth and session management issues.
-
-        Args:
-            ctx: FastMCP Context object providing access to server state and logging
-
-        Returns:
-            list[ResourceContent]: JSON content with comprehensive profile information including:
-            - User email and session ID
-            - Detailed authentication status with token validity
-            - OAuth scopes and credential expiration information
-            - Debug information for troubleshooting authentication issues
-
-        Example Response (Authenticated):
-            {
-                "email": "user@example.com",
-                "session_id": "session_12345",
-                "auth_status": {
-                    "authenticated": true,
-                    "credentials_valid": true,
-                    "has_refresh_token": true,
-                    "scopes": ["https://www.googleapis.com/auth/gmail.modify"],
-                    "expires_at": "2024-01-15T12:30:00Z"
-                },
-                "timestamp": "2024-01-15T10:30:00Z"
-            }
-
-        Example Response (Not Authenticated):
-            {
-                "error": "No authenticated user found in current session",
-                "authenticated": false,
-                "timestamp": "2024-01-15T10:30:00Z",
-                "debug_info": {
-                    "user_email_context": null,
-                    "session_context": null,
-                    "issue": "OAuth proxy authentication may not be setting session context"
-                }
-            }
-        """
-        user_email = await get_user_email_context()
-        session_id = await get_session_context()
-
-        # DIAGNOSTIC: Log context state for debugging OAuth vs start_google_auth disconnect
-        logger.info("🔍 get_current_user_profile called")
-
-        if not user_email:
-            response = UserProfileResponse(
-                error="No authenticated user found in current session",
-                authenticated=False,
-                timestamp=datetime.now().isoformat(),
-                debug_info={
-                    "user_email_context": user_email,
-                    "session_context": session_id,
-                    "issue": "OAuth proxy authentication may not be setting session context",
-                },
-            )
-            return [ResourceContent(response, mime_type="application/json")]
-
-        # Check credential validity
+    if include_credentials and user_email:
         credentials = get_valid_credentials(user_email)
-        auth_status = AuthenticationStatus(
+        state["auth_status"] = AuthenticationStatus(
             authenticated=credentials is not None,
             credentials_valid=credentials is not None and not credentials.expired,
             has_refresh_token=credentials is not None
@@ -556,11 +431,159 @@ def setup_user_resources(mcp: FastMCP) -> None:
             ),
         )
 
+    return state
+
+
+def _project_email(full: Dict[str, Any]) -> UserEmailResponse:
+    """Project canonical state to user://current/email's slim wire shape."""
+    if not full["email"]:
+        return UserEmailResponse(
+            error="No authenticated user found in current session",
+            suggestion="Use start_google_auth tool to authenticate first",
+            authenticated=False,
+            timestamp=full["timestamp"],
+        )
+    return UserEmailResponse(
+        email=full["email"],
+        session_id=full["session_id"],
+        timestamp=full["timestamp"],
+        authenticated=True,
+    )
+
+
+def _project_identity(full: Dict[str, Any]) -> UserIdentityResponse:
+    """Project canonical state to user://current/identity's subscription-target wire shape."""
+    return UserIdentityResponse(
+        email=full["email"],
+        session_id=full["session_id"],
+        auth_provenance=full["auth_provenance"],
+        identity_source=full["identity_source"],
+        linked_accounts=full["linked_accounts"],
+        mcp_client_id=full["mcp_client_id"],
+        mcp_client_name=full["mcp_client_name"],
+        authenticated=full["authenticated"],
+        timestamp=full["timestamp"],
+    )
+
+
+def setup_user_resources(mcp: FastMCP) -> None:
+    """Setup all user and authentication resources."""
+
+    @mcp.resource(
+        uri="user://current/email",
+        name="Current User Email",
+        description=(
+            "Slim 'most recent authenticated email for this session' — returns "
+            "email + session_id + authenticated flag. For the full profile "
+            "(credentials, scopes, etc.) use user://current/profile."
+        ),
+        mime_type="application/json",
+        tags={"authentication", "user", "email", "session", "template"},
+        meta={
+            "template_accessible": True,
+            "property_paths": ["email", "session_id", "timestamp"],
+            "response_model": "UserEmailResponse",
+            "detailed": True,
+        },
+    )
+    async def get_current_user_email(ctx: Context) -> list[ResourceContent]:
+        """Return the authenticated email for the current session (slim view)."""
+        full = await _build_current_user(include_credentials=False)
+        return [ResourceContent(_project_email(full), mime_type="application/json")]
+
+    @mcp.resource(
+        uri="user://current/identity",
+        name="Current User Identity",
+        description=(
+            "Lightweight active-account identity: email, session, and auth provenance. "
+            "Optimized for client subscriptions — AuthMiddleware fires "
+            "notifications/resources/updated for this URI when the active Google "
+            "account changes between tool calls. For credential details use "
+            "user://current/profile."
+        ),
+        mime_type="application/json",
+        tags={"authentication", "user", "identity", "session", "subscribe"},
+        meta={
+            "template_accessible": True,
+            "property_paths": [
+                "email",
+                "session_id",
+                "auth_provenance",
+                "identity_source",
+                "linked_accounts",
+                "mcp_client_id",
+                "mcp_client_name",
+                "authenticated",
+                "timestamp",
+            ],
+            "response_model": "UserIdentityResponse",
+            "supports_subscription": True,
+        },
+    )
+    async def get_current_user_identity(ctx: Context) -> list[ResourceContent]:
+        """Return the current session's resolved identity for subscription clients."""
+        full = await _build_current_user(include_credentials=False)
+        return [ResourceContent(_project_identity(full), mime_type="application/json")]
+
+    @mcp.resource(
+        uri="user://current/profile",
+        name="Current User Profile",
+        description=(
+            "Canonical current-user resource. Superset of user://current/email + "
+            "user://current/identity + prior profile: email, session_id, authenticated, "
+            "auth_provenance, identity_source, linked_accounts, and nested auth_status "
+            "(credential validity, scopes, expiry). Subscription target."
+        ),
+        mime_type="application/json",
+        tags={"authentication", "user", "profile", "credentials", "session", "google", "subscribe"},
+        meta={
+            "template_accessible": True,
+            "property_paths": [
+                "email",
+                "session_id",
+                "authenticated",
+                "auth_provenance",
+                "identity_source",
+                "linked_accounts",
+                "mcp_client_id",
+                "mcp_client_name",
+                "auth_status",
+                "timestamp",
+            ],
+            "response_model": "UserProfileResponse",
+            "detailed": True,
+            "includes_debug": True,
+            "supports_subscription": True,
+        },
+    )
+    async def get_current_user_profile(ctx: Context) -> list[ResourceContent]:
+        """Canonical current-user resource. Returns the superset of email/identity/profile state."""
+        full = await _build_current_user(include_credentials=True)
+
+        if not full["email"]:
+            response = UserProfileResponse(
+                error="No authenticated user found in current session",
+                authenticated=False,
+                timestamp=full["timestamp"],
+                debug_info={
+                    "user_email_context": None,
+                    "session_context": full["session_id"],
+                    "issue": "OAuth proxy authentication may not be setting session context",
+                },
+            )
+            return [ResourceContent(response, mime_type="application/json")]
+
         response = UserProfileResponse(
-            email=user_email,
-            session_id=session_id,  # Use already-awaited session_id
-            auth_status=auth_status,
-            timestamp=datetime.now().isoformat(),
+            email=full["email"],
+            session_id=full["session_id"],
+            authenticated=full["authenticated"],
+            auth_provenance=full["auth_provenance"],
+            identity_source=full["identity_source"],
+            linked_accounts=full["linked_accounts"],
+            mcp_client_id=full["mcp_client_id"],
+            mcp_client_name=full["mcp_client_name"],
+            auth_status=full["auth_status"],
+            timestamp=full["timestamp"],
         )
         return [ResourceContent(response, mime_type="application/json")]
 

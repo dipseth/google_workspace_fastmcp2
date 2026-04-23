@@ -708,7 +708,7 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
             )
             if creds:
                 logger.info(
-                    f"Successfully loaded credentials via AuthMiddleware for {normalized_email}"
+                    f"Successfully loaded credentials via AuthMiddleware for {redact_email(normalized_email)}"
                 )
                 return creds
     except Exception as e:
@@ -1018,7 +1018,7 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
     if needs_refresh(credentials):
         try:
             logger.info(
-                f"Proactively refreshing credentials for {normalized_email} before expiry"
+                f"Proactively refreshing credentials for {redact_email(normalized_email)} before expiry"
             )
             credentials = _refresh_credentials(credentials, normalized_email)
         except GoogleAuthError:

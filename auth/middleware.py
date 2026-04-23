@@ -34,7 +34,7 @@ from .context import (
 )
 from .dual_auth_bridge import get_dual_auth_bridge
 from .service_manager import GoogleServiceError, get_google_service
-from .types import AuthProvenance, SessionKey
+from .types import AuthProvenance, SessionKey, is_me_alias
 
 logger = setup_logger()
 
@@ -256,6 +256,15 @@ class AuthMiddleware(Middleware):
         auth_provenance = self._detect_auth_provenance()
         if auth_provenance and session_id:
             store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
+
+        # Capture MCP client identity (DCR/CIMD client_id + client_name)
+        mcp_client_id, mcp_client_name = self._capture_mcp_client_identity()
+        if mcp_client_id and session_id:
+            store_session_data(session_id, SessionKey.MCP_CLIENT_ID, mcp_client_id)
+            if mcp_client_name:
+                store_session_data(
+                    session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
+                )
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -734,6 +743,15 @@ class AuthMiddleware(Middleware):
         if auth_provenance and session_id:
             store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
 
+        # Capture MCP client identity (DCR/CIMD client_id + client_name)
+        mcp_client_id, mcp_client_name = self._capture_mcp_client_identity()
+        if mcp_client_id and session_id:
+            store_session_data(session_id, SessionKey.MCP_CLIENT_ID, mcp_client_id)
+            if mcp_client_name:
+                store_session_data(
+                    session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
+                )
+
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
@@ -1196,7 +1214,7 @@ class AuthMiddleware(Middleware):
                     additional_keys=additional_keys,
                 )
                 logger.info(
-                    f"🔐 Saved OAuth-only encrypted credentials for {normalized_email}"
+                    f"🔐 Saved OAuth-only encrypted credentials for {redact_email(normalized_email)}"
                 )
         elif oauth_recipient_key:
             # First auth with only OAuth recipient (no existing envelope)
@@ -1688,7 +1706,7 @@ class AuthMiddleware(Middleware):
             self._zero_bytes(cek)
 
         logger.info(
-            f"🔐 Saved server-keyed envelope for {normalized_email} → {path.name}"
+            f"🔐 Saved server-keyed envelope for {redact_email(normalized_email)}"
         )
 
     def _save_per_user_encrypted(
@@ -2889,7 +2907,7 @@ class AuthMiddleware(Middleware):
             final_email = user_email
 
             if (
-                current_value in ["me", "myself"]
+                is_me_alias(current_value)
                 or user_email is None
                 or not user_email
             ):
@@ -2943,7 +2961,7 @@ class AuthMiddleware(Middleware):
             # FIX: explicit parentheses to avoid operator-precedence bug
             # (previously `and ... or ...` let the `or` branch bypass checks)
             if (
-                final_email and current_value in ["me", "myself", None]
+                final_email and (current_value is None or is_me_alias(current_value))
             ) or "user_google_email" not in args:
                 if final_email:  # Double-check we have something real
                     args["user_google_email"] = final_email
@@ -3222,6 +3240,56 @@ class AuthMiddleware(Middleware):
             return None
         except Exception:
             return None
+
+    def _capture_mcp_client_identity(self) -> tuple[Optional[str], Optional[str]]:
+        """Best-effort extract of the MCP client's DCR identity from the current request.
+
+        The access token issued to the MCP client carries the DCR/CIMD client_id
+        (e.g. "https://claude.ai/oauth/claude-code-client-metadata"). The human
+        client_name (e.g. "Claude Code") comes from the CIMD document that
+        FastMCP's CIMDFetcher caches when the OAuth flow first validates the
+        metadata URL. We read that cache synchronously.
+
+        CIMD shape we rely on (fastmcp.server.auth.cimd):
+          provider._cimd_manager: CIMDManager   — .enabled, ._fetcher
+          CIMDManager._fetcher:   CIMDFetcher   — ._cache: dict[str, _CIMDCacheEntry]
+          _CIMDCacheEntry.doc:    CIMDDocument  — .client_name: str | None
+
+        `provider._cimd_manager` may be absent (provider not configured with
+        CIMD); that's the only uncertainty. The nested attributes are stable.
+
+        Returns (client_id_url, client_name). Either may be None.
+        """
+        from fastmcp.server.dependencies import get_access_token
+
+        try:
+            access_token = get_access_token()
+        except RuntimeError:
+            return (None, None)
+        if access_token is None:
+            return (None, None)
+
+        client_id = getattr(access_token, "client_id", None)
+        if not client_id:
+            return (None, None)
+
+        # client_name comes from the CIMD document cache when the client_id is
+        # a CIMD URL. For non-URL client_ids (e.g. "api-key-client",
+        # "google-user-<email>") there is no metadata doc, so name stays None.
+        client_name: Optional[str] = None
+        if client_id.startswith(("http://", "https://")):
+            for provider in (self._google_provider, self._github_provider):
+                if provider is None:
+                    continue
+                cimd_mgr = getattr(provider, "_cimd_manager", None)
+                if cimd_mgr is None or not cimd_mgr.enabled:
+                    continue
+                entry = cimd_mgr._fetcher._cache.get(client_id)
+                if entry is not None and entry.doc.client_name:
+                    client_name = entry.doc.client_name
+                    break
+
+        return (client_id, client_name)
 
     def _extract_user_from_github_token(
         self, session_id: Optional[str] = None
