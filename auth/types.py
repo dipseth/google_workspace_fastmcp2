@@ -5,6 +5,16 @@ google_auth, and tool implementations to prevent typo-prone string literals.
 """
 
 from enum import Enum
+from typing import Any
+
+# Aliases a caller can pass in place of their own email. Case/whitespace-insensitive —
+# always match via is_me_alias() below, never via raw literal comparison.
+ME_ALIASES = frozenset({"me", "myself"})
+
+
+def is_me_alias(value: Any) -> bool:
+    """True if value is a 'me'/'myself'-style self-reference (case and whitespace insensitive)."""
+    return isinstance(value, str) and value.strip().lower() in ME_ALIASES
 
 
 class AuthProvenance(str, Enum):
@@ -32,6 +42,12 @@ class SessionKey(str, Enum):
 
     USER_EMAIL = "user_email"
     AUTH_PROVENANCE = "auth_provenance"
+    IDENTITY_NOTIFIED = (
+        "identity_notified"  # Last email we sent resources/updated for (dedup)
+    )
+    IDENTITY_SOURCE = "identity_source"  # Which extraction path resolved the identity: "jwt" | "google_provider" | "session" | "oauth_file"
+    MCP_CLIENT_ID = "mcp_client_id"  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
+    MCP_CLIENT_NAME = "mcp_client_name"  # Human-friendly client_name from the CIMD document (e.g. "Claude Code"), if resolvable
     API_KEY_OWNED_ACCOUNTS = "api_key_owned_accounts"
     SESSION_AUTHED_EMAILS = "session_authed_emails"
     SESSION_DISABLED_TOOLS = "session_disabled_tools"

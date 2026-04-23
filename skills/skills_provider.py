@@ -79,6 +79,7 @@ def setup_skills_provider(
     enabled_modules: Optional[List[str]] = None,
     skills_root: Optional[Path] = None,
     auto_regenerate: bool = True,
+    supporting_files: str = "resources",
 ) -> Optional[Path]:
     """
     Register skills provider with dynamic skill generation.
@@ -94,6 +95,11 @@ def setup_skills_provider(
         enabled_modules: Module names to enable (None = all). Default: ["card_framework"]
         skills_root: Base directory for skills (default: ~/.claude/skills)
         auto_regenerate: If True, regenerate skills on each startup
+        supporting_files: How non-main skill files are surfaced to clients.
+            "resources" (default) registers one concrete Resource per file so
+            every file appears in resources/list. "template" registers a single
+            ResourceTemplate at skill://{skill_name}/{path} — clients must know
+            the path to read (files are not listed individually).
 
     Returns:
         Path to skills root directory, or None if no skills were generated
@@ -193,13 +199,21 @@ def setup_skills_provider(
 
     # Add single provider for all generated skills
     try:
+        if supporting_files not in ("resources", "template"):
+            logger.warning(
+                f"Invalid supporting_files={supporting_files!r}, falling back to 'resources'"
+            )
+            supporting_files = "resources"
+
         provider = SkillsDirectoryProvider(
             roots=skills_root,
             reload=auto_regenerate,  # Re-scan on each request if regenerating
-            supporting_files="resources",  # Expose every file in list_resources for remote clients that don't follow the manifest->template flow
+            supporting_files=supporting_files,
         )
         mcp.add_provider(provider)
-        logger.info(f"Skills provider registered: {skills_root}")
+        logger.info(
+            f"Skills provider registered: {skills_root} (supporting_files={supporting_files})"
+        )
     except Exception:
         logger.exception("Failed to register skills provider")
         return None

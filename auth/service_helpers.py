@@ -35,6 +35,7 @@ logger = setup_logger()
 
 # Import centralized scope registry
 from .scope_registry import ScopeRegistry
+from .types import is_me_alias
 
 # Legacy fallback for compatibility - now redirects to scope_registry
 _FALLBACK_SERVICE_DEFAULTS = {}  # Empty - now uses ScopeRegistry
@@ -143,8 +144,8 @@ async def get_service(
         # Custom scopes with unified auth
         drive_service = await get_service("drive", scopes=["drive_full"])
     """
-    # Handle 'me'/'myself' aliases by treating them as None for auto-resolution
-    if user_email in ["me", "myself"]:
+    # Handle 'me'/'myself' aliases (case/whitespace insensitive) by treating them as None for auto-resolution
+    if is_me_alias(user_email):
         user_email = None
 
     # Use provided email or get from context (set by middleware)

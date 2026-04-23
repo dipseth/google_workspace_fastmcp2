@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
 
-from config.enhanced_logging import setup_logger
+from config.enhanced_logging import redact_email, setup_logger
 
 logger = setup_logger()
 
@@ -692,7 +692,9 @@ checkStar();
                         status_code=403,
                     )
 
-        logger.info(f"GitHub OAuth successful for {github_login} ({github_email})")
+        logger.info(
+            f"GitHub OAuth successful for {github_login} ({redact_email(github_email)})"
+        )
 
         # Cache GitHub user data for session enrichment
         if self._github_provider:

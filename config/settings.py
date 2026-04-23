@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing_extensions import List, Optional
+from typing_extensions import List, Literal, Optional
 
 from config.enhanced_logging import setup_logger
 
@@ -242,6 +242,17 @@ class Settings(BaseSettings):
         default=True,
         description="Regenerate skill documents on startup",
         json_schema_extra={"env": "SKILLS_AUTO_REGENERATE"},
+    )
+    skills_supporting_files_mode: Literal["resources", "template"] = Field(
+        default="resources",
+        description=(
+            "How skill supporting files are exposed to MCP clients. "
+            "'resources' registers one concrete resource per file (flat, fully enumerable "
+            "in resources/list — current default, ~hundreds of entries). "
+            "'template' registers a single skill://{skill_name}/{path} ResourceTemplate "
+            "(hierarchical, files resolved lazily on read, not listed individually)."
+        ),
+        json_schema_extra={"env": "SKILLS_SUPPORTING_FILES_MODE"},
     )
 
     # Google Chat Card Collection Configuration

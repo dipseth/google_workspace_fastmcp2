@@ -34,7 +34,7 @@ from .context import (
 )
 from .dual_auth_bridge import get_dual_auth_bridge
 from .service_manager import GoogleServiceError, get_google_service
-from .types import AuthProvenance, SessionKey
+from .types import AuthProvenance, SessionKey, is_me_alias
 
 logger = setup_logger()
 
@@ -246,6 +246,10 @@ class AuthMiddleware(Middleware):
 
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
+        # Track which extraction path won — mirrors on_read_resource for parity.
+        # Stored as SessionKey.IDENTITY_SOURCE so user://current/identity can
+        # surface "jwt" vs "session" vs "oauth_file" for dual-auth diagnostics.
+        _identity_source: Optional[str] = None
         logger.debug(f"🔍 Starting user extraction for tool {tool_name}")
 
         # Detect auth provenance (api_key vs oauth) and store in session
@@ -253,9 +257,19 @@ class AuthMiddleware(Middleware):
         if auth_provenance and session_id:
             store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
 
+        # Capture MCP client identity (DCR/CIMD client_id + client_name)
+        mcp_client_id, mcp_client_name = self._capture_mcp_client_identity()
+        if mcp_client_id and session_id:
+            store_session_data(session_id, SessionKey.MCP_CLIENT_ID, mcp_client_id)
+            if mcp_client_name:
+                store_session_data(
+                    session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
+                )
+
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
+            _identity_source = "jwt"
             logger.debug(
                 f"🎫 Extracted user from JWT token for tool {tool_name}: {user_email}"
             )
@@ -275,6 +289,7 @@ class AuthMiddleware(Middleware):
         if not user_email and auth_provenance == AuthProvenance.GITHUB_OAUTH:
             user_email = self._extract_user_from_github_token(session_id)
             if user_email:
+                _identity_source = "github_oauth"
                 logger.debug(
                     f"🐙 Extracted GitHub user for tool {tool_name}: {user_email}"
                 )
@@ -287,6 +302,7 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
+                _identity_source = "google_provider"
                 logger.debug(
                     f"🔑 Extracted user from GoogleProvider for tool {tool_name}: {user_email}"
                 )
@@ -306,6 +322,7 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
+                _identity_source = "session"
                 logger.debug(
                     f"✅ Retrieved user email from session storage for tool {tool_name}: {user_email}"
                 )
@@ -326,6 +343,7 @@ class AuthMiddleware(Middleware):
         ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
+                _identity_source = "oauth_file"
                 logger.debug(
                     f"✅ Retrieved user email from OAuth authentication file for tool {tool_name}: {user_email}"
                 )
@@ -365,10 +383,17 @@ class AuthMiddleware(Middleware):
                     )
                 elif session_id:
                     store_session_data(session_id, SessionKey.USER_EMAIL, user_email)
+            if user_email:
+                _identity_source = "tool_args"
             else:
                 logger.debug(
                     f"🔍 DEBUG: No user email found in tool arguments for tool {tool_name}"
                 )
+
+        # Persist which extraction path resolved the identity — read back by
+        # user://current/identity to expose jwt/session/oauth_file/tool_args.
+        if _identity_source and session_id:
+            store_session_data(session_id, SessionKey.IDENTITY_SOURCE, _identity_source)
 
         # CREDENTIAL CROSS-CHECK: If per-user API key resolves to an email
         # with no credentials on disk, fall back to .oauth_authentication.json
@@ -395,6 +420,33 @@ class AuthMiddleware(Middleware):
                         await self._auto_inject_email_parameter(context, user_email)
             except Exception as e:
                 logger.debug(f"Credential cross-check failed: {e}")
+
+        # Emit notifications/resources/updated for user://current/* only when
+        # the identity we're *notifying about* changes. `IDENTITY_NOTIFIED`
+        # records the last email we emitted for on this session, so steady
+        # state is zero emits and a stray identity oscillation within one
+        # session still only fires once per actual change.
+        last_notified = (
+            get_session_data(session_id, SessionKey.IDENTITY_NOTIFIED)
+            if session_id
+            else None
+        )
+        if (user_email or None) != (last_notified or None):
+            # NOTE: emit fires before the credential-isolation block below.
+            # If isolation later rejects this call, the client will receive an
+            # identity notification for a session it can't use.  This is
+            # intentional — the identity *did* resolve in session storage, so
+            # the client re-reading user://current/identity will see accurate
+            # state; the failed tool call is an orthogonal error.
+            await self._notify_identity_changed(
+                context,
+                previous_email=last_notified,
+                new_email=user_email,
+            )
+            if session_id:
+                # Store None (not "") so the dedup key is cleanly absent for
+                # unauthenticated states rather than holding a falsy sentinel.
+                store_session_data(session_id, SessionKey.IDENTITY_NOTIFIED, user_email)
 
         # CREDENTIAL ISOLATION: Shared API key sessions can only use credentials
         # they created via start_google_auth in this session.
@@ -437,7 +489,7 @@ class AuthMiddleware(Middleware):
                                 list(owned_accounts),
                             )
                         logger.info(
-                            f"🔑 Registered API key owned account (session-scoped): {effective_email}"
+                            f"🔑 Registered API key owned account (session-scoped): {redact_email(effective_email)}"
                         )
                     elif effective_email not in owned_accounts:
                         # Auto-register if credentials exist on disk for this
@@ -549,7 +601,8 @@ class AuthMiddleware(Middleware):
                     if prev != target_email and _link_allowed:
                         request_link(prev, target_email, method=_link_method)
                         logger.info(
-                            f"🔗 {_link_method} link: {prev} → {target_email} (deferred until OAuth completes)"
+                            f"🔗 {_link_method} link: {redact_email(prev)} → {redact_email(target_email)} "
+                            f"(deferred until OAuth completes)"
                         )
 
                 # Record this email in the session's authenticated set
@@ -674,13 +727,35 @@ class AuthMiddleware(Middleware):
 
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None
+        # Track which extraction path won so we can record it as IDENTITY_SOURCE
+        # after the chain — makes dual-auth (client-side OAuth vs
+        # server-side start_google_auth) distinguishable on the resource read.
+        _identity_source: Optional[str] = None
         logger.debug(f"🔍 Starting user extraction for resource {resource_uri}")
+
+        # Detect auth provenance and store in session so clients inspecting
+        # `user://current/identity` on resource-only sessions can see whether
+        # the client is api-key vs oauth — previously only recorded during
+        # tool calls, which left resource-only sessions reporting null.
+        auth_provenance = self._detect_auth_provenance()
+        if auth_provenance and session_id:
+            store_session_data(session_id, SessionKey.AUTH_PROVENANCE, auth_provenance)
+
+        # Capture MCP client identity (DCR/CIMD client_id + client_name)
+        mcp_client_id, mcp_client_name = self._capture_mcp_client_identity()
+        if mcp_client_id and session_id:
+            store_session_data(session_id, SessionKey.MCP_CLIENT_ID, mcp_client_id)
+            if mcp_client_name:
+                store_session_data(
+                    session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
+                )
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
         if user_email:
+            _identity_source = "jwt"
             logger.debug(
-                f"🎫 Extracted user from JWT token for resource {resource_uri}: {user_email}"
+                f"🎫 Extracted user from JWT token for resource {resource_uri}: {redact_email(user_email)}"
             )
             # Store in session for future use
             if session_id:
@@ -696,8 +771,9 @@ class AuthMiddleware(Middleware):
         if not user_email and self._unified_auth_enabled:
             user_email = await self._extract_user_from_google_provider()
             if user_email:
+                _identity_source = "google_provider"
                 logger.debug(
-                    f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {user_email}"
+                    f"🔑 Extracted user from GoogleProvider for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Store in session for future use
                 if session_id:
@@ -713,8 +789,9 @@ class AuthMiddleware(Middleware):
         if not user_email and session_id:
             user_email = get_session_data(session_id, SessionKey.USER_EMAIL)
             if user_email:
+                _identity_source = "session"
                 logger.debug(
-                    f"✅ Retrieved user email from session storage for resource {resource_uri}: {user_email}"
+                    f"✅ Retrieved user email from session storage for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Also set it in context for immediate use
                 await set_user_email_context(user_email)
@@ -736,8 +813,9 @@ class AuthMiddleware(Middleware):
         ):
             user_email = self._load_oauth_authentication_data()
             if user_email:
+                _identity_source = "oauth_file"
                 logger.debug(
-                    f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {user_email}"
+                    f"✅ Retrieved user email from OAuth authentication file for resource {resource_uri}: {redact_email(user_email)}"
                 )
                 # Store in session for future use
                 if session_id:
@@ -748,6 +826,10 @@ class AuthMiddleware(Middleware):
                 logger.debug(
                     f"No OAuth authentication file found for resource {resource_uri}"
                 )
+
+        # Record which path won — exposed via user://current/identity
+        if _identity_source and session_id:
+            store_session_data(session_id, SessionKey.IDENTITY_SOURCE, _identity_source)
 
         # Set user email context if found
         if user_email:
@@ -1108,7 +1190,7 @@ class AuthMiddleware(Middleware):
                 additional_keys=all_additional if all_additional else None,
             )
             logger.info(
-                f"🔐 Saved per-user encrypted credentials for {normalized_email}"
+                f"🔐 Saved per-user encrypted credentials for {redact_email(normalized_email)}"
                 + (" (+OAuth recipient)" if oauth_recipient_key else "")
             )
         elif oauth_recipient_key and path.exists():
@@ -1130,7 +1212,7 @@ class AuthMiddleware(Middleware):
                     additional_keys=additional_keys,
                 )
                 logger.info(
-                    f"🔐 Saved OAuth-only encrypted credentials for {normalized_email}"
+                    f"🔐 Saved OAuth-only encrypted credentials for {redact_email(normalized_email)}"
                 )
         elif oauth_recipient_key:
             # First auth with only OAuth recipient (no existing envelope)
@@ -1237,7 +1319,9 @@ class AuthMiddleware(Middleware):
             return True
 
         except Exception as e:
-            logger.warning(f"CEK reuse failed for {normalized_email}: {e}")
+            logger.warning(
+                f"CEK reuse failed for {redact_email(normalized_email)}: {e}"
+            )
             return False
 
     def _setup_encryption(self):
@@ -1622,7 +1706,7 @@ class AuthMiddleware(Middleware):
             self._zero_bytes(cek)
 
         logger.info(
-            f"🔐 Saved server-keyed envelope for {normalized_email} → {path.name}"
+            f"🔐 Saved server-keyed envelope for {redact_email(normalized_email)}"
         )
 
     def _save_per_user_encrypted(
@@ -2047,7 +2131,9 @@ class AuthMiddleware(Middleware):
             encrypted_sa = self._fernet.encrypt(sa_json_str.encode())
             with open(sa_path, "w") as f:
                 f.write(base64.urlsafe_b64encode(encrypted_sa).decode())
-            logger.info(f"Saved server-encrypted Chat SA for {normalized_email}")
+            logger.info(
+                f"Saved server-encrypted Chat SA for {redact_email(normalized_email)}"
+            )
         else:
             cek = Fernet.generate_key()
             try:
@@ -2165,7 +2251,9 @@ class AuthMiddleware(Middleware):
             return None
 
         except Exception as e:
-            logger.warning(f"Failed to load Chat SA for {normalized_email}: {e}")
+            logger.warning(
+                f"Failed to load Chat SA for {redact_email(normalized_email)}: {e}"
+            )
             return None
 
     # ── Sampling configuration envelope (per-user encrypted) ─────────
@@ -2351,7 +2439,7 @@ class AuthMiddleware(Middleware):
 
         if cfg_path.exists():
             cfg_path.unlink()
-            logger.info(f"Deleted sampling config for {normalized_email}")
+            logger.info(f"Deleted sampling config for {redact_email(normalized_email)}")
             return True
         return False
 
@@ -2506,7 +2594,7 @@ class AuthMiddleware(Middleware):
             cred_path.unlink()
             # Also purge from memory cache
             self._memory_credentials.pop(normalized_email, None)
-            logger.info(f"Deleted credential file for {normalized_email}")
+            logger.info(f"Deleted credential file for {redact_email(normalized_email)}")
             return True
         return False
 
@@ -2523,7 +2611,9 @@ class AuthMiddleware(Middleware):
 
         if sa_path.exists():
             sa_path.unlink()
-            logger.info(f"Deleted chat service account for {normalized_email}")
+            logger.info(
+                f"Deleted chat service account for {redact_email(normalized_email)}"
+            )
             return True
         return False
 
@@ -2540,7 +2630,7 @@ class AuthMiddleware(Middleware):
 
         if bak_path.exists():
             bak_path.unlink()
-            logger.info(f"Deleted backup file for {normalized_email}")
+            logger.info(f"Deleted backup file for {redact_email(normalized_email)}")
             return True
         return False
 
@@ -2735,6 +2825,56 @@ class AuthMiddleware(Middleware):
     # Actual tool names: tags, search, get_schema, execute
     _CODE_MODE_TOOLS = frozenset({"tags", "search", "get_schema", "execute"})
 
+    # Resources that reflect active-account identity — clients can `resources/subscribe`
+    # to any of these and will get `notifications/resources/updated` on account change.
+    _IDENTITY_RESOURCE_URIS = (
+        "user://current/identity",
+        "user://current/email",
+        "user://current/profile",
+    )
+
+    async def _notify_identity_changed(
+        self,
+        context: MiddlewareContext,
+        previous_email: Optional[str],
+        new_email: Optional[str],
+    ) -> None:
+        """Fire notifications/resources/updated for user://current/* on identity change.
+
+        Notifications only flow inside an active MCP request context, so this is a
+        best-effort emit — failures are logged at debug level and never block the
+        tool call. Emits one notification per identity-sensitive resource URI so
+        clients subscribed to any of them will re-read.
+        """
+        try:
+            from mcp.types import (
+                ResourceUpdatedNotification,
+                ResourceUpdatedNotificationParams,
+            )
+
+            fmcp_ctx = getattr(context, "fastmcp_context", None)
+            if fmcp_ctx is None:
+                logger.debug(
+                    "Skipping identity-changed notifications: no fastmcp_context"
+                )
+                return
+
+            for uri in self._IDENTITY_RESOURCE_URIS:
+                await fmcp_ctx.send_notification(
+                    ResourceUpdatedNotification(
+                        params=ResourceUpdatedNotificationParams(uri=uri)
+                    )
+                )
+
+            logger.info(
+                "📡 Identity changed %s -> %s; sent resources/updated for %d URIs",
+                redact_email(previous_email) if previous_email else "None",
+                redact_email(new_email) if new_email else "None",
+                len(self._IDENTITY_RESOURCE_URIS),
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send identity-changed notifications: {e}")
+
     async def _auto_inject_email_parameter(
         self, context: MiddlewareContext, user_email: str
     ) -> None:
@@ -2766,11 +2906,7 @@ class AuthMiddleware(Middleware):
             # CRITICAL FIX: Resolve 'me'/'myself'/None to OAuth email BEFORE injection
             final_email = user_email
 
-            if (
-                current_value in ["me", "myself"]
-                or user_email is None
-                or not user_email
-            ):
+            if is_me_alias(current_value) or user_email is None or not user_email:
                 # Skip OAuth file fallback for API key sessions
                 from .context import get_session_data
 
@@ -2821,7 +2957,7 @@ class AuthMiddleware(Middleware):
             # FIX: explicit parentheses to avoid operator-precedence bug
             # (previously `and ... or ...` let the `or` branch bypass checks)
             if (
-                final_email and current_value in ["me", "myself", None]
+                final_email and (current_value is None or is_me_alias(current_value))
             ) or "user_google_email" not in args:
                 if final_email:  # Double-check we have something real
                     args["user_google_email"] = final_email
@@ -3100,6 +3236,56 @@ class AuthMiddleware(Middleware):
             return None
         except Exception:
             return None
+
+    def _capture_mcp_client_identity(self) -> tuple[Optional[str], Optional[str]]:
+        """Best-effort extract of the MCP client's DCR identity from the current request.
+
+        The access token issued to the MCP client carries the DCR/CIMD client_id
+        (e.g. "https://claude.ai/oauth/claude-code-client-metadata"). The human
+        client_name (e.g. "Claude Code") comes from the CIMD document that
+        FastMCP's CIMDFetcher caches when the OAuth flow first validates the
+        metadata URL. We read that cache synchronously.
+
+        CIMD shape we rely on (fastmcp.server.auth.cimd):
+          provider._cimd_manager: CIMDManager   — .enabled, ._fetcher
+          CIMDManager._fetcher:   CIMDFetcher   — ._cache: dict[str, _CIMDCacheEntry]
+          _CIMDCacheEntry.doc:    CIMDDocument  — .client_name: str | None
+
+        `provider._cimd_manager` may be absent (provider not configured with
+        CIMD); that's the only uncertainty. The nested attributes are stable.
+
+        Returns (client_id_url, client_name). Either may be None.
+        """
+        from fastmcp.server.dependencies import get_access_token
+
+        try:
+            access_token = get_access_token()
+        except RuntimeError:
+            return (None, None)
+        if access_token is None:
+            return (None, None)
+
+        client_id = getattr(access_token, "client_id", None)
+        if not client_id:
+            return (None, None)
+
+        # client_name comes from the CIMD document cache when the client_id is
+        # a CIMD URL. For non-URL client_ids (e.g. "api-key-client",
+        # "google-user-<email>") there is no metadata doc, so name stays None.
+        client_name: Optional[str] = None
+        if client_id.startswith(("http://", "https://")):
+            for provider in (self._google_provider, self._github_provider):
+                if provider is None:
+                    continue
+                cimd_mgr = getattr(provider, "_cimd_manager", None)
+                if cimd_mgr is None or not cimd_mgr.enabled:
+                    continue
+                entry = cimd_mgr._fetcher._cache.get(client_id)
+                if entry is not None and entry.doc.client_name:
+                    client_name = entry.doc.client_name
+                    break
+
+        return (client_id, client_name)
 
     def _extract_user_from_github_token(
         self, session_id: Optional[str] = None

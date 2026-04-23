@@ -1415,7 +1415,7 @@ def restore_session_tool_state_by_email(new_session_id: str, user_email: str) ->
     disabled_count = len(old_state.get("disabled_tools", set()))
     logger.info(
         f"✅ Restored session {new_session_id[:8]}... from previous session "
-        f"{old_session_id[:8]}... for user {user_email} "
+        f"{old_session_id[:8]}... for user {redact_email(user_email)} "
         f"({disabled_count} tools disabled)"
     )
 

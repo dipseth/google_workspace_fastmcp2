@@ -65,11 +65,13 @@ from prompts.structured_response_demo_prompts import (
     setup_structured_response_demo_prompts,
 )
 from resources.chat_digest_resources import setup_chat_digest_resources
+from resources.gmail_resources import setup_gmail_resources
 from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
 from resources.template_resources import register_template_resources
 from resources.tool_output_resources import setup_tool_output_resources
 from resources.user_resources import setup_user_resources
+from resources.workspace_resources import setup_workspace_resources
 from sheets.sheets_tools import setup_sheets_tools
 from slides.slides_tools import setup_slides_tools
 from tools.dynamic_instructions import update_mcp_instructions
@@ -404,6 +406,7 @@ if settings.enable_skills_provider:
             enabled_modules=skill_modules,
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
+            supporting_files=settings.skills_supporting_files_mode,
         )
         if skills_path:
             logger.info(f"✅ Skills Provider enabled: {skills_path}")
@@ -483,6 +486,10 @@ setup_user_resources(mcp)
 
 # Setup tool output resources (cached outputs and Qdrant integration)
 setup_tool_output_resources(mcp, qdrant_middleware)
+
+# Setup workspace content search + Gmail-specific resources
+setup_workspace_resources(mcp)
+setup_gmail_resources(mcp)
 
 # Setup service list resources (dynamic discovery of list-based tools)
 # These resources define the URI patterns and documentation

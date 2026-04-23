@@ -81,9 +81,22 @@ class BaseListToolsTest:
             ]
         )
 
+        # Prefab card / UI output is also a valid structured response
+        has_prefab_shape = any(
+            [
+                '"$prefab"' in content,
+                '"view"' in content and '"type"' in content,
+                '"DataTable"' in content,
+            ]
+        )
+
         # Verify structured format
         is_structured = (
-            has_items_field or has_count_field or has_context_field or has_error_field
+            has_items_field
+            or has_count_field
+            or has_context_field
+            or has_error_field
+            or has_prefab_shape
         )
 
         assert is_structured, (
@@ -661,26 +674,27 @@ class TestStructuredResponseValidation:
 
     @pytest.mark.asyncio
     async def test_error_response_structure(self, client):
-        """Test that error responses follow the structured format."""
-        # Test with invalid user email to trigger authentication error
-        result = await client.call_tool(
-            "list_gmail_labels", {"user_google_email": "invalid@nonexistent.com"}
+        """Test that error responses are raised as ToolError, not the
+        legacy structured_content ValueError."""
+        from fastmcp.exceptions import ToolError
+
+        with pytest.raises(ToolError) as exc_info:
+            await client.call_tool(
+                "list_gmail_labels",
+                {"user_google_email": "invalid@nonexistent.com"},
+            )
+
+        message = str(exc_info.value)
+
+        # Must not regress into the legacy structured_content bug
+        assert "structured_content must be a dict or None" not in message, (
+            "Regression: error is the legacy structured_content ValueError"
         )
 
-        assert result is not None
-        content = result.content[0].text if result.content else str(result)
-
-        # Error responses should still have structured format
-        # Should NOT raise ValueError about structured_content
-        assert "ValueError: structured_content must be a dict or None" not in content, (
-            "Bug detected: Error responses are not being returned as structured format"
+        # AuthMiddleware rejects email mismatches with a clear message
+        assert "Email mismatch" in message or "authenticated" in message.lower(), (
+            f"Unexpected ToolError message: {message}"
         )
-
-        # Should contain error information
-        assert any(
-            keyword in content.lower()
-            for keyword in ["error", "failed", "authentication"]
-        ), f"Error response not properly formatted: {content}"
 
     @pytest.mark.asyncio
     async def test_successful_response_structure(self, client):
