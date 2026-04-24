@@ -108,6 +108,7 @@ class TestCostTracker:
             "sampling_calls",
             "sampling_estimated_input_tokens",
             "sampling_estimated_output_tokens",
+            "sampling_estimated_cached_tokens",
             "cost_sampling_estimated",
             "sampling_model",
         }

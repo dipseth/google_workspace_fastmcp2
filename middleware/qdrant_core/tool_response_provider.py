@@ -96,6 +96,12 @@ class ToolResponseProvider:
             parts.append(f"Session: {session_id}.")
         return " ".join(parts)
 
+    def content_text(self, name: str, metadata: Dict[str, Any]) -> str:
+        """Tool-response user content. Returns empty string (response payload is
+        already embedded via inputs_text). Present to satisfy the RICTextProvider
+        Protocol; matches IntrospectionProvider's class-point behavior."""
+        return ""
+
 
 __all__ = [
     "ToolResponseProvider",

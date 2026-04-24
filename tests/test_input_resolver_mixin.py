@@ -323,26 +323,28 @@ class TestConsumeFromContext:
         assert context["_button_index"] == 3
 
     def test_overflow_button(self):
-        """When resources exhausted, overflow handler provides fallback."""
+        """When resources exhausted, overflow handler provides a fallback dict
+        tagged with _placeholder=True (consumed by component_builder to skip
+        synthesized entries)."""
         context = {"buttons": [], "_button_index": 0}
         result = self.w.consume_from_context("Button", context)
-        assert result == {"text": "Button 1"}
+        assert result == {"text": "Button 1", "_placeholder": True}
         assert context["_button_index"] == 1
 
     def test_overflow_chip(self):
         context = {"chips": [], "_chip_index": 0}
         result = self.w.consume_from_context("Chip", context)
-        assert result == {"label": "Chip 1"}
+        assert result == {"label": "Chip 1", "_placeholder": True}
 
     def test_overflow_carousel_card(self):
         context = {"carousel_cards": [], "_carousel_card_index": 0}
         result = self.w.consume_from_context("CarouselCard", context)
-        assert result == {"title": "Card 1"}
+        assert result == {"title": "Card 1", "_placeholder": True}
 
     def test_overflow_grid_item(self):
         context = {"grid_items": [], "_grid_item_index": 0}
         result = self.w.consume_from_context("GridItem", context)
-        assert result == {"title": "Item 1"}
+        assert result == {"title": "Item 1", "_placeholder": True}
 
     def test_overflow_decorated_text_empty(self):
         """DecoratedText has no overflow handler - returns empty dict."""
