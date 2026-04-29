@@ -59,10 +59,15 @@ from .upload_types import (
     CheckAuthResponse,
     FileUploadInfo,
     FolderUploadSummary,
+    PendingUploadInfo,
     StartAuthResponse,
     UploadFileResponse,
 )
-from .utils import DriveUploadError, upload_file_to_drive_api
+from .utils import (
+    DriveUploadError,
+    upload_content_to_drive_api,
+    upload_file_to_drive_api,
+)
 
 # Default services — derived from the catalog (all non-required services).
 DEFAULT_SERVICES = ScopeRegistry.get_default_services()
@@ -647,7 +652,16 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="upload_to_drive",
-        description="Upload a local file or folder to Google Drive with UNIFIED authentication (no email parameter needed when authenticated via GoogleProvider)",
+        description=(
+            "Upload a file to Google Drive. By default `path` is the server's "
+            "local filesystem (single call, supports folders). On remote "
+            "deployments where the client and server are on different machines, "
+            "set DRIVE_UPLOAD_CLIENT_FS=true: `path` is then the *client's* "
+            "filesystem — the first call returns a pendingUpload payload with "
+            "a signed PUT URL; the client uploads bytes to that URL, then "
+            "re-calls this tool with the same path to finalize the Drive "
+            "upload. Folder uploads are only supported in server-FS mode."
+        ),
         tags={"upload", "drive", "file", "folder", "storage", "google", "unified"},
         annotations={
             "title": "Google Drive File/Folder Upload (Unified Auth)",
@@ -735,6 +749,38 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             f"Upload request: {path} -> Drive folder {folder_id} for {user_google_email}"
         )
 
+        # ── Client-filesystem mode ───────────────────────────────────────
+        # When enabled, `path` is on the client's filesystem (not the
+        # server's). We orchestrate transport via an HMAC-signed PUT URL.
+        # Phase 1: no staged bytes → return upload instructions.
+        # Phase 2: staged bytes present → finalize Drive upload.
+        if settings.drive_upload_client_fs:
+            try:
+                return await _handle_client_fs_upload(
+                    path=path,
+                    folder_id=folder_id,
+                    custom_filename=filename,
+                    user_email=user_google_email,
+                )
+            except GoogleAuthError as e:
+                error_msg = f"Authentication error: {e}"
+                logger.error(f"❌ {error_msg}")
+                return UploadFileResponse(
+                    success=False,
+                    userEmail=user_google_email,
+                    message="",
+                    error=error_msg,
+                )
+            except Exception as e:
+                error_msg = f"Client-FS upload error: {e}"
+                logger.error(f"❌ {error_msg}", exc_info=True)
+                return UploadFileResponse(
+                    success=False,
+                    userEmail=user_google_email,
+                    message="",
+                    error=error_msg,
+                )
+
         try:
             # Validate and convert path
             local_path = Path(path).expanduser().resolve()
@@ -817,6 +863,152 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             return UploadFileResponse(
                 success=False, userEmail=user_google_email, message="", error=error_msg
             )
+
+
+async def _handle_client_fs_upload(
+    path: str,
+    folder_id: str,
+    custom_filename: Optional[str],
+    user_email: str,
+) -> UploadFileResponse:
+    """Two-phase client→server→Drive upload, no extra tool parameters.
+
+    Phase 1 (allocation): no staged bytes for ``(session_id, path)`` →
+    allocate, sign a PUT URL, return ``pendingUpload`` instructions.
+
+    Phase 2 (finalize): staged bytes present → run them through the
+    existing ``upload_content_to_drive_api`` and return the normal
+    ``UploadFileResponse`` with ``fileInfo``. On success the staging
+    record is consumed.
+
+    Phase-2 ``folder_id`` and ``filename`` override the values captured at
+    Phase 1 if the caller passes them on the second call (so a user can
+    re-target the destination folder after PUT-ing the bytes). If the
+    caller passes the defaults, Phase-1 values are used.
+    """
+    from auth.context import get_session_context
+
+    from .upload_staging import (
+        allocate_upload,
+        consume_allocation,
+        find_allocation_by_path,
+        generate_upload_url,
+        read_staged_bytes,
+    )
+
+    session_id = await get_session_context()
+    if not session_id:
+        return UploadFileResponse(
+            success=False,
+            userEmail=user_email,
+            message="",
+            error=(
+                "Client-filesystem upload mode requires an MCP session "
+                "(none found in current context). Set DRIVE_UPLOAD_CLIENT_FS=false "
+                "for stdio / local-filesystem uploads."
+            ),
+        )
+
+    # Phase 2: staged bytes already present for this (session, path) pair
+    existing = find_allocation_by_path(session_id, path)
+    if existing and existing.received:
+        staged = read_staged_bytes(existing.upload_id)
+        if staged is None:
+            consume_allocation(existing.upload_id)
+            return UploadFileResponse(
+                success=False,
+                userEmail=user_email,
+                message="",
+                error=(
+                    "Staged upload could not be read from disk. Re-call "
+                    "upload_to_drive to retry the transfer."
+                ),
+            )
+
+        # Honor Phase-2 overrides when the caller passes non-default values.
+        # `folder_id="root"` is the default, so we treat it as "not set"
+        # unless it differs from the Phase-1 value.
+        effective_folder_id = (
+            folder_id if folder_id and folder_id != "root" else existing.folder_id
+        )
+        effective_filename = (
+            custom_filename or existing.custom_filename or existing.filename
+        )
+
+        drive_service = await get_service("drive", user_email)
+        result = await upload_content_to_drive_api(
+            service=drive_service,
+            content=staged,
+            filename=effective_filename,
+            folder_id=effective_folder_id,
+            mime_type=existing.mime_type,
+        )
+
+        file_info: FileUploadInfo = {
+            "fileId": result["id"],
+            "fileName": result["name"],
+            "filePath": path,
+            "fileSize": len(staged),
+            "mimeType": result.get("mimeType", existing.mime_type),
+            "folderId": effective_folder_id,
+            "driveUrl": f"https://drive.google.com/file/d/{result['id']}/view",
+            "webViewLink": result.get(
+                "webViewLink",
+                f"https://drive.google.com/file/d/{result['id']}/view",
+            ),
+        }
+
+        consume_allocation(existing.upload_id)
+        logger.info(
+            f"Client-FS upload finalized: {result['name']} (ID: {result['id']})"
+        )
+        return UploadFileResponse(
+            success=True,
+            userEmail=user_email,
+            fileInfo=file_info,
+            message=f"Successfully uploaded {result['name']} to Google Drive",
+        )
+
+    # Phase 1: allocate + return signed PUT URL
+    alloc = allocate_upload(
+        session_id=session_id,
+        client_path=path,
+        user_email=user_email,
+        folder_id=folder_id,
+        custom_filename=custom_filename,
+    )
+    ttl = settings.drive_upload_ttl_seconds
+    url, exp_ts = generate_upload_url(settings.base_url, alloc.upload_id, ttl)
+
+    safe_path = path.replace('"', '\\"')
+    curl_example = f'curl -X PUT --data-binary @"{safe_path}" "{url}"'
+
+    pending: PendingUploadInfo = {
+        "uploadId": alloc.upload_id,
+        "uploadUrl": url,
+        "method": "PUT",
+        "expiresAt": exp_ts,
+        "expiresInSeconds": ttl,
+        "maxSizeBytes": settings.drive_upload_max_size_mb * 1024 * 1024,
+        "instructions": [
+            f"PUT the bytes of '{path}' to the upload URL (single request).",
+            f"Then re-invoke upload_to_drive with path='{path}' to finalize.",
+            "The URL is one-time-use and expires; a fresh tool call always "
+            "issues a new URL.",
+        ],
+        "curlExample": curl_example,
+    }
+
+    return UploadFileResponse(
+        success=False,
+        userEmail=user_email,
+        message=(
+            "Upload pending: client filesystem mode is active. "
+            f"PUT '{path}' to the provided uploadUrl, then re-call this tool "
+            "with the same path to finalize the Drive upload."
+        ),
+        pendingUpload=pending,
+    )
 
 
 async def _upload_folder_to_drive(

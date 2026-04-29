@@ -573,6 +573,16 @@ from tools.attachment_endpoints import setup_attachment_endpoints
 setup_attachment_endpoints(mcp)
 logger.info("Attachment download endpoint registered (/attachment-download)")
 
+# Setup Drive upload endpoint (client→server transport for upload_to_drive)
+if settings.drive_upload_client_fs:
+    from tools.drive_upload_endpoints import setup_drive_upload_endpoints
+
+    setup_drive_upload_endpoints(mcp)
+    logger.info(
+        "Drive upload endpoint registered (PUT /drive-upload) — "
+        "client-filesystem mode active"
+    )
+
 # Attachment cleanup task is started lazily on first download or via lifespan
 # (asyncio.create_task requires a running event loop, so defer to runtime)
 

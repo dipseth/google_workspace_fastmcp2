@@ -35,6 +35,26 @@ class FolderUploadSummary(TypedDict):
     uploadDuration: float
 
 
+class PendingUploadInfo(TypedDict, total=False):
+    """Instructions returned to the client when an upload needs to be staged.
+
+    Emitted by ``upload_to_drive`` in client-filesystem mode (see
+    ``settings.drive_upload_client_fs``). The client (typically an
+    LLM agent with shell access) is expected to PUT the file's bytes
+    to ``uploadUrl``, then re-invoke ``upload_to_drive`` with the same
+    ``path`` to finalize the Drive upload.
+    """
+
+    uploadId: str
+    uploadUrl: str
+    method: str  # always "PUT"
+    expiresAt: int  # unix timestamp
+    expiresInSeconds: int
+    maxSizeBytes: int
+    instructions: List[str]
+    curlExample: str
+
+
 class UploadFileResponse(TypedDict, total=False):
     """Response structure for upload_file_to_drive and upload_file_to_drive_unified tools."""
 
@@ -46,6 +66,7 @@ class UploadFileResponse(TypedDict, total=False):
     message: str
     error: Optional[str]
     warnings: Optional[List[str]]  # For partial failures in folder upload
+    pendingUpload: Optional[PendingUploadInfo]  # Phase 1 of client-FS upload
 
 
 class OAuthInstruction(TypedDict):
