@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     # Attachment download temp directory (for signed URL mode)
     attachment_temp_dir: str = "/tmp/gw-mcp-attachments"
 
+    # Drive upload — client filesystem mode
+    # When True (default), upload_to_drive treats `path` as a path on the
+    # *client's* filesystem and orchestrates client→server→Drive transport
+    # via an HMAC-signed PUT URL (see drive/upload_staging.py and
+    # tools/drive_upload_endpoints.py). When False, `path` is the server's
+    # local filesystem (legacy behavior, suitable for stdio / co-located use).
+    drive_upload_client_fs: bool = True
+    drive_upload_temp_dir: str = "/tmp/gw-mcp-drive-uploads"
+    drive_upload_max_size_mb: int = 100
+    drive_upload_ttl_seconds: int = 900
+
     @property
     def is_cloud_deployment(self) -> bool:
         """Detect if running in FastMCP Cloud."""
