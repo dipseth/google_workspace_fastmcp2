@@ -91,6 +91,9 @@ class TestRICTextProviderProtocol:
             def relationships_text(self, name: str, metadata: Dict[str, Any]) -> str:
                 return "standalone"
 
+            def content_text(self, name: str, metadata: Dict[str, Any]) -> str:
+                return ""
+
         assert isinstance(MyProvider(), RICTextProvider)
 
 
