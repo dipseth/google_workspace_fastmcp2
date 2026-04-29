@@ -653,14 +653,14 @@ def setup_drive_tools(mcp: FastMCP) -> None:
     @mcp.tool(
         name="upload_to_drive",
         description=(
-            "Upload a file to Google Drive. When DRIVE_UPLOAD_CLIENT_FS=true "
-            "(default) and the server is remote, `path` refers to the *client's* "
-            "filesystem: the first call returns a pendingUpload payload with a "
-            "signed PUT URL; the client uploads bytes to that URL, then re-calls "
-            "this tool with the same path to finalize the Drive upload. When "
-            "DRIVE_UPLOAD_CLIENT_FS=false, `path` is the server's local "
-            "filesystem (legacy single-call behavior). Folder uploads are only "
-            "supported in legacy mode."
+            "Upload a file to Google Drive. By default `path` is the server's "
+            "local filesystem (single call, supports folders). On remote "
+            "deployments where the client and server are on different machines, "
+            "set DRIVE_UPLOAD_CLIENT_FS=true: `path` is then the *client's* "
+            "filesystem — the first call returns a pendingUpload payload with "
+            "a signed PUT URL; the client uploads bytes to that URL, then "
+            "re-calls this tool with the same path to finalize the Drive "
+            "upload. Folder uploads are only supported in server-FS mode."
         ),
         tags={"upload", "drive", "file", "folder", "storage", "google", "unified"},
         annotations={

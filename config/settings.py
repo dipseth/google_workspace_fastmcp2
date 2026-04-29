@@ -47,12 +47,15 @@ class Settings(BaseSettings):
     attachment_temp_dir: str = "/tmp/gw-mcp-attachments"
 
     # Drive upload — client filesystem mode
-    # When True (default), upload_to_drive treats `path` as a path on the
-    # *client's* filesystem and orchestrates client→server→Drive transport
-    # via an HMAC-signed PUT URL (see drive/upload_staging.py and
-    # tools/drive_upload_endpoints.py). When False, `path` is the server's
-    # local filesystem (legacy behavior, suitable for stdio / co-located use).
-    drive_upload_client_fs: bool = True
+    # When False (default), `path` is interpreted as the server's local
+    # filesystem — suitable for stdio and any deployment where the client
+    # and server share a filesystem (the common case).
+    # When True, `upload_to_drive` treats `path` as a path on the *client's*
+    # filesystem and orchestrates client→server→Drive transport via an
+    # HMAC-signed PUT URL (see drive/upload_staging.py and
+    # tools/drive_upload_endpoints.py). Enable this on remote/hosted
+    # deployments where clients and the server are on different machines.
+    drive_upload_client_fs: bool = False
     drive_upload_temp_dir: str = "/tmp/gw-mcp-drive-uploads"
     drive_upload_max_size_mb: int = 100
     drive_upload_ttl_seconds: int = 900
