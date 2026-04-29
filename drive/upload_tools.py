@@ -652,7 +652,16 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="upload_to_drive",
-        description="Upload a local file or folder to Google Drive with UNIFIED authentication (no email parameter needed when authenticated via GoogleProvider)",
+        description=(
+            "Upload a file to Google Drive. When DRIVE_UPLOAD_CLIENT_FS=true "
+            "(default) and the server is remote, `path` refers to the *client's* "
+            "filesystem: the first call returns a pendingUpload payload with a "
+            "signed PUT URL; the client uploads bytes to that URL, then re-calls "
+            "this tool with the same path to finalize the Drive upload. When "
+            "DRIVE_UPLOAD_CLIENT_FS=false, `path` is the server's local "
+            "filesystem (legacy single-call behavior). Folder uploads are only "
+            "supported in legacy mode."
+        ),
         tags={"upload", "drive", "file", "folder", "storage", "google", "unified"},
         annotations={
             "title": "Google Drive File/Folder Upload (Unified Auth)",
@@ -871,6 +880,11 @@ async def _handle_client_fs_upload(
     existing ``upload_content_to_drive_api`` and return the normal
     ``UploadFileResponse`` with ``fileInfo``. On success the staging
     record is consumed.
+
+    Phase-2 ``folder_id`` and ``filename`` override the values captured at
+    Phase 1 if the caller passes them on the second call (so a user can
+    re-target the destination folder after PUT-ing the bytes). If the
+    caller passes the defaults, Phase-1 values are used.
     """
     from auth.context import get_session_context
 
@@ -911,12 +925,22 @@ async def _handle_client_fs_upload(
                 ),
             )
 
+        # Honor Phase-2 overrides when the caller passes non-default values.
+        # `folder_id="root"` is the default, so we treat it as "not set"
+        # unless it differs from the Phase-1 value.
+        effective_folder_id = (
+            folder_id if folder_id and folder_id != "root" else existing.folder_id
+        )
+        effective_filename = (
+            custom_filename or existing.custom_filename or existing.filename
+        )
+
         drive_service = await get_service("drive", user_email)
         result = await upload_content_to_drive_api(
             service=drive_service,
             content=staged,
-            filename=existing.custom_filename or existing.filename,
-            folder_id=existing.folder_id,
+            filename=effective_filename,
+            folder_id=effective_folder_id,
             mime_type=existing.mime_type,
         )
 
@@ -926,7 +950,7 @@ async def _handle_client_fs_upload(
             "filePath": path,
             "fileSize": len(staged),
             "mimeType": result.get("mimeType", existing.mime_type),
-            "folderId": existing.folder_id,
+            "folderId": effective_folder_id,
             "driveUrl": f"https://drive.google.com/file/d/{result['id']}/view",
             "webViewLink": result.get(
                 "webViewLink",

@@ -193,33 +193,38 @@ def generate_upload_url(
     return f"{base}/drive-upload?{urlencode(params)}", exp
 
 
-def verify_upload_url(upload_id: str, exp: str, sig: str) -> tuple[bool, str]:
+def verify_upload_url(
+    upload_id: str, exp: str, sig: str
+) -> tuple[bool, str, Optional[_Allocation]]:
     """Verify PUT-URL signature, expiry, and one-time use.
 
-    Returns ``(is_valid, error_message)``. On success, the upload_id is
-    marked consumed so a second PUT to the same URL is rejected.
+    Returns ``(is_valid, error_message, allocation)``. The allocation
+    reference is captured *before* the token is consumed, so a TTL
+    eviction firing between this call and the endpoint's use of the
+    allocation cannot strand a consumed token without an allocation.
     """
     params = {"uid": upload_id, "exp": exp}
     expected = _compute_signature(params)
     if not _hmac.compare_digest(sig, expected):
-        return False, "Invalid signature"
+        return False, "Invalid signature", None
 
     try:
         exp_ts = int(exp)
     except (ValueError, TypeError):
-        return False, "Invalid expiry"
+        return False, "Invalid expiry", None
 
     if time.time() > exp_ts:
-        return False, "Upload link has expired"
+        return False, "Upload link has expired", None
 
     if _consumed_uploads.is_consumed_sync(upload_id):
-        return False, "Upload URL already used"
+        return False, "Upload URL already used", None
 
-    if upload_id not in _allocations:
-        return False, "Unknown upload id"
+    alloc = _allocations.get(upload_id)
+    if alloc is None:
+        return False, "Unknown upload id", None
 
     _consumed_uploads.consume_sync(upload_id)
-    return True, ""
+    return True, "", alloc
 
 
 def staged_path(upload_id: str) -> str:

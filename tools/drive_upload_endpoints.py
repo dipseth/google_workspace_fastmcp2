@@ -31,7 +31,6 @@ def setup_drive_upload_endpoints(mcp: FastMCP) -> None:
 
         from config.settings import settings
         from drive.upload_staging import (
-            get_allocation,
             mark_received,
             staged_path,
             verify_upload_url,
@@ -48,18 +47,17 @@ def setup_drive_upload_endpoints(mcp: FastMCP) -> None:
                 status_code=400,
             )
 
-        valid, error = verify_upload_url(upload_id, exp, sig)
-        if not valid:
+        # verify_upload_url atomically returns the allocation alongside the
+        # validity check, so a TTL eviction between verify and use cannot
+        # strand a consumed token without its allocation record.
+        valid, error, alloc = verify_upload_url(upload_id, exp, sig)
+        if not valid or alloc is None:
             status = (
                 410
                 if "expired" in error.lower() or "already used" in error.lower()
                 else 403
             )
             return JSONResponse({"error": error}, status_code=status)
-
-        alloc = get_allocation(upload_id)
-        if alloc is None:
-            return JSONResponse({"error": "Allocation not found"}, status_code=404)
 
         max_bytes = settings.drive_upload_max_size_mb * 1024 * 1024
         target = staged_path(upload_id)
