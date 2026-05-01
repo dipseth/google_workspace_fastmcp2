@@ -9,16 +9,20 @@ Features:
 - Auto-launches Qdrant via Docker if not reachable (when enabled)
 - Seamless fallback for local development
 - Persistent data storage
+- Graceful degradation: returns None when Qdrant is unreachable so
+  callers short-circuit cleanly instead of hitting per-call gRPC errors
 
 Usage:
-    from config.qdrant_client import get_qdrant_client
+    from config.qdrant_client import get_qdrant_client, is_qdrant_available
 
-    client = get_qdrant_client()
-    if client:
-        collections = client.get_collections()
+    if is_qdrant_available():
+        client = get_qdrant_client()
+        # ...
 """
 
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 
 from config.enhanced_logging import setup_logger
 
@@ -28,6 +32,51 @@ logger = setup_logger()
 _qdrant_client = None
 _initialization_attempted = False
 _docker_launch_attempted = False
+# Cached availability result; None means "not yet probed"
+_availability_cache: Optional[bool] = None
+
+
+def _probe_tcp(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Quick TCP reachability probe — short timeout, no retries."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
+def is_qdrant_available(force_recheck: bool = False) -> bool:
+    """Return True if Qdrant is reachable, False otherwise.
+
+    Caches the result so repeated calls are cheap. Probes the gRPC port
+    (default 6334) when prefer_grpc, falling back to HTTP (default 6333),
+    so we detect the same unavailability the gRPC client would hit on
+    its first real call.
+    """
+    global _availability_cache
+    if _availability_cache is not None and not force_recheck:
+        return _availability_cache
+
+    try:
+        from config.settings import settings
+
+        url = settings.qdrant_url or "http://localhost:6333"
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        http_port = parsed.port or 6333
+        grpc_port = settings.qdrant_docker_grpc_port or 6334
+
+        # If gRPC preferred, probe both ports; gRPC is the load-bearing one
+        if settings.qdrant_prefer_grpc:
+            available = _probe_tcp(host, grpc_port) and _probe_tcp(host, http_port)
+        else:
+            available = _probe_tcp(host, http_port)
+    except Exception as e:
+        logger.debug(f"Qdrant TCP probe error: {e}")
+        available = False
+
+    _availability_cache = available
+    return available
 
 
 def _ensure_qdrant_available() -> bool:
@@ -93,6 +142,19 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
     # Ensure Qdrant is available (auto-launch via Docker if needed)
     _ensure_qdrant_available()
 
+    # Fast TCP probe: if Qdrant ports aren't even listening, don't bother
+    # creating a phantom client that fails on every gRPC call. This is the
+    # common case in single-container sandbox environments (Glama, Cloud Run
+    # without a Qdrant sidecar, etc.).
+    if not is_qdrant_available():
+        logger.warning(
+            "⚠️ Qdrant not reachable at configured URL — vector-storage "
+            "features will be disabled. Set QDRANT_URL or run a Qdrant "
+            "sidecar to enable."
+        )
+        _qdrant_client = None
+        return None
+
     try:
         from qdrant_client import QdrantClient
 
@@ -127,15 +189,27 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
                 f"✅ Qdrant client connected: {settings.qdrant_host}:{settings.qdrant_port}"
             )
 
-        # Test the connection
+        # Test the connection. If it fails, drop the phantom client so
+        # callers see None instead of hitting per-call gRPC errors that
+        # bubble up as noisy tracebacks throughout startup.
         try:
             collections = _qdrant_client.get_collections()
             logger.info(
                 f"✅ Qdrant connection verified - {len(collections.collections)} collections"
             )
         except Exception as test_err:
-            logger.warning(f"⚠️ Qdrant connection test failed: {test_err}")
-            # Don't fail completely - client might still work for some operations
+            logger.warning(
+                f"⚠️ Qdrant connection test failed ({test_err}) — disabling "
+                "vector-storage features for this process"
+            )
+            try:
+                _qdrant_client.close()
+            except Exception:
+                pass
+            _qdrant_client = None
+            global _availability_cache
+            _availability_cache = False
+            return None
 
     except ImportError as e:
         logger.warning(f"⚠️ qdrant-client not installed: {e}")
@@ -150,6 +224,7 @@ def get_qdrant_client(force_reinit: bool = False) -> Optional["QdrantClient"]:
 def close_qdrant_client():
     """Close and reset the Qdrant client singleton."""
     global _qdrant_client, _initialization_attempted, _docker_launch_attempted
+    global _availability_cache
 
     if _qdrant_client is not None:
         try:
@@ -161,19 +236,7 @@ def close_qdrant_client():
     _qdrant_client = None
     _initialization_attempted = False
     _docker_launch_attempted = False
-
-
-def is_qdrant_available() -> bool:
-    """Check if Qdrant client is available and connected."""
-    client = get_qdrant_client()
-    if client is None:
-        return False
-
-    try:
-        client.get_collections()
-        return True
-    except Exception:
-        return False
+    _availability_cache = None
 
 
 def get_tenant_client(user_email: str) -> Optional["QdrantClient"]:
