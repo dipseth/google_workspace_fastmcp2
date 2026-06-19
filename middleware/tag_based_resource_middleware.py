@@ -413,7 +413,7 @@ class TagBasedResourceMiddleware(Middleware):
                 uri=resource_uri,
             )
 
-    async def on_tool_call(self, context: MiddlewareContext, call_next):
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
         """
         Hook to update cache when tools are called directly.
 
@@ -448,9 +448,20 @@ class TagBasedResourceMiddleware(Middleware):
                     # Convert result to serializable format (same logic as _handle_list_items)
                     serializable_result = self._convert_result_to_serializable(result)
 
+                    # Cache must hold a ServiceListResponse, not a raw dict: the cache
+                    # reader in _handle_list_items does `cache_entry.data.result`, so a
+                    # dict here raises AttributeError on the next service:// read.
+                    cached_response = ServiceListResponse.from_middleware_data(
+                        result=serializable_result,
+                        service=service,
+                        list_type=list_type,
+                        tool_called=tool_name,
+                        user_email=user_email,
+                    )
+
                     # Cache the result
                     self.cache[cache_key] = CacheEntry(
-                        data=serializable_result,
+                        data=cached_response,
                         timestamp=datetime.now(),
                         ttl_seconds=self.cache_ttl_seconds,
                     )
