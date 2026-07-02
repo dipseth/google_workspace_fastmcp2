@@ -74,9 +74,33 @@ class DualAuthBridge:
         """Initialize the dual auth bridge."""
         self._memory_credentials: Dict[str, Credentials] = {}
         self._primary_account: Optional[str] = None
-        self._secondary_accounts: set[str] = set()
+        # SECURITY (C3): secondary accounts are scoped PER SESSION, keyed by the
+        # FastMCP transport session id. A previous implementation used a single
+        # process-global set, so a secondary registered by one session/user
+        # caused the email-mismatch guard to be skipped for EVERY session —
+        # letting one authenticated user act as another. Never make this global.
+        self._secondary_accounts_by_session: Dict[str, set[str]] = {}
         self._api_key_owned_accounts: set[str] = set()
         logger.info("🌉 DualAuthBridge initialized")
+
+    @staticmethod
+    def _resolve_session_id(session_id: Optional[str]) -> Optional[str]:
+        """Return the given session id, or the current transport session id."""
+        if session_id:
+            return session_id
+        try:
+            from .context import get_session_context_sync
+
+            return get_session_context_sync()
+        except Exception:
+            return None
+
+    def _all_secondaries(self) -> set[str]:
+        """Aggregate of every session's secondaries (for display/UX only)."""
+        out: set[str] = set()
+        for emails in self._secondary_accounts_by_session.values():
+            out |= emails
+        return out
 
     def set_primary_account(
         self, user_email: str, credentials: Optional[Credentials] = None
@@ -93,23 +117,55 @@ class DualAuthBridge:
             self._memory_credentials[user_email] = credentials
         logger.info(f"✅ Set primary account: {redact_email(user_email)}")
 
-    def add_secondary_account(self, user_email: str) -> None:
+    def add_secondary_account(
+        self, user_email: str, session_id: Optional[str] = None
+    ) -> None:
         """
-        Register a secondary account (authenticated via file-based OAuth).
+        Register a secondary account for the CURRENT session only.
 
         Args:
             user_email: Secondary account email
+            session_id: Session to scope this to (defaults to the current
+                transport session). If no session can be resolved, the
+                registration is skipped rather than made global.
         """
-        self._secondary_accounts.add(user_email)
-        logger.info(f"➕ Added secondary account: {redact_email(user_email)}")
+        sid = self._resolve_session_id(session_id)
+        if not sid:
+            logger.debug(
+                "add_secondary_account: no session context — not registering "
+                f"{redact_email(user_email)} (avoids cross-session bypass)"
+            )
+            return
+        self._secondary_accounts_by_session.setdefault(sid, set()).add(
+            user_email.lower().strip()
+        )
+        logger.info(
+            f"➕ Added secondary account for session {sid[:8]}…: {redact_email(user_email)}"
+        )
 
     def is_primary_account(self, user_email: str) -> bool:
         """Check if an email is the primary account."""
         return self._primary_account == user_email
 
-    def is_secondary_account(self, user_email: str) -> bool:
-        """Check if an email is a secondary account."""
-        return user_email in self._secondary_accounts
+    def is_secondary_account(
+        self, user_email: str, session_id: Optional[str] = None
+    ) -> bool:
+        """Check if an email is a secondary account IN THIS SESSION.
+
+        Session-scoped by design (C3): a secondary registered by another session
+        must never authorize this one. Returns False when no session can be
+        resolved (fail-closed).
+        """
+        sid = self._resolve_session_id(session_id)
+        if not sid:
+            return False
+        return user_email.lower().strip() in self._secondary_accounts_by_session.get(
+            sid, set()
+        )
+
+    def clear_session(self, session_id: str) -> None:
+        """Drop per-session secondary state (call on session teardown)."""
+        self._secondary_accounts_by_session.pop(session_id, None)
 
     def register_api_key_account(self, user_email: str) -> None:
         """Register an email as owned by an API key session.
@@ -184,10 +240,12 @@ class DualAuthBridge:
             logger.debug(f"Active account is primary: {self._primary_account}")
             return self._primary_account
 
-        # Fallback to most recent secondary
-        if self._secondary_accounts:
-            # In a real implementation, track access time
-            recent = list(self._secondary_accounts)[0]
+        # Fallback to a secondary from the CURRENT session (not any session).
+        session_secondaries = self._secondary_accounts_by_session.get(
+            self._resolve_session_id(None) or "", set()
+        )
+        if session_secondaries:
+            recent = next(iter(session_secondaries))
             logger.debug(f"Active account is secondary: {recent}")
             return recent
 
@@ -260,7 +318,7 @@ class DualAuthBridge:
             "secondary_flow": {
                 "enabled": True,
                 "oauth_configured": settings.is_oauth_configured(),
-                "secondary_accounts": list(self._secondary_accounts),
+                "secondary_accounts": list(self._all_secondaries()),
             },
             "bridging": {
                 "enabled": settings.credential_migration,
@@ -423,7 +481,7 @@ class DualAuthBridge:
         if self._primary_account:
             accounts[self._primary_account] = "primary"
 
-        for email in self._secondary_accounts:
+        for email in self._all_secondaries():
             accounts[email] = "secondary"
 
         # Also check for file-based accounts not yet registered
