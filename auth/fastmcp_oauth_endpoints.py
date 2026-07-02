@@ -2002,6 +2002,28 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     status_code=400,
                 )
 
+            # SECURITY: require a signed action token bound to this session (same
+            # gate as the GoogleProvider-mode route) so a caller can't flip
+            # another session's privacy mode by guessing its id. Without this the
+            # legacy-mode endpoint would remain unauthenticated.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request,
+                "privacy-mode",
+                target_session,
+                body_token=body.get("action_token", ""),
+                subject_is_email=False,
+            )
+            if not _ok:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token is required.",
+                    },
+                    status_code=401,
+                )
+
             from auth.context import get_session_data, store_session_data
             from auth.types import AuthProvenance, SessionKey
 
