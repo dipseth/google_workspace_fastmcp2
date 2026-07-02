@@ -253,6 +253,37 @@ def redact_email(email: str) -> str:
     return f"{local[0]}***@{domain}"
 
 
+def redact_url_secrets(url: str) -> str:
+    """Redact sensitive OAuth query params (code, state, token, secret) in a URL.
+
+    Auth codes are single-use bearer secrets; logging the full callback URL lets
+    anyone with log access replay the code before it's redeemed.
+    """
+    if not url or not isinstance(url, str):
+        return "***"
+    try:
+        from urllib.parse import parse_qs, urlencode, urlparse
+
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+        sensitive = {
+            "code",
+            "state",
+            "token",
+            "access_token",
+            "client_secret",
+            "id_token",
+        }
+        q = parse_qs(parsed.query, keep_blank_values=True)
+        for k in list(q):
+            if k.lower() in sensitive:
+                q[k] = ["<redacted>"]
+        return parsed._replace(query=urlencode(q, doseq=True)).geturl()
+    except Exception:
+        return "<unparseable-url-redacted>"
+
+
 def log_execution_time(func):
     """
     Decorator that logs function execution time.

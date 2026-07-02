@@ -134,16 +134,20 @@ class AuthMiddleware(Middleware):
 
     def _get_or_create_session(self, request_id: int) -> str:
         """
-        Get existing session or create new one for this request.
+        Resolve the session id for this request.
 
-        PHASE 1 FIX: Session management independent of FastMCP context.
-        Reuses existing sessions from thread-safe session store.
+        SECURITY/CORRECTNESS (Group A / C1): the session id is keyed to FastMCP's
+        stable per-connection transport session id (``ctx.session_id``). The old
+        implementation fell back to ``list_sessions()[-1]`` — the globally
+        most-recent session — which collapsed distinct concurrent connections
+        onto ONE session, letting identity / credential-ownership state bleed
+        between different users. We must NEVER adopt another connection's session.
         """
         import uuid
 
-        from .context import list_sessions
+        from .context import get_session_context_sync
 
-        # Check if we already have a session for this request
+        # Check if we already resolved a session for this request object.
         with self._session_lock:
             if request_id in self._active_sessions:
                 session_id = self._active_sessions[request_id]
@@ -152,15 +156,17 @@ class AuthMiddleware(Middleware):
                 )
                 return session_id
 
-        # Try to reuse most recent active session from store
-        active_sessions = list_sessions()
-        if active_sessions:
-            session_id = active_sessions[-1]
-            logger.debug(f"♻️ Reusing most recent active session: {session_id}")
+        # Prefer the native transport session id — stable and per-connection.
+        session_id = get_session_context_sync()
+        if session_id:
+            logger.debug(f"🔗 Using native transport session id: {session_id[:8]}...")
         else:
-            # Generate new session only if necessary
+            # Native id not available yet (very early request phase). Mint a
+            # fresh per-request id — do NOT adopt another connection's session.
             session_id = str(uuid.uuid4())
-            logger.debug(f"🆕 Generated new session ID: {session_id}")
+            logger.debug(
+                f"🆕 Generated new session ID (native unavailable): {session_id}"
+            )
 
         # Track this session for this request
         with self._session_lock:
@@ -224,25 +230,35 @@ class AuthMiddleware(Middleware):
             context: MiddlewareContext containing tool call information
             call_next: Function to continue the middleware chain
         """
-        from .context import get_session_data, store_session_data
+        from .context import (
+            get_session_context_sync,
+            get_session_data,
+            store_session_data,
+        )
 
         tool_name = context.message.name
         logger.debug(f"Processing tool call: {tool_name}")
 
-        # PHASE 1 FIX: Get session from instance tracking (reliable and early-access safe)
         request_id = self._get_request_id(context)
 
-        with self._session_lock:
-            session_id = self._active_sessions.get(request_id)
-
-        if not session_id:
-            # Fallback: create session if on_request didn't run (shouldn't happen normally)
-            session_id = self._get_or_create_session(request_id)
-            logger.debug(
-                f"⚠️ Created session in on_call_tool for {tool_name}: {session_id}"
-            )
+        # Group A / C1: credential + identity decisions must key off the stable
+        # native transport session id, which IS available at tool-call time.
+        # (on_request may have cached an early-phase uuid before the native id
+        # existed; do not reuse that for credential isolation.)
+        session_id = get_session_context_sync()
+        if session_id:
+            with self._session_lock:
+                self._active_sessions[request_id] = session_id
         else:
-            logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
+            with self._session_lock:
+                session_id = self._active_sessions.get(request_id)
+            if not session_id:
+                # Fallback: create session if on_request didn't run
+                session_id = self._get_or_create_session(request_id)
+                logger.debug(
+                    f"⚠️ Created session in on_call_tool for {tool_name}: {session_id}"
+                )
+        logger.debug(f"✅ Using session for tool {tool_name}: {session_id}")
 
         # FastMCP Pattern: FIRST try JWT token (following FastMCP examples)
         user_email = None

@@ -65,9 +65,29 @@ def get_feedback_base_url() -> str:
 
 
 def make_callback_url(card_id: str, feedback_val: str, feedback_type: str) -> str:
-    """Create feedback callback URL."""
+    """Create a signed feedback callback URL.
+
+    The ``sig`` binds (card_id, feedback, feedback_type) so the /card-feedback
+    endpoint can reject forged/guessed requests (feedback poisoning).
+    """
     base_url = get_feedback_base_url()
-    return f"{base_url}?card_id={card_id}&feedback={feedback_val}&feedback_type={feedback_type}"
+    from urllib.parse import urlencode
+
+    from auth.action_tokens import sign_payload
+
+    # Sign the RAW values, then URL-encode the query so the endpoint decodes the
+    # exact same values back (otherwise reserved chars in card_id/feedback would
+    # break signature verification).
+    sig = sign_payload("card-feedback", [card_id, feedback_val, feedback_type])
+    query = urlencode(
+        {
+            "card_id": card_id,
+            "feedback": feedback_val,
+            "feedback_type": feedback_type,
+            "sig": sig,
+        }
+    )
+    return f"{base_url}?{query}"
 
 
 # ---------------------------------------------------------------------------

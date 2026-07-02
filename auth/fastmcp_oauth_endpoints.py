@@ -1545,8 +1545,10 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
         full credential storage and success page display.
         """
         # IMMEDIATE logging to ensure we see if the route is hit
+        from config.enhanced_logging import redact_url_secrets
+
         logger.info("🚨 CRITICAL: OAuth2 callback route HIT!")
-        logger.info(f"🚨 CRITICAL: Request URL: {request.url}")
+        logger.info(f"🚨 CRITICAL: Request URL: {redact_url_secrets(str(request.url))}")
         logger.info(f"🚨 CRITICAL: Request method: {request.method}")
 
         from starlette.responses import HTMLResponse, Response
@@ -2000,6 +2002,28 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                     status_code=400,
                 )
 
+            # SECURITY: require a signed action token bound to this session (same
+            # gate as the GoogleProvider-mode route) so a caller can't flip
+            # another session's privacy mode by guessing its id. Without this the
+            # legacy-mode endpoint would remain unauthenticated.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request,
+                "privacy-mode",
+                target_session,
+                body_token=body.get("action_token", ""),
+                subject_is_email=False,
+            )
+            if not _ok:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token is required.",
+                    },
+                    status_code=401,
+                )
+
             from auth.context import get_session_data, store_session_data
             from auth.types import AuthProvenance, SessionKey
 
@@ -2115,6 +2139,30 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 return JSONResponse(
                     {"success": False, "error": "No user email in session"},
                     status_code=400,
+                )
+
+            # SECURITY: require proof the caller owns this identity before saving
+            # LLM config (model/api_key/api_base). Otherwise an attacker who knows
+            # a victim's email/session could repoint api_base at their own server
+            # and capture the victim's prompts.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request,
+                "sampling-config",
+                user_email,
+                body_token=body.get("action_token", ""),
+            )
+            if not _ok:
+                logger.warning(
+                    f"🚫 /api/sampling-config unauthorized for {redact_email(user_email)}: {_why}"
+                )
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token or owning API key is required.",
+                    },
+                    status_code=401,
                 )
 
             auth_middleware = get_auth_middleware()
@@ -2246,6 +2294,26 @@ def setup_config_api_routes(mcp) -> None:
                     status_code=400,
                 )
 
+            # SECURITY: require a signed action token bound to this session, so a
+            # caller cannot flip another session's privacy mode by guessing its id.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request,
+                "privacy-mode",
+                target_session,
+                body_token=body.get("action_token", ""),
+                subject_is_email=False,
+            )
+            if not _ok:
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token is required.",
+                    },
+                    status_code=401,
+                )
+
             from auth.context import get_session_data, store_session_data
             from auth.types import AuthProvenance, SessionKey
 
@@ -2357,6 +2425,30 @@ def setup_config_api_routes(mcp) -> None:
                 return JSONResponse(
                     {"success": False, "error": "No user email in session"},
                     status_code=400,
+                )
+
+            # SECURITY: require proof the caller owns this identity before saving
+            # LLM config (model/api_key/api_base). Otherwise an attacker who knows
+            # a victim's email/session could repoint api_base at their own server
+            # and capture the victim's prompts.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request,
+                "sampling-config",
+                user_email,
+                body_token=body.get("action_token", ""),
+            )
+            if not _ok:
+                logger.warning(
+                    f"🚫 /api/sampling-config unauthorized for {redact_email(user_email)}: {_why}"
+                )
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token or owning API key is required.",
+                    },
+                    status_code=401,
                 )
 
             auth_middleware = get_auth_middleware()
@@ -2600,6 +2692,28 @@ def setup_config_api_routes(mcp) -> None:
                     status_code=400,
                 )
 
+            # SECURITY: require proof the caller owns this email — a signed action
+            # token embedded in the server-rendered page, or a per-user API key
+            # that owns the target. Without this, any anonymous caller who knows
+            # a victim's email could destroy their credentials/keys/backups.
+            from auth.action_tokens import authorize_action
+
+            _ok, _why = authorize_action(
+                request, "revoke", user_email, body_token=body.get("action_token", "")
+            )
+            if not _ok:
+                logger.warning(
+                    f"🚫 /api/revoke unauthorized for {redact_email(user_email)}: {_why}"
+                )
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Unauthorized: a valid action token or owning API key is required.",
+                    },
+                    status_code=401,
+                    headers={"Access-Control-Allow-Origin": "*"},
+                )
+
             from auth.context import get_auth_middleware
 
             auth_mw = get_auth_middleware()
@@ -2814,11 +2928,32 @@ def setup_complete_oauth_endpoints(
                         oauth_data = {}
                     authenticated_email = oauth_data.get("authenticated_email")
                     if authenticated_email:
+                        # SECURITY: do NOT disclose which account authenticated to
+                        # anonymous callers (this endpoint is CORS `*` and polled
+                        # during the flow). Only echo the email back to a caller
+                        # who proves they own it via a per-user API key Bearer.
+                        _disclose = False
+                        _authz = request.headers.get("Authorization", "")
+                        if _authz.startswith("Bearer "):
+                            try:
+                                from auth.user_api_keys import (
+                                    get_accessible_emails,
+                                    lookup_key,
+                                )
+
+                                _owner = lookup_key(_authz[len("Bearer ") :].strip())
+                                _disclose = bool(
+                                    _owner
+                                ) and authenticated_email.lower() in {
+                                    e.lower() for e in get_accessible_emails(_owner)
+                                }
+                            except Exception:
+                                _disclose = False
+                        _content = {"authenticated": True}
+                        if _disclose:
+                            _content["user_email"] = authenticated_email
                         return JSONResponse(
-                            content={
-                                "authenticated": True,
-                                "user_email": authenticated_email,
-                            },
+                            content=_content,
                             headers={
                                 "Access-Control-Allow-Origin": "*",
                                 "Cache-Control": "no-store",
