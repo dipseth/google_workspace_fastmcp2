@@ -16,10 +16,13 @@ import os
 
 import httpx
 import pytest
-from dotenv import dotenv_values
 
-_ENV = dotenv_values(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-BASE = os.getenv("SEC_TEST_BASE_URL", "https://localhost:8002")
+# Reuse the shared framework config, which calls load_dotenv() and does
+# HTTP/HTTPS protocol detection from the environment (ENABLE_HTTPS etc.), so
+# these tests target the same server the rest of the client suite does.
+from .base_test_config import PROTOCOL, SERVER_HOST, SERVER_PORT
+
+BASE = os.getenv("SEC_TEST_BASE_URL") or f"{PROTOCOL}://{SERVER_HOST}:{SERVER_PORT}"
 FAKE_VICTIM = "nonexistent-victim-probe@example.com"
 
 
@@ -35,6 +38,11 @@ class TestUnauthenticatedEndpoints:
         """/oauth/status must not leak the authenticated identity to anonymous callers."""
         with _client() as c:
             r = c.get(f"{BASE}/oauth/status")
+        # Fail on unexpected statuses (e.g. 500) so a regression can't masquerade
+        # as a pass by skipping the body check below.
+        assert r.status_code in (200, 401, 403), (
+            f"/oauth/status returned unexpected status {r.status_code}: {r.text[:200]}"
+        )
         # Secure: either requires auth (401/403) or does not disclose an email.
         if r.status_code == 200:
             body = r.text.lower()
