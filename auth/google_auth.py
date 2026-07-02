@@ -1365,42 +1365,25 @@ async def handle_oauth_callback(
         f"Handling OAuth callback with state: {state} (PKCE: {'enabled' if code_verifier else 'disabled'})"
     )
 
-    # Get state info - if not found, use defaults for resilience
+    # SECURITY: the `state` parameter is a per-flow CSRF token minted by
+    # start_google_auth and stored in `_oauth_state_map`. If the presented
+    # state is absent/unknown we must REJECT — never fabricate a fallback and
+    # proceed. Fabricating one turns this into a login-CSRF / authorization-code
+    # injection sink (an attacker delivers a callback with their own code and an
+    # arbitrary state, and the server would complete the flow). An unknown state
+    # can also mean the in-memory map was lost to a restart; in both cases the
+    # correct, safe action is to make the user restart the flow.
     state_info = _oauth_state_map.pop(state, None)
     if not state_info:
-        logger.warning(f"OAuth state not found in current session: {state}")
-        logger.info(
-            "This may happen if the server was restarted. Using fallback configuration."
+        logger.warning(
+            f"🚫 OAuth callback rejected: unknown or expired state '{state}' "
+            f"(possible CSRF/code-injection, or server restarted mid-flow)"
         )
-
-        # Extract email from authorization response as fallback
-        from urllib.parse import parse_qs, urlparse
-
-        try:
-            parsed_url = urlparse(authorization_response)
-            query_params = parse_qs(parsed_url.query)
-
-            # Look for email hint in the OAuth callback (some flows include this)
-            email_hint = None
-
-            # Fallback: Use a default configuration for resilient OAuth handling
-            state_info = {
-                "user_email": email_hint
-                or "unknown@gmail.com",  # Will be corrected from userinfo
-                "auth_method": "pkce_file",  # Default to PKCE file storage
-                "custom_client_id": None,
-                "custom_client_secret": None,
-            }
-            logger.info(
-                f"🔄 Using fallback state info for resilient OAuth: {state_info}"
-            )
-
-        except Exception as fallback_error:
-            logger.error(f"❌ Could not create fallback state info: {fallback_error}")
-            raise GoogleAuthError(
-                "OAuth session expired (possibly due to server restart). "
-                "Please start the authentication process again by calling the start_google_auth tool."
-            )
+        raise GoogleAuthError(
+            "OAuth state is invalid, expired, or was not issued by this server. "
+            "This can happen if the server restarted mid-flow. Please restart "
+            "authentication by calling the start_google_auth tool again."
+        )
 
     user_email = state_info["user_email"]
     auth_method = state_info["auth_method"]
@@ -1636,8 +1619,10 @@ async def handle_oauth_callback(
     try:
         # DIAGNOSTIC LOG: OAuth scope inconsistency debugging - callback phase
         logger.info("OAUTH_SCOPE_DEBUG: Processing OAuth callback")
+        from config.enhanced_logging import redact_url_secrets
+
         logger.info(
-            f"OAUTH_SCOPE_DEBUG: Authorization response: {authorization_response}"
+            f"OAUTH_SCOPE_DEBUG: Authorization response: {redact_url_secrets(authorization_response)}"
         )
 
         # Disable scope validation to handle Google adding extra scopes

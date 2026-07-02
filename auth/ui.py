@@ -447,6 +447,13 @@ def build_revoke_section(user_email: str, base_url: str) -> str:
     safe_email = html.escape(user_email)
     safe_base = html.escape(base_url)
 
+    # SECURITY: mint a short-lived signed token bound to this email so the
+    # /api/revoke endpoint can verify the request came from this authenticated
+    # page (not an anonymous cross-site caller). See auth/action_tokens.py.
+    from auth.action_tokens import sign_action_token
+
+    revoke_token = html.escape(sign_action_token("revoke", user_email))
+
     # Determine which items exist for this user
     items_available: list[dict] = []
     try:
@@ -569,7 +576,8 @@ def build_revoke_section(user_email: str, base_url: str) -> str:
                 body: JSON.stringify({{
                     user_email: '{user_email.lower().strip()}',
                     items: items,
-                    confirmation_email: confirmEmail
+                    confirmation_email: confirmEmail,
+                    action_token: '{revoke_token}'
                 }})
             }})
             .then(r => r.json())

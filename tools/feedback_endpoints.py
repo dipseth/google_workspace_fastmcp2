@@ -72,6 +72,26 @@ def setup_feedback_endpoints(mcp: FastMCP):
                     ),
                 )
 
+            # SECURITY: verify the HMAC signature that make_callback_url embeds.
+            # Without it, anyone who knows/guesses a card_id could inject feedback
+            # and poison the scorer/feedback-loop training data.
+            from auth.action_tokens import verify_payload
+
+            sig = query_params.get("sig", "")
+            if not verify_payload(
+                sig, "card-feedback", [card_id, feedback, feedback_type]
+            ):
+                logger.warning(
+                    f"🚫 /card-feedback rejected: invalid/missing signature for card {card_id[:8]}..."
+                )
+                return HTMLResponse(
+                    status_code=403,
+                    content=_render_feedback_page(
+                        success=False,
+                        message="Invalid or missing feedback signature.",
+                    ),
+                )
+
             # Update the feedback in the feedback loop
             from gchat.feedback_loop import get_feedback_loop
 

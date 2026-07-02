@@ -24,11 +24,6 @@ _RATE_LIMIT_MAX = 15  # max failures per window (generous for refresh loops)
 _MAX_TRACKED_PREFIXES = 1000  # cap to prevent memory growth from brute-force
 _last_stale_warn: dict[str, float] = {}
 
-# Grace period / stale-header fallback cache
-_latest_issued_jwt: list = [None, 0.0]  # [jwt_string, issued_at]
-_GRACE_PERIOD_SECONDS = 30.0
-_stale_token_aliases: set = set()
-
 
 def _clear_auth_rate_limits():
     """Clear all rate limit state — called after successful token issuance."""
@@ -81,14 +76,6 @@ def create_sso_google_provider(
                 client, authorization_code
             )
 
-            # Cache the newly-issued JWT for stale-header fallback.
-            if result and hasattr(result, "access_token") and result.access_token:
-                import time as _t
-
-                _latest_issued_jwt[0] = result.access_token
-                _latest_issued_jwt[1] = _t.time()
-                logger.debug("🔑 Cached latest JWT for stale-header fallback")
-
             # Now save the Google tokens as API credentials
             if idp_tokens:
                 try:
@@ -98,17 +85,6 @@ def create_sso_google_provider(
                         f"⚠️ SSO credential save failed (auth still works): {e}"
                     )
 
-            return result
-
-        async def exchange_refresh_token(self, client, refresh_token, scopes):
-            """Intercept refresh to update stale-header fallback cache."""
-            result = await super().exchange_refresh_token(client, refresh_token, scopes)
-            if result and hasattr(result, "access_token") and result.access_token:
-                import time as _t
-
-                _latest_issued_jwt[0] = result.access_token
-                _latest_issued_jwt[1] = _t.time()
-                logger.debug("🔑 Refresh: updated latest JWT for stale-header fallback")
             return result
 
         async def _save_google_credentials(self, idp_tokens: dict):
@@ -307,9 +283,7 @@ def create_sso_google_provider(
             return result
 
         # 4. Fallback: try validating as a raw Google access token
-        if (
-            "." not in token[:40] or not token.startswith("eyJ")
-        ) and token_prefix not in _stale_token_aliases:
+        if "." not in token[:40] or not token.startswith("eyJ"):
             logger.info(
                 "🔄 Token is not a FastMCP JWT — trying Google tokeninfo fallback..."
             )
@@ -325,7 +299,22 @@ def create_sso_google_provider(
                     _info = _resp.json()
                     _email = _info.get("email")
                     _expires_in = int(_info.get("expires_in", 0))
-                    if _email and _expires_in > 0:
+                    # SECURITY: bind the token to THIS server's OAuth client.
+                    # tokeninfo returns the client the token was minted for as
+                    # `audience`/`issued_to`. Without this check, any Google
+                    # access token for a known-email user — including one issued
+                    # to a different (malicious) app the user authorized — would
+                    # be accepted (OAuth confused-deputy / token substitution).
+                    _aud = _info.get("audience") or _info.get("issued_to") or ""
+                    if _email and _expires_in > 0 and _aud != client_id:
+                        from config.enhanced_logging import redact_email as _re
+
+                        logger.warning(
+                            f"🚫 Rejecting Google token for {_re(_email)}: audience "
+                            f"'{_aud}' was not issued to this server's OAuth client. "
+                            f"Token substitution / confused-deputy attempt blocked."
+                        )
+                    elif _email and _expires_in > 0:
                         from config.enhanced_logging import redact_email as _re
 
                         logger.info(
@@ -357,39 +346,15 @@ def create_sso_google_provider(
             except Exception as _e:
                 logger.debug(f"Google tokeninfo fallback error: {_e}")
 
-        # 5. Stale-header fallback
-        if not token.startswith("eyJ") and _latest_issued_jwt[0]:
-            _grace_jwt = _latest_issued_jwt[0]
-            _grace_ts = _latest_issued_jwt[1]
-            _JWT_MAX_AGE = 3700.0
-            if now - _grace_ts > _JWT_MAX_AGE:
-                _latest_issued_jwt[0] = None
-                _latest_issued_jwt[1] = 0.0
-                _stale_token_aliases.clear()
-                logger.debug("🧹 Cleared expired JWT from stale-header fallback cache")
-            else:
-                _is_known_stale = token_prefix in _stale_token_aliases
-                _in_grace_window = now - _grace_ts <= _GRACE_PERIOD_SECONDS
-                if _is_known_stale or _in_grace_window:
-                    _grace_result = await _original_load_access_token(_grace_jwt)
-                    if _grace_result is not None:
-                        if not _is_known_stale:
-                            logger.warning(
-                                f"🔄 STALE HEADER FALLBACK: client sent "
-                                f"non-JWT token (prefix={token_prefix}...) "
-                                f"but a valid JWT was issued "
-                                f"{now - _grace_ts:.1f}s ago. Using the "
-                                f"fresh JWT. FIX: remove the hardcoded "
-                                f"'Authorization' header from the client's "
-                                f"MCP server config — OAuth handles auth "
-                                f"automatically."
-                            )
-                            _stale_token_aliases.add(token_prefix)
-                        return _grace_result
-                    elif _is_known_stale:
-                        _latest_issued_jwt[0] = None
-                        _latest_issued_jwt[1] = 0.0
-                        _stale_token_aliases.discard(token_prefix)
+        # 5. Stale-header fallback — REMOVED (security).
+        # This previously resolved an arbitrary non-JWT ("junk") token to the
+        # most-recently-issued JWT's user if it arrived within a 30s grace window
+        # of any token issuance, and then aliased that junk token to the same
+        # identity for ~1h. That binds an UNAUTHENTICATED token to a real user's
+        # session (authentication-confusion bypass). Clients that were relying on
+        # this to paper over a hardcoded stale `Authorization` header must instead
+        # remove that header and let OAuth handle auth (the code below already
+        # logs that guidance when it detects a stuck stale token).
 
         # Detect repeated stale token
         prior_count = len(attempts)
