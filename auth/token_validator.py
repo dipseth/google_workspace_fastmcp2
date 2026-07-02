@@ -15,14 +15,28 @@ logger = setup_logger()
 from auth.access_control import validate_user_access
 
 
+def _expected_client_id() -> str:
+    """The OAuth client_id this server issues tokens for (audience binding)."""
+    import os
+
+    from config.settings import settings
+
+    return (
+        getattr(settings, "fastmcp_server_auth_google_client_id", "")
+        or os.getenv("FASTMCP_SERVER_AUTH_GOOGLE_CLIENT_ID", "")
+        or (settings.get_oauth_client_config() or {}).get("client_id", "")
+    )
+
+
 def validate_google_token_with_access_control(token: str) -> Optional[Dict[str, Any]]:
     """
     Validate a Google OAuth Bearer token AND verify the user has access.
 
     This function:
     1. Validates the token with Google's tokeninfo endpoint
-    2. Extracts the user's email from the token
-    3. Checks if the user has stored credentials (access control)
+    2. Verifies the token was issued to THIS server's OAuth client (audience)
+    3. Extracts the user's email from the token
+    4. Checks if the user has stored credentials (access control)
 
     Args:
         token: Google OAuth Bearer token
@@ -54,6 +68,20 @@ def validate_google_token_with_access_control(token: str) -> Optional[Dict[str, 
         email = token_info.get("email")
         if not email:
             logger.warning("❌ Token validation failed: No email in token")
+            return None
+
+        # Step 2b: SECURITY — verify the token was issued to THIS server's OAuth
+        # client. tokeninfo returns the minting client as `audience`/`issued_to`.
+        # Without this, any Google access token for a known-email user (including
+        # one issued to a different app the user authorized, or a leaked/phished
+        # token) is accepted — the classic OAuth confused-deputy bypass.
+        expected = _expected_client_id()
+        token_aud = token_info.get("audience") or token_info.get("issued_to") or ""
+        if expected and token_aud != expected:
+            logger.warning(
+                f"🚫 Token validation failed: audience '{token_aud}' not issued to "
+                f"this server's OAuth client (confused-deputy / substitution blocked)"
+            )
             return None
 
         # Step 3: Validate access control

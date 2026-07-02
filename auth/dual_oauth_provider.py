@@ -488,8 +488,12 @@ class DualOAuthRouter:
         error = request.query_params.get("error")
 
         if error:
+            import html as _html
+
+            # SECURITY: `error` is attacker-controllable (reflected from the query
+            # string) — escape it to prevent reflected XSS on this origin.
             return HTMLResponse(
-                f"<h1>GitHub Authentication Failed</h1><p>{error}</p>",
+                f"<h1>GitHub Authentication Failed</h1><p>{_html.escape(error)}</p>",
                 status_code=400,
             )
 
@@ -532,9 +536,13 @@ class DualOAuthRouter:
 
         access_token = token_data.get("access_token")
         if not access_token:
+            import html as _html
+
+            # SECURITY: error_description originates from GitHub's response and is
+            # not trusted for HTML — escape before reflecting into the page.
             error_desc = token_data.get("error_description", "Unknown error")
             return HTMLResponse(
-                f"<h1>Authentication Failed</h1><p>{error_desc}</p>",
+                f"<h1>Authentication Failed</h1><p>{_html.escape(str(error_desc))}</p>",
                 status_code=400,
             )
 

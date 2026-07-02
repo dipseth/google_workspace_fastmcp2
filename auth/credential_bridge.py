@@ -51,6 +51,20 @@ from config.enhanced_logging import redact_email, setup_logger
 logger = setup_logger()
 
 
+def _safe_identifier(email: str) -> str:
+    """Return *email* if it is safe to embed in a filename, else raise.
+
+    SECURITY: this module interpolates ``user_email`` directly into credential
+    file paths. A crafted value like ``a/../../etc/x`` would otherwise let a
+    caller read/write outside the credentials directory. A real email never
+    contains a path separator, NUL, or ``..``.
+    """
+    s = (email or "").strip()
+    if not s or "/" in s or "\\" in s or ".." in s or "\x00" in s:
+        raise ValueError(f"Unsafe credential identifier: {email!r}")
+    return s
+
+
 class CredentialFormat(Enum):
     """Credential storage formats."""
 
@@ -105,7 +119,7 @@ class CredentialBridge:
         self.credentials_dir = Path(
             credentials_dir or os.getenv("CREDENTIALS_DIR", "./credentials")
         )
-        self.credentials_dir.mkdir(parents=True, exist_ok=True)
+        self.credentials_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         self._enhanced_logging = (
             os.getenv("ENHANCED_LOGGING", "false").lower() == "true"
@@ -181,12 +195,14 @@ class CredentialBridge:
             StoredCredential if found, None otherwise
         """
         try:
+            # SECURITY: reject path-traversal in the email before building a path.
+            _safe_email = _safe_identifier(user_email)
             # Try different file patterns
             patterns = [
-                f"token_{user_email}.json",  # Legacy format
-                f"creds_{user_email}.json",  # Alternative legacy
-                f"fastmcp_{user_email}.json",  # FastMCP format
-                f"unified_{user_email}.json",  # Unified format
+                f"token_{_safe_email}.json",  # Legacy format
+                f"creds_{_safe_email}.json",  # Alternative legacy
+                f"fastmcp_{_safe_email}.json",  # FastMCP format
+                f"unified_{_safe_email}.json",  # Unified format
             ]
 
             for pattern in patterns:
@@ -241,13 +257,15 @@ class CredentialBridge:
         try:
             format_type = format_type or stored_credential.metadata.format
 
+            # SECURITY: reject path-traversal in the email before building a path.
+            _safe_email = _safe_identifier(stored_credential.user_email)
             # Determine filename based on format
             if format_type == CredentialFormat.LEGACY:
-                filename = f"token_{stored_credential.user_email}.json"
+                filename = f"token_{_safe_email}.json"
             elif format_type == CredentialFormat.FASTMCP:
-                filename = f"fastmcp_{stored_credential.user_email}.json"
+                filename = f"fastmcp_{_safe_email}.json"
             else:
-                filename = f"unified_{stored_credential.user_email}.json"
+                filename = f"unified_{_safe_email}.json"
 
             cred_file = self.credentials_dir / filename
 
@@ -255,11 +273,15 @@ class CredentialBridge:
             stored_credential.metadata.last_modified = datetime.now(UTC)
             stored_credential.metadata.format = format_type
 
-            # Write to file
+            # Write to file with owner-only permissions (tokens/refresh_token).
             with open(cred_file, "w") as f:
                 json.dump(
                     stored_credential.model_dump(mode="json"), f, indent=2, default=str
                 )
+            try:
+                cred_file.chmod(0o600)
+            except OSError as _e:
+                logger.warning(f"Could not set 0600 on {cred_file}: {_e}")
 
             if self._enhanced_logging:
                 logger.info(
