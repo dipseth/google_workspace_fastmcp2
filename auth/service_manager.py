@@ -379,8 +379,6 @@ async def get_google_service(
     # Separate-auth services (e.g. Photos — Google refuses to combine its
     # scopes with Drive's in one authorization) have their own token group,
     # stored independently of the Workspace token.
-    from .scope_registry import ScopeRegistry
-
     token_group = ScopeRegistry.get_token_group_for_service(service_type)
     credentials = get_valid_credentials(user_email, token_group=token_group)
     if not credentials:
@@ -391,7 +389,7 @@ async def get_google_service(
                 f"own OAuth flow, with its own token — it cannot share the "
                 f"combined Workspace authorization.\n\n"
                 f"**Run:** `start_google_auth` with your email ({user_email}) "
-                f"and `service_name=[\"{service_type}\"]`\n\n"
+                f'and `service_name=["{service_type}"]`\n\n'
                 f"Your existing Workspace sign-in is unaffected; this adds a "
                 f"second, {service_type}-only token for the same account."
             )

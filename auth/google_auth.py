@@ -316,7 +316,9 @@ def _get_credentials_path(
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
     safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-    return get_token_group_credentials_dir(token_group) / f"{safe_email}_credentials.json"
+    return (
+        get_token_group_credentials_dir(token_group) / f"{safe_email}_credentials.json"
+    )
 
 
 def _update_oauth_session_marker(
@@ -1678,9 +1680,9 @@ async def handle_oauth_callback(
     # for states created before token groups existed.
     from .scope_registry import ScopeRegistry
 
-    oauth_scopes = state_info.get("requested_scopes") or ScopeRegistry.resolve_scope_group(
-        "oauth_comprehensive"
-    )
+    oauth_scopes = state_info.get(
+        "requested_scopes"
+    ) or ScopeRegistry.resolve_scope_group("oauth_comprehensive")
 
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
     logger.debug("CALLBACK_DEBUG: Creating OAuth flow for token exchange")

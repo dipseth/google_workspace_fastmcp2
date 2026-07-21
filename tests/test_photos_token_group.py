@@ -66,7 +66,9 @@ def _mock_creds(token: str, scopes: list[str]) -> Mock:
     creds.client_id = "test_client_id"
     creds.client_secret = "test_client_secret"
     creds.scopes = scopes
-    creds.expiry = datetime.now() + timedelta(hours=1)
+    # Naive UTC to match google-auth's Credentials.expiry convention
+    # (needs_refresh compares against datetime.utcnow())
+    creds.expiry = datetime.utcnow() + timedelta(hours=1)
     creds.expired = False
     creds.valid = True
     return creds
@@ -114,7 +116,9 @@ class TestTokenGroupResolution:
 class TestTokenGroupPaths:
     def test_default_group_keeps_legacy_layout(self, temp_credentials_dir):
         path = _get_credentials_path("user@example.com")
-        assert path == Path(temp_credentials_dir) / "user_at_example_com_credentials.json"
+        assert (
+            path == Path(temp_credentials_dir) / "user_at_example_com_credentials.json"
+        )
 
     def test_photos_group_uses_isolated_subdirectory(self, temp_credentials_dir):
         path = _get_credentials_path("user@example.com", token_group="photos")
@@ -135,9 +139,7 @@ class TestTokenGroupPaths:
 
 
 class TestTokenGroupStorageIsolation:
-    def test_photos_save_does_not_overwrite_workspace_token(
-        self, temp_credentials_dir
-    ):
+    def test_photos_save_does_not_overwrite_workspace_token(self, temp_credentials_dir):
         email = "user@example.com"
         _save_credentials(email, _mock_creds("workspace_token", WORKSPACE_SCOPES))
         _save_credentials(
@@ -291,9 +293,7 @@ class TestEncryptedEnvelopeTokenGroups:
             is None
         )
 
-    def test_workspace_and_photos_envelopes_are_independent(
-        self, temp_credentials_dir
-    ):
+    def test_workspace_and_photos_envelopes_are_independent(self, temp_credentials_dir):
         middleware = self._middleware()
         middleware.save_credentials(
             self.EMAIL,
