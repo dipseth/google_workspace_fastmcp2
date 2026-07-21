@@ -217,6 +217,144 @@ class TestMiddlewareMemoryKeyNamespacing:
         )
 
 
+def _real_creds(token: str, scopes: list[str]) -> Credentials:
+    """A real Credentials object (encryption serializes/rebuilds real fields)."""
+    return Credentials(
+        token=token,
+        refresh_token=f"{token}_refresh",
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id="test_client_id",
+        client_secret="test_client_secret",
+        scopes=scopes,
+    )
+
+
+class TestEncryptedEnvelopeTokenGroups:
+    """Token-group files use the same multi-recipient crypto envelope
+    (v2, per-user split-key + HMAC) as Workspace credential files."""
+
+    EMAIL = "user@example.com"
+    KEY = "test-bearer-key-abc123"
+
+    def _middleware(self):
+        from auth.middleware import AuthMiddleware, CredentialStorageMode
+
+        return AuthMiddleware(storage_mode=CredentialStorageMode.FILE_ENCRYPTED)
+
+    def test_photos_group_saves_per_user_envelope(self, temp_credentials_dir):
+        middleware = self._middleware()
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("photos_secret_token", PHOTOS_SCOPES),
+            per_user_key=self.KEY,
+            token_group="photos",
+        )
+
+        enc_path = (
+            Path(temp_credentials_dir)
+            / "token_groups"
+            / "photos"
+            / "user_at_example_com_credentials.enc"
+        )
+        assert enc_path.exists()
+
+        raw = enc_path.read_text()
+        envelope = json.loads(raw)
+        assert envelope["v"] == 2
+        assert envelope["enc"] == "per_user"
+        assert len(envelope.get("recipients", {})) >= 1
+        assert "hmac" in envelope
+        # The token itself must never appear in plaintext on disk
+        assert "photos_secret_token" not in raw
+
+    def test_photos_envelope_decrypts_only_with_key(self, temp_credentials_dir):
+        middleware = self._middleware()
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("photos_secret_token", PHOTOS_SCOPES),
+            per_user_key=self.KEY,
+            token_group="photos",
+        )
+
+        loaded = middleware.load_credentials(
+            self.EMAIL, per_user_key=self.KEY, token_group="photos"
+        )
+        assert loaded is not None
+        assert loaded.token == "photos_secret_token"
+
+        # No key → locked; wrong key → locked
+        assert middleware.load_credentials(self.EMAIL, token_group="photos") is None
+        assert (
+            middleware.load_credentials(
+                self.EMAIL, per_user_key="wrong-key", token_group="photos"
+            )
+            is None
+        )
+
+    def test_workspace_and_photos_envelopes_are_independent(
+        self, temp_credentials_dir
+    ):
+        middleware = self._middleware()
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("workspace_secret", WORKSPACE_SCOPES),
+            per_user_key=self.KEY,
+        )
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("photos_secret", PHOTOS_SCOPES),
+            per_user_key=self.KEY,
+            token_group="photos",
+        )
+
+        workspace = middleware.load_credentials(self.EMAIL, per_user_key=self.KEY)
+        photos = middleware.load_credentials(
+            self.EMAIL, per_user_key=self.KEY, token_group="photos"
+        )
+        assert workspace is not None and workspace.token == "workspace_secret"
+        assert photos is not None and photos.token == "photos_secret"
+
+    def test_add_recipient_works_on_group_envelope(self, temp_credentials_dir):
+        middleware = self._middleware()
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("photos_secret", PHOTOS_SCOPES),
+            per_user_key=self.KEY,
+            token_group="photos",
+        )
+        enc_path = (
+            Path(temp_credentials_dir)
+            / "token_groups"
+            / "photos"
+            / "user_at_example_com_credentials.enc"
+        )
+
+        second_key = "linked-account-key-xyz789"
+        assert middleware.add_recipient_to_encrypted_file(
+            enc_path, self.KEY, second_key
+        )
+        loaded = middleware.load_credentials(
+            self.EMAIL, per_user_key=second_key, token_group="photos"
+        )
+        assert loaded is not None
+        assert loaded.token == "photos_secret"
+
+    def test_group_envelope_appears_in_inventory(self, temp_credentials_dir):
+        middleware = self._middleware()
+        middleware.save_credentials(
+            self.EMAIL,
+            _real_creds("photos_secret", PHOTOS_SCOPES),
+            per_user_key=self.KEY,
+            token_group="photos",
+        )
+
+        inventory = middleware.get_envelope_inventory(self.EMAIL)
+        group_entries = [e for e in inventory if "photos token group" in e["label"]]
+        assert len(group_entries) == 1
+        assert group_entries[0]["enc_type"] == "per_user"
+        assert group_entries[0]["has_hmac"] is True
+
+
 class TestServiceManagerRouting:
     @pytest.mark.asyncio
     async def test_photos_service_without_photos_token_gives_specific_error(

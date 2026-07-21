@@ -623,6 +623,22 @@ def _save_credentials(
                             auth_middleware.add_recipient_to_encrypted_file(
                                 backup_path, session_stashed_key, per_user_key
                             )
+                        # Separate-auth token group envelopes (e.g. photos)
+                        # live under token_groups/<group>/ and need the new
+                        # recipient too, so linked users keep the same access
+                        # to every credential slot.
+                        group_root = Path(settings.credentials_dir) / "token_groups"
+                        if group_root.is_dir():
+                            for group_file in group_root.glob(
+                                f"*/{safe}_credentials.enc"
+                            ):
+                                auth_middleware.add_recipient_to_encrypted_file(
+                                    group_file, session_stashed_key, per_user_key
+                                )
+                            for group_file in group_root.glob(f"*/{safe}_backup.enc"):
+                                auth_middleware.add_recipient_to_encrypted_file(
+                                    group_file, session_stashed_key, per_user_key
+                                )
                 except Exception as e:
                     logger.warning(f"Could not cross-add recipients: {e}")
 

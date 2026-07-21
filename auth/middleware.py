@@ -2586,9 +2586,34 @@ class AuthMiddleware(Middleware):
             "_backup.enc": ("backup", "Credential Backup"),
         }
 
+        candidates: list[tuple] = [
+            (creds_dir / f"{safe_email}{suffix}", file_type, label)
+            for suffix, (file_type, label) in type_map.items()
+        ]
+
+        # Separate-auth token group envelopes (e.g. photos) live in their own
+        # subdirectories — include them so the inventory covers every slot.
+        group_root = creds_dir / "token_groups"
+        if group_root.is_dir():
+            for group_dir in sorted(p for p in group_root.iterdir() if p.is_dir()):
+                group = group_dir.name
+                candidates.append(
+                    (
+                        group_dir / f"{safe_email}_credentials.enc",
+                        "credentials",
+                        f"Google OAuth Credentials ({group} token group)",
+                    )
+                )
+                candidates.append(
+                    (
+                        group_dir / f"{safe_email}_backup.enc",
+                        "backup",
+                        f"Credential Backup ({group} token group)",
+                    )
+                )
+
         inventory = []
-        for suffix, (file_type, label) in type_map.items():
-            path = creds_dir / f"{safe_email}{suffix}"
+        for path, file_type, label in candidates:
             if not path.exists():
                 continue
             entry: dict = {
