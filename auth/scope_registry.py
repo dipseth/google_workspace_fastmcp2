@@ -557,6 +557,15 @@ class ScopeRegistry:
     # These must be authorized in their own OAuth flow with their own token.
     SEPARATE_AUTH_SERVICES = {"photos"}
 
+    # Token group used by the combined Workspace flow. Services in
+    # SEPARATE_AUTH_SERVICES each get their own token group (named after the
+    # service), stored and refreshed independently so a Photos-only
+    # authorization never overwrites the Workspace token for the same account.
+    DEFAULT_TOKEN_GROUP = "workspace"
+
+    # Aliases used by service configs that map onto a registry service name
+    _TOKEN_GROUP_SERVICE_ALIASES = {"photoslibrary": "photos"}
+
     # Convenient access to individual service scope groups
     DRIVE_SCOPES = GOOGLE_API_SCOPES["drive"]
     GMAIL_SCOPES = GOOGLE_API_SCOPES["gmail"]
@@ -570,6 +579,46 @@ class ScopeRegistry:
     TASKS_SCOPES = GOOGLE_API_SCOPES["tasks"]
     PEOPLE_SCOPES = GOOGLE_API_SCOPES["people"]
     BASE_SCOPES = GOOGLE_API_SCOPES["base"]
+
+    @classmethod
+    def get_token_group_for_service(cls, service: str) -> str:
+        """
+        Get the credential token group a service's tokens belong to.
+
+        Services in SEPARATE_AUTH_SERVICES get their own group (named after
+        the service); everything else shares DEFAULT_TOKEN_GROUP.
+
+        Args:
+            service: Service name (e.g. "drive", "photos", "photoslibrary")
+
+        Returns:
+            Token group name (e.g. "workspace" or "photos")
+        """
+        normalized = cls._TOKEN_GROUP_SERVICE_ALIASES.get(service, service)
+        if normalized in cls.SEPARATE_AUTH_SERVICES:
+            return normalized
+        return cls.DEFAULT_TOKEN_GROUP
+
+    @classmethod
+    def get_token_group_for_services(cls, services: List[str]) -> str:
+        """
+        Get the token group for a set of services selected for one OAuth flow.
+
+        A flow made up entirely of one separate-auth service maps to that
+        service's group; any other combination maps to DEFAULT_TOKEN_GROUP
+        (get_scopes_for_services drops separate-auth services from mixed
+        requests, so the resulting token is a Workspace token).
+
+        Args:
+            services: Service names selected for the flow
+
+        Returns:
+            Token group name for the credentials this flow will produce
+        """
+        groups = {cls.get_token_group_for_service(s) for s in services or []}
+        if len(groups) == 1:
+            return groups.pop()
+        return cls.DEFAULT_TOKEN_GROUP
 
     @classmethod
     def get_service_metadata(cls, service: str) -> Optional[ServiceMetadata]:

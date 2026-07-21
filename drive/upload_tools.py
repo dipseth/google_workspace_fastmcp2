@@ -226,16 +226,26 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             # --- Credential pre-check: skip OAuth if valid creds already cover requested scopes ---
             from auth.google_auth import compare_scopes, get_valid_credentials
 
-            existing_creds = get_valid_credentials(user_google_email)
-            if existing_creds is not None:
-                # Resolve requested scopes from service_name parameter
-                if isinstance(service_name, list):
-                    requested_services = service_name
-                elif service_name is None or service_name == "":
-                    requested_services = DEFAULT_SERVICES
-                else:
-                    requested_services = []  # custom display string — can't resolve scopes
+            # Resolve requested services first so the pre-check reads the
+            # credential slot this flow would actually write (e.g. a
+            # photos-only request must check the "photos" token group, not
+            # the Workspace token).
+            if isinstance(service_name, list):
+                requested_services = service_name
+            elif service_name is None or service_name == "":
+                requested_services = DEFAULT_SERVICES
+            else:
+                requested_services = []  # custom display string — can't resolve scopes
 
+            precheck_token_group = (
+                ScopeRegistry.get_token_group_for_services(requested_services)
+                if requested_services
+                else ScopeRegistry.DEFAULT_TOKEN_GROUP
+            )
+            existing_creds = get_valid_credentials(
+                user_google_email, token_group=precheck_token_group
+            )
+            if existing_creds is not None:
                 if requested_services:
                     requested_scopes = ScopeRegistry.get_scopes_for_services(
                         requested_services

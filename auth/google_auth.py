@@ -278,8 +278,36 @@ def _normalize_email(email: str) -> str:
     return email.lower().strip() if email else ""
 
 
-def _get_credentials_path(user_email: str) -> Path:
-    """Get the path to store credentials for a specific user.
+# Token group for the combined Workspace flow. Services Google requires to be
+# authorized separately (see ScopeRegistry.SEPARATE_AUTH_SERVICES, e.g.
+# Photos) use their own token group so their tokens are stored alongside —
+# not instead of — the Workspace token for the same account.
+DEFAULT_TOKEN_GROUP = "workspace"
+
+
+def get_token_group_credentials_dir(token_group: str = DEFAULT_TOKEN_GROUP) -> Path:
+    """Get the credentials directory for a token group.
+
+    The default (Workspace) group uses ``settings.credentials_dir`` directly,
+    preserving existing file layouts. Separate-auth groups (e.g. "photos")
+    get an isolated subdirectory so their credential files can never collide
+    with — or be globbed as — Workspace credential files.
+    """
+    base = Path(settings.credentials_dir)
+    if not token_group or token_group == DEFAULT_TOKEN_GROUP:
+        return base
+    # Token groups come from the scope registry, but sanitize defensively so
+    # a bad value can never escape the credentials directory.
+    safe_group = "".join(c for c in token_group if c.isalnum() or c in "-_")
+    if not safe_group:
+        raise GoogleAuthError(f"Invalid token group name: {token_group!r}")
+    return base / "token_groups" / safe_group
+
+
+def _get_credentials_path(
+    user_email: str, token_group: str = DEFAULT_TOKEN_GROUP
+) -> Path:
+    """Get the path to store credentials for a specific user and token group.
 
     Email addresses are normalized to lowercase for consistent file naming.
     """
@@ -288,7 +316,7 @@ def _get_credentials_path(user_email: str) -> Path:
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
     safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-    return Path(settings.credentials_dir) / f"{safe_email}_credentials.json"
+    return get_token_group_credentials_dir(token_group) / f"{safe_email}_credentials.json"
 
 
 def _update_oauth_session_marker(
@@ -342,10 +370,17 @@ def _update_oauth_session_marker(
         # Don't fail the whole auth flow if this fails
 
 
-def _save_credentials(user_email: str, credentials: Credentials) -> None:
+def _save_credentials(
+    user_email: str,
+    credentials: Credentials,
+    token_group: str = DEFAULT_TOKEN_GROUP,
+) -> None:
     """Save credentials to disk with proper permissions and validation.
 
     Email addresses are normalized to lowercase for consistent credential storage.
+    ``token_group`` selects the credential slot: the default Workspace group
+    keeps its existing layout; separate-auth groups (e.g. "photos") are saved
+    in their own subdirectory and never overwrite the Workspace token.
     """
     # Normalize email to lowercase for consistent credential storage
     normalized_email = _normalize_email(user_email)
@@ -529,6 +564,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
                 additional_keys=additional_keys if additional_keys else None,
                 google_sub=google_sub,
                 oauth_linkage_password=oauth_linkage_password,
+                token_group=token_group,
             )
 
             # Save Chat service account JSON if provided via consent screen
@@ -597,7 +633,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         logger.debug(f"AuthMiddleware not available, using fallback: {e}")
 
     # Fallback to plaintext storage if middleware not available
-    creds_path = _get_credentials_path(normalized_email)
+    creds_path = _get_credentials_path(normalized_email, token_group)
 
     # Ensure directory exists with proper permissions
     creds_path.parent.mkdir(parents=True, exist_ok=True)
@@ -632,6 +668,7 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         "expiry": credentials.expiry.isoformat() if credentials.expiry else None,
         "saved_at": datetime.now().isoformat(),
         "user_email": normalized_email,  # Store normalized email for validation
+        "token_group": token_group,
     }
 
     try:
@@ -659,10 +696,13 @@ def _save_credentials(user_email: str, credentials: Credentials) -> None:
         raise GoogleAuthError(f"Failed to save credentials: {e}")
 
 
-def _load_credentials(user_email: str) -> Optional[Credentials]:
+def _load_credentials(
+    user_email: str, token_group: str = DEFAULT_TOKEN_GROUP
+) -> Optional[Credentials]:
     """Load credentials from disk with validation and error recovery.
 
     Email addresses are normalized to lowercase for consistent credential lookup.
+    ``token_group`` selects the credential slot (see _save_credentials).
     """
     # Normalize email to lowercase for consistent credential lookup
     normalized_email = _normalize_email(user_email)
@@ -705,6 +745,7 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
                 normalized_email,
                 per_user_key=per_user_key,
                 google_sub=google_sub,
+                token_group=token_group,
             )
             if creds:
                 logger.info(
@@ -715,7 +756,7 @@ def _load_credentials(user_email: str) -> Optional[Credentials]:
         logger.debug(f"AuthMiddleware not available for loading, using fallback: {e}")
 
     # Fallback to plaintext storage if middleware not available or has no credentials
-    creds_path = _get_credentials_path(normalized_email)
+    creds_path = _get_credentials_path(normalized_email, token_group)
 
     if not creds_path.exists():
         logger.debug(
@@ -933,7 +974,11 @@ def compare_scopes(
     return (not missing, missing)
 
 
-def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentials:
+def _refresh_credentials(
+    credentials: Credentials,
+    user_email: str,
+    token_group: str = DEFAULT_TOKEN_GROUP,
+) -> Credentials:
     """Refresh expired credentials with enhanced error handling."""
     if not credentials.refresh_token:
         logger.error(
@@ -964,7 +1009,7 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
             )
 
         # Save the refreshed credentials
-        _save_credentials(user_email, credentials)
+        _save_credentials(user_email, credentials, token_group=token_group)
 
         logger.info(
             f"Successfully refreshed credentials for {redact_email(user_email)}"
@@ -999,17 +1044,21 @@ def _refresh_credentials(credentials: Credentials, user_email: str) -> Credentia
         raise GoogleAuthError(f"Failed to refresh credentials: {e}")
 
 
-def get_valid_credentials(user_email: str) -> Optional[Credentials]:
+def get_valid_credentials(
+    user_email: str, token_group: str = DEFAULT_TOKEN_GROUP
+) -> Optional[Credentials]:
     """Get valid credentials for a user, refreshing proactively if needed.
 
     Email addresses are normalized to lowercase for consistent credential lookup.
+    ``token_group`` selects the credential slot — e.g. "photos" tokens live in
+    their own slot because Google requires Photos to be authorized separately.
     """
     if not user_email:
         raise GoogleAuthError("Cannot get credentials: user_email is required")
 
     # Normalize email for consistent credential lookup
     normalized_email = _normalize_email(user_email)
-    credentials = _load_credentials(normalized_email)
+    credentials = _load_credentials(normalized_email, token_group)
 
     if not credentials:
         return None
@@ -1020,7 +1069,9 @@ def get_valid_credentials(user_email: str) -> Optional[Credentials]:
             logger.info(
                 f"Proactively refreshing credentials for {redact_email(normalized_email)} before expiry"
             )
-            credentials = _refresh_credentials(credentials, normalized_email)
+            credentials = _refresh_credentials(
+                credentials, normalized_email, token_group=token_group
+            )
         except GoogleAuthError:
             # If refresh fails, credentials are invalid
             logger.error(
@@ -1116,11 +1167,15 @@ async def initiate_oauth_flow(
         from .scope_registry import ScopeRegistry
 
         oauth_scopes = ScopeRegistry.get_scopes_for_services(selected_services)
-        logger.info(f"Using selected services: {selected_services}")
+        token_group = ScopeRegistry.get_token_group_for_services(selected_services)
+        logger.info(
+            f"Using selected services: {selected_services} (token group: {token_group})"
+        )
     else:
         from .scope_registry import ScopeRegistry
 
         oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+        token_group = DEFAULT_TOKEN_GROUP
         logger.info(f"Using oauth_comprehensive scopes: {len(oauth_scopes)} scopes")
 
     # Get OAuth client configuration - create clean config for custom credentials
@@ -1230,6 +1285,12 @@ async def initiate_oauth_flow(
         "chat_sa_json": chat_sa_json,
         "privacy_mode": privacy_mode,
         "sampling_config": sampling_config,
+        # Credential slot the resulting token belongs to ("workspace" or a
+        # separate-auth group like "photos") plus the scopes this flow
+        # actually requested, so the callback can exchange the code with the
+        # same scope set instead of assuming oauth_comprehensive.
+        "token_group": token_group,
+        "requested_scopes": oauth_scopes,
     }
 
     # Use enhanced context-based credential storage for persistence
@@ -1410,6 +1471,7 @@ async def handle_oauth_callback(
     chat_sa_json = state_info.get("chat_sa_json")
     _privacy_mode = state_info.get("privacy_mode", False)
     _sampling_config = state_info.get("sampling_config")
+    token_group = state_info.get("token_group", DEFAULT_TOKEN_GROUP)
 
     # Stash OAuth linkage password in session so _save_credentials can use it
     _oauth_linkage_pw = state_info.get("oauth_linkage_password", "")
@@ -1594,10 +1656,15 @@ async def handle_oauth_callback(
         oauth_config = settings.get_oauth_client_config()
         logger.info("🔑 CALLBACK: Using default OAuth configuration")
 
-    # Use centralized scope registry as single source of truth (same as initiate_oauth_flow)
+    # Use the scopes this flow actually requested (stored with the state by
+    # initiate_oauth_flow) — a photos-only flow must not be exchanged against
+    # the comprehensive Workspace scope set. Fall back to oauth_comprehensive
+    # for states created before token groups existed.
     from .scope_registry import ScopeRegistry
 
-    oauth_scopes = ScopeRegistry.resolve_scope_group("oauth_comprehensive")
+    oauth_scopes = state_info.get("requested_scopes") or ScopeRegistry.resolve_scope_group(
+        "oauth_comprehensive"
+    )
 
     # DIAGNOSTIC LOG: OAuth client_secret debugging - callback phase
     logger.debug("CALLBACK_DEBUG: Creating OAuth flow for token exchange")
@@ -1720,8 +1787,16 @@ async def handle_oauth_callback(
         if _sampling_config:
             credentials._sampling_config = _sampling_config
 
-        # Conditional storage based on auth_method
-        if auth_method == "pkce_memory":
+        # Conditional storage based on auth_method. Session-memory storage is
+        # a single slot (SessionKey.CREDENTIALS), so separate-auth token
+        # groups (e.g. photos) always use file storage — otherwise a Photos
+        # token would clobber the Workspace token in the session.
+        if auth_method == "pkce_memory" and token_group != DEFAULT_TOKEN_GROUP:
+            logger.info(
+                f"pkce_memory requested for token group '{token_group}' - using "
+                f"file storage instead (session memory is a single credential slot)"
+            )
+        if auth_method == "pkce_memory" and token_group == DEFAULT_TOKEN_GROUP:
             # Store in session memory only
             session_id = await get_session_context()
             if session_id:
@@ -1737,10 +1812,10 @@ async def handle_oauth_callback(
                 logger.warning(
                     f"No session context available - falling back to file storage for {redact_email(user_email)}"
                 )
-                _save_credentials(user_email, credentials)
+                _save_credentials(user_email, credentials, token_group=token_group)
         else:
             # File storage for 'file_credentials' and 'pkce_file'
-            _save_credentials(user_email, credentials)
+            _save_credentials(user_email, credentials, token_group=token_group)
 
         logger.info(
             f"Successfully authenticated {redact_email(user_email)} (auth_method: {auth_method})"

@@ -1503,6 +1503,19 @@ class AuthMiddleware(Middleware):
             logger.error(f"Failed to decrypt credentials: {e}")
             raise
 
+    @staticmethod
+    def _memory_key(normalized_email: str, token_group: str) -> str:
+        """In-memory credential cache key, namespaced by token group.
+
+        The default (Workspace) group keeps the bare email key for backward
+        compatibility; separate-auth groups get an explicit suffix.
+        """
+        from .google_auth import DEFAULT_TOKEN_GROUP
+
+        if not token_group or token_group == DEFAULT_TOKEN_GROUP:
+            return normalized_email
+        return f"{normalized_email}::{token_group}"
+
     def save_credentials(
         self,
         user_email: str,
@@ -1511,6 +1524,7 @@ class AuthMiddleware(Middleware):
         additional_keys: Optional[list] = None,
         google_sub: Optional[str] = None,
         oauth_linkage_password: str = "",
+        token_group: str = "workspace",
     ) -> None:
         """
         Save credentials using the configured storage mode.
@@ -1529,33 +1543,41 @@ class AuthMiddleware(Middleware):
             google_sub: Optional Google account ID (sub claim) for OAuth recipient
             oauth_linkage_password: Passphrase for OAuth recipient key derivation
                 (in-memory only, never persisted)
+            token_group: Credential slot ("workspace" default, or a
+                separate-auth group like "photos" stored in its own
+                subdirectory so it never overwrites the Workspace token)
         """
         # Import normalization function
-        from .google_auth import _normalize_email
+        from .google_auth import (
+            _normalize_email,
+            get_token_group_credentials_dir,
+        )
 
         normalized_email = _normalize_email(user_email)
+        group_dir = get_token_group_credentials_dir(token_group)
 
         logger.debug(
-            f"💾 Saving credentials for {normalized_email} using {self._storage_mode.value}"
+            f"💾 Saving credentials for {normalized_email} using "
+            f"{self._storage_mode.value} (token group: {token_group})"
         )
 
         if self._storage_mode == CredentialStorageMode.MEMORY_ONLY:
             # Store only in memory with normalized email
-            self._memory_credentials[normalized_email] = credentials
+            self._memory_credentials[
+                self._memory_key(normalized_email, token_group)
+            ] = credentials
             logger.debug(f"Stored credentials in memory for {normalized_email}")
 
         elif self._storage_mode == CredentialStorageMode.FILE_PLAINTEXT:
             # Backward compatibility - use existing file-based storage (handles normalization)
             from .google_auth import _save_credentials
 
-            _save_credentials(normalized_email, credentials)
+            _save_credentials(normalized_email, credentials, token_group=token_group)
 
         elif self._storage_mode == CredentialStorageMode.FILE_ENCRYPTED:
             # Encrypted file storage with normalized email
             safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-            creds_path = (
-                Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-            )
+            creds_path = group_dir / f"{safe_email}_credentials.enc"
             creds_path.parent.mkdir(parents=True, exist_ok=True)
 
             oauth_recipient_key = self._resolve_oauth_recipient_key(
@@ -1580,11 +1602,13 @@ class AuthMiddleware(Middleware):
 
         elif self._storage_mode == CredentialStorageMode.MEMORY_WITH_BACKUP:
             # Store in memory + encrypted backup with normalized email
-            self._memory_credentials[normalized_email] = credentials
+            self._memory_credentials[
+                self._memory_key(normalized_email, token_group)
+            ] = credentials
 
             # Also save encrypted backup
             safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-            backup_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
+            backup_path = group_dir / f"{safe_email}_backup.enc"
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
             oauth_recipient_key = self._resolve_oauth_recipient_key(
@@ -2031,6 +2055,7 @@ class AuthMiddleware(Middleware):
         user_email: str,
         per_user_key: Optional[str] = None,
         google_sub: Optional[str] = None,
+        token_group: str = "workspace",
     ) -> Optional[Credentials]:
         """
         Load credentials using the configured storage mode.
@@ -2044,26 +2069,33 @@ class AuthMiddleware(Middleware):
             user_email: User's email address (will be normalized to lowercase)
             per_user_key: Plaintext per-user API key (bearer token) for per-user decryption
             google_sub: Google account ID for OAuth recipient key derivation
+            token_group: Credential slot to load from ("workspace" default,
+                or a separate-auth group like "photos")
 
         Returns:
             Credentials if found and decryptable, None otherwise
         """
         # Import normalization function
-        from .google_auth import _normalize_email
+        from .google_auth import (
+            _normalize_email,
+            get_token_group_credentials_dir,
+        )
 
         normalized_email = _normalize_email(user_email)
+        group_dir = get_token_group_credentials_dir(token_group)
+        memory_key = self._memory_key(normalized_email, token_group)
 
         if self._storage_mode == CredentialStorageMode.MEMORY_ONLY:
-            return self._memory_credentials.get(normalized_email)
+            return self._memory_credentials.get(memory_key)
 
         elif self._storage_mode == CredentialStorageMode.MEMORY_WITH_BACKUP:
             # Try memory first with normalized email
-            if normalized_email in self._memory_credentials:
-                return self._memory_credentials[normalized_email]
+            if memory_key in self._memory_credentials:
+                return self._memory_credentials[memory_key]
 
             # Fall back to encrypted backup
             safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-            backup_path = Path(settings.credentials_dir) / f"{safe_email}_backup.enc"
+            backup_path = group_dir / f"{safe_email}_backup.enc"
 
             if backup_path.exists():
                 creds = self._try_decrypt_with_keys(
@@ -2076,9 +2108,7 @@ class AuthMiddleware(Middleware):
 
         elif self._storage_mode == CredentialStorageMode.FILE_ENCRYPTED:
             safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
-            creds_path = (
-                Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
-            )
+            creds_path = group_dir / f"{safe_email}_credentials.enc"
 
             if not creds_path.exists():
                 return None
@@ -2099,7 +2129,7 @@ class AuthMiddleware(Middleware):
             # Backward compatibility - use existing file-based storage (handles normalization)
             from .google_auth import _load_credentials
 
-            return _load_credentials(normalized_email)
+            return _load_credentials(normalized_email, token_group)
 
         return None
 
@@ -2606,13 +2636,30 @@ class AuthMiddleware(Middleware):
         safe_email = normalized_email.replace("@", "_at_").replace(".", "_")
         cred_path = Path(settings.credentials_dir) / f"{safe_email}_credentials.enc"
 
+        # Also remove any separate-auth token group credentials (e.g. photos)
+        # so revoking a user revokes every slot, not just the Workspace one.
+        deleted_group_files = False
+        group_root = Path(settings.credentials_dir) / "token_groups"
+        if group_root.is_dir():
+            for group_file in group_root.glob(f"*/{safe_email}_credentials.*"):
+                group_file.unlink()
+                deleted_group_files = True
+            for group_file in group_root.glob(f"*/{safe_email}_backup.enc"):
+                group_file.unlink()
+                deleted_group_files = True
+        # Purge namespaced memory cache entries for all token groups
+        for key in [
+            k
+            for k in self._memory_credentials
+            if k == normalized_email or k.startswith(f"{normalized_email}::")
+        ]:
+            self._memory_credentials.pop(key, None)
+
         if cred_path.exists():
             cred_path.unlink()
-            # Also purge from memory cache
-            self._memory_credentials.pop(normalized_email, None)
             logger.info(f"Deleted credential file for {redact_email(normalized_email)}")
             return True
-        return False
+        return deleted_group_files
 
     def delete_chat_service_account(self, user_email: str) -> bool:
         """Delete the encrypted chat service account file for a user.
