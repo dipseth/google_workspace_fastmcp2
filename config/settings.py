@@ -764,13 +764,12 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar",
-        # Google Photos Library API scopes
-        "https://www.googleapis.com/auth/photoslibrary.readonly",
-        "https://www.googleapis.com/auth/photoslibrary.appendonly",
-        "https://www.googleapis.com/auth/photoslibrary",
-        "https://www.googleapis.com/auth/photoslibrary.sharing",
-        "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
-        "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
+        # Google Photos Library API scopes intentionally excluded:
+        # Google rejects authorization requests that combine photoslibrary
+        # scopes with Drive scopes (400 invalid_request), and the broad
+        # photoslibrary / photoslibrary.readonly / photoslibrary.sharing
+        # scopes were retired after March 31, 2025. Photos must be
+        # authorized via its own OAuth flow (selected_services=["photos"]).
         # Cloud Platform scopes (for broader Google services)
         "https://www.googleapis.com/auth/cloud-platform",
         "https://www.googleapis.com/auth/cloudfunctions",
@@ -798,9 +797,12 @@ class Settings(BaseSettings):
                 f"SCOPE_DEBUG: Retrieved {len(scopes)} scopes from oauth_comprehensive group"
             )
 
-            # Verify no problematic scopes are included
+            # Verify no problematic scopes are included. Any photoslibrary
+            # scope is problematic here: this combined bundle includes Drive
+            # scopes, and Google rejects requests mixing Photos and Drive
+            # scopes (400 invalid_request).
             problematic_patterns = [
-                "photoslibrary.sharing",
+                "photoslibrary",
                 "cloud-platform",
                 "cloudfunctions",
                 "pubsub",
@@ -810,6 +812,7 @@ class Settings(BaseSettings):
                 scope
                 for scope in scopes
                 if any(bad in scope for bad in problematic_patterns)
+                or scope in ScopeRegistry.RETIRED_SCOPES
             ]
 
             if problematic_scopes:

@@ -2,6 +2,27 @@
 
 This document describes the Google Photos API integration following FastMCP2 patterns and optimization best practices.
 
+> **⚠️ Important — Google Photos API changes (effective March 31, 2025)**
+>
+> 1. **Retired scopes**: `photoslibrary`, `photoslibrary.readonly`, and
+>    `photoslibrary.sharing` were removed by Google. Requests using them return
+>    `403 PERMISSION_DENIED`. Only `photoslibrary.appendonly`,
+>    `photoslibrary.readonly.appcreateddata`, and
+>    `photoslibrary.edit.appcreateddata` remain.
+> 2. **App-created data only**: listing and search now only return albums and
+>    media items **created by this app** (i.e., uploaded via these tools).
+>    Tools like `search_photos`, `list_photos_albums`, `photos_smart_search`,
+>    and `photos_batch_details` cannot see the rest of the user's library.
+>    Library-wide selection requires Google's interactive
+>    [Picker API](https://developers.google.com/photos/picker/guides/get-started-picker),
+>    which is not yet integrated.
+> 3. **Separate authorization required**: Google rejects any OAuth request
+>    that combines Photos Library scopes with Drive (or other Workspace)
+>    scopes — `Error 400: invalid_request — This request contains scopes that
+>    cannot be requested together`. Photos is therefore excluded from the
+>    combined `oauth_comprehensive` flow and must be authorized on its own
+>    (e.g., `selected_services=["photos"]`).
+
 ## Overview
 
 The Google Photos integration provides:
@@ -44,14 +65,18 @@ photos/
 
 ## Google Photos API Scopes
 
-The integration supports all Google Photos API scopes:
+The integration uses the Photos Library API scopes that remain valid after
+Google's March 31, 2025 changes:
 
 | Scope Key | URL | Description |
 |-----------|-----|-------------|
-| `photos.readonly` | `https://www.googleapis.com/auth/photoslibrary.readonly` | Read-only access to photos |
-| `photos.appendonly` | `https://www.googleapis.com/auth/photoslibrary.appendonly` | Add photos only |
-| `photos.full` | `https://www.googleapis.com/auth/photoslibrary` | Full access to photos |
-| `photos.sharing` | `https://www.googleapis.com/auth/photoslibrary.sharing` | Manage photo sharing |
+| `photos.appendonly` | `https://www.googleapis.com/auth/photoslibrary.appendonly` | Upload photos and create albums |
+| `photos.readonly_appcreated` | `https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata` | Read app-created albums/media |
+| `photos.edit_appcreated` | `https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata` | Edit app-created albums/media |
+
+Retired scopes (`photoslibrary`, `photoslibrary.readonly`,
+`photoslibrary.sharing`) are tracked in `ScopeRegistry.RETIRED_SCOPES` and are
+never requested.
 
 ## Standard MCP Tools
 

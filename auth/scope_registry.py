@@ -135,13 +135,14 @@ class ScopeRegistry:
             "readonly": "https://www.googleapis.com/auth/presentations.readonly",
         },
         # Google Photos scopes
+        # The photoslibrary, photoslibrary.readonly, and photoslibrary.sharing
+        # scopes were retired by Google after March 31, 2025 and now return
+        # 403 PERMISSION_DENIED. Only app-created-data scopes remain, and the
+        # Library API only returns albums/media created by this app.
         "photos": {
-            "readonly": "https://www.googleapis.com/auth/photoslibrary.readonly",
             "appendonly": "https://www.googleapis.com/auth/photoslibrary.appendonly",
-            "full": "https://www.googleapis.com/auth/photoslibrary",
             "readonly_appcreated": "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
             "edit_appcreated": "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
-            # Note: Added back 'full' scope - needed for album listing and search operations
         },
         # Google People API scopes
         "people": {
@@ -433,21 +434,24 @@ class ScopeRegistry:
             "slides.full",
             "slides.readonly",
         ],
+        # Photos scopes CANNOT be combined with Drive (or other Workspace)
+        # scopes in a single authorization request — Google's auth server
+        # rejects the mix with "Error 400: invalid_request — This request
+        # contains scopes that cannot be requested together". Photos must be
+        # authorized in its own OAuth flow (selected_services=["photos"]).
         "photos_basic": [
             "base.userinfo_email",
             "base.openid",
-            "photos.readonly",
             "photos.appendonly",
-            "photos.full",
-            # appcreateddata scopes excluded — restricts API to app-created content only
+            "photos.readonly_appcreated",
+            "photos.edit_appcreated",
         ],
         "photos_full": [
             "base.userinfo_email",
             "base.openid",
-            "photos.readonly",
             "photos.appendonly",
-            "photos.full",
-            # appcreateddata scopes excluded — restricts API to app-created content only
+            "photos.readonly_appcreated",
+            "photos.edit_appcreated",
         ],
         "tasks_basic": [
             "base.userinfo_email",
@@ -523,10 +527,10 @@ class ScopeRegistry:
             "forms.responses_readonly",
             "slides.full",
             "slides.readonly",
-            "photos.readonly",
-            "photos.appendonly",
-            "photos.full",
-            # appcreateddata scopes excluded — restricts API to app-created content only
+            # photos.* intentionally excluded: Google rejects authorization
+            # requests that combine photoslibrary scopes with Drive scopes
+            # (400 invalid_request). Photos requires its own OAuth flow —
+            # see SEPARATE_AUTH_SERVICES and the photos_basic group.
             "calendar.readonly",
             "calendar.events",
             "calendar.full",
@@ -537,6 +541,21 @@ class ScopeRegistry:
             "people.directory_readonly",
         ],
     }
+
+    # Scopes Google has removed entirely. Requesting them fails; API calls
+    # relying on them return 403 PERMISSION_DENIED. (Photos Library scopes
+    # retired after March 31, 2025.)
+    RETIRED_SCOPES = {
+        "https://www.googleapis.com/auth/photoslibrary",
+        "https://www.googleapis.com/auth/photoslibrary.readonly",
+        "https://www.googleapis.com/auth/photoslibrary.sharing",
+    }
+
+    # Services whose scopes Google refuses to combine with other services'
+    # scopes in a single authorization request (400 invalid_request:
+    # "This request contains scopes that cannot be requested together").
+    # These must be authorized in their own OAuth flow with their own token.
+    SEPARATE_AUTH_SERVICES = {"photos"}
 
     # Convenient access to individual service scope groups
     DRIVE_SCOPES = GOOGLE_API_SCOPES["drive"]
@@ -630,7 +649,10 @@ class ScopeRegistry:
                 )
             elif service == "photos":
                 result_scopes.extend(
-                    [service_scopes["readonly"], service_scopes["appendonly"]]
+                    [
+                        service_scopes["appendonly"],
+                        service_scopes["readonly_appcreated"],
+                    ]
                 )
             else:
                 # Default to readonly and full if available
@@ -745,6 +767,27 @@ class ScopeRegistry:
                 result.invalid_scopes.append(scope)
                 logger.warning(f"SCOPE_REGISTRY: Unknown scope: {scope}")
 
+        # Google rejects authorization requests mixing Photos Library scopes
+        # with any other Google API scopes (400 invalid_request)
+        photos_scopes = [s for s in scopes if "auth/photoslibrary" in s]
+        other_api_scopes = [
+            s
+            for s in scopes
+            if "auth/photoslibrary" not in s
+            and s not in cls.GOOGLE_API_SCOPES["base"].values()
+        ]
+        if photos_scopes and other_api_scopes:
+            result.is_valid = False
+            result.warnings.append(
+                "Photos Library scopes cannot be requested together with other "
+                "Google API scopes - Google returns 400 invalid_request. "
+                "Authorize Photos in a separate OAuth flow."
+            )
+            logger.error(
+                f"SCOPE_REGISTRY: Invalid combination - {len(photos_scopes)} Photos "
+                f"scopes mixed with {len(other_api_scopes)} other API scopes"
+            )
+
         # Check for missing base scopes
         base_scopes = cls.GOOGLE_API_SCOPES["base"]
         has_userinfo = base_scopes["userinfo_email"] in scopes
@@ -760,8 +803,9 @@ class ScopeRegistry:
             result.missing_scopes.append(base_scopes["openid"])
             result.warnings.append("Missing openid scope - OAuth flow may fail")
 
-        # Set overall validity
-        result.is_valid = len(result.invalid_scopes) == 0
+        # Set overall validity (preserve failures already recorded, e.g. the
+        # Photos/other-API mutual exclusion above)
+        result.is_valid = result.is_valid and len(result.invalid_scopes) == 0
 
         if result.is_valid:
             logger.info(
@@ -811,7 +855,7 @@ class ScopeRegistry:
             "docs_write": cls.GOOGLE_API_SCOPES["docs"]["full"],
             "sheets_read": cls.GOOGLE_API_SCOPES["sheets"]["readonly"],
             "sheets_write": cls.GOOGLE_API_SCOPES["sheets"]["full"],
-            "photos_read": cls.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photos_read": cls.GOOGLE_API_SCOPES["photos"]["readonly_appcreated"],
             "photos_append": cls.GOOGLE_API_SCOPES["photos"]["appendonly"],
             "tasks_read": cls.GOOGLE_API_SCOPES["tasks"]["readonly"],
             "tasks_full": cls.GOOGLE_API_SCOPES["tasks"]["full"],
@@ -908,9 +952,14 @@ class ScopeRegistry:
             },
             "photos": {
                 "name": "Google Photos",
-                "description": "Access and manage photos and albums",
+                "description": (
+                    "Upload photos and manage app-created albums. Requires a "
+                    "separate sign-in - Google does not allow Photos scopes in "
+                    "the same authorization as other services"
+                ),
                 "category": "Storage & Files",
                 "required": False,
+                "default_selected": False,
                 "scopes": cls.get_service_scopes("photos", "basic"),
             },
             "people": {
@@ -941,9 +990,32 @@ class ScopeRegistry:
 
     @classmethod
     def get_scopes_for_services(cls, service_keys: List[str]) -> List[str]:
-        """Get combined scopes for selected services."""
+        """
+        Get combined scopes for selected services.
+
+        Services in SEPARATE_AUTH_SERVICES (currently Photos) cannot share an
+        authorization request with other services — Google rejects the mix
+        with 400 invalid_request. When such a service is selected alongside
+        others, it is dropped from the combined request and must be
+        authorized in its own flow (e.g. selected_services=["photos"]).
+        """
         catalog = cls.get_service_catalog()
         all_scopes = set()
+
+        selected = [key for key in service_keys if key in catalog]
+        exclusive = [key for key in selected if key in cls.SEPARATE_AUTH_SERVICES]
+        combinable = [key for key in selected if key not in cls.SEPARATE_AUTH_SERVICES]
+
+        if exclusive and combinable:
+            logger.warning(
+                f"SCOPE_REGISTRY: {exclusive} cannot be authorized together with "
+                f"{combinable} - Google rejects the combined request "
+                f"(400 invalid_request). Dropping {exclusive} from this flow; "
+                f"authorize them separately (e.g. selected_services={exclusive})."
+            )
+        elif exclusive:
+            # Only exclusive service(s) selected - honor them
+            combinable = exclusive
 
         # Always include required services
         for service_key, service_info in catalog.items():
@@ -951,9 +1023,8 @@ class ScopeRegistry:
                 all_scopes.update(service_info["scopes"])
 
         # Add selected services
-        for key in service_keys:
-            if key in catalog:
-                all_scopes.update(catalog[key]["scopes"])
+        for key in combinable:
+            all_scopes.update(catalog[key]["scopes"])
 
         return list(all_scopes)
 
