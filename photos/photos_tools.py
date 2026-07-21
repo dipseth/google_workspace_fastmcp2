@@ -57,19 +57,14 @@ async def _get_photos_service_with_fallback(user_google_email: str):
     from auth.compatibility_shim import CompatibilityShim
     from auth.service_manager import get_google_service
 
-    # Get photos scopes - MUST include app-created data scopes for API to work
+    # Get photos scopes. Only the app-created-data scopes survive Google's
+    # March 31, 2025 Photos Library API changes - the broad photoslibrary
+    # and photoslibrary.readonly scopes were retired and now return
+    # 403 PERMISSION_DENIED. Listing/search only returns app-created content.
     try:
         shim = CompatibilityShim()
         scope_groups = shim.get_legacy_scope_groups()
-        # Use both general and app-created data scopes for full access
         photos_scopes = [
-            scope_groups.get(
-                "photoslibrary_read",
-                "https://www.googleapis.com/auth/photoslibrary.readonly",
-            ),
-            scope_groups.get(
-                "photoslibrary_full", "https://www.googleapis.com/auth/photoslibrary"
-            ),
             scope_groups.get(
                 "photoslibrary_append",
                 "https://www.googleapis.com/auth/photoslibrary.appendonly",
@@ -87,12 +82,9 @@ async def _get_photos_service_with_fallback(user_google_email: str):
         logger.debug(f"Using Photos scopes from compatibility shim: {photos_scopes}")
     except Exception as e:
         logger.warning(f"Failed to get photos scopes from compatibility shim: {e}")
-        # Fallback to hardcoded scopes - include app-created data scopes
+        # Fallback to hardcoded scopes - app-created data scopes only
         photos_scopes = [
-            "https://www.googleapis.com/auth/photoslibrary.readonly",
-            "https://www.googleapis.com/auth/photoslibrary",
             "https://www.googleapis.com/auth/photoslibrary.appendonly",
-            # CRITICAL: App-created data scopes required for list/get operations
             "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
             "https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
         ]

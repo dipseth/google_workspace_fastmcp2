@@ -124,8 +124,12 @@ class CompatibilityShim:
             # Slides legacy names
             "slides": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["full"],
             "slides_read": ScopeRegistry.GOOGLE_API_SCOPES["slides"]["readonly"],
-            # Photos legacy names (using only valid scopes)
-            "photos_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            # Photos legacy names. The broad photoslibrary/photoslibrary.readonly
+            # scopes were retired by Google after March 31, 2025, so the legacy
+            # "read" names now map to the app-created-data readonly scope.
+            "photos_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"][
+                "readonly_appcreated"
+            ],
             "photos_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["appendonly"],
             "photos_readonly_appcreated": ScopeRegistry.GOOGLE_API_SCOPES["photos"][
                 "readonly_appcreated"
@@ -134,7 +138,9 @@ class CompatibilityShim:
                 "edit_appcreated"
             ],
             # PhotosLibrary legacy names (for backwards compatibility)
-            "photoslibrary_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"]["readonly"],
+            "photoslibrary_read": ScopeRegistry.GOOGLE_API_SCOPES["photos"][
+                "readonly_appcreated"
+            ],
             "photoslibrary_append": ScopeRegistry.GOOGLE_API_SCOPES["photos"][
                 "appendonly"
             ],
@@ -249,14 +255,22 @@ class CompatibilityShim:
                 "description": "Google Slides service",
             },
             "photos": {
-                "default_scopes": ["photos_read", "photos_append"],
+                "default_scopes": [
+                    "photos_append",
+                    "photos_readonly_appcreated",
+                    "photos_edit_appcreated",
+                ],
                 "version": "v1",
-                "description": "Google Photos service",
+                "description": "Google Photos service (app-created data only)",
             },
             "photoslibrary": {
-                "default_scopes": ["photos_read", "photos_append"],
+                "default_scopes": [
+                    "photos_append",
+                    "photos_readonly_appcreated",
+                    "photos_edit_appcreated",
+                ],
                 "version": "v1",
-                "description": "Google Photos Library API service",
+                "description": "Google Photos Library API service (app-created data only)",
             },
             "tasks": {
                 "default_scopes": ["tasks_read", "tasks_full"],

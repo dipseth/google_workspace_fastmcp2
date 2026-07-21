@@ -1169,8 +1169,9 @@ async def initiate_oauth_flow(
         logger.info("🔑 INITIATE: Using default OAuth configuration")
 
     # Verify no problematic scopes are included
+    from .scope_registry import ScopeRegistry
+
     problematic_patterns = [
-        "photoslibrary.sharing",
         "cloud-platform",
         "cloudfunctions",
         "pubsub",
@@ -1180,16 +1181,33 @@ async def initiate_oauth_flow(
         scope
         for scope in oauth_scopes
         if any(bad in scope for bad in problematic_patterns)
+        or scope in ScopeRegistry.RETIRED_SCOPES
     ]
 
-    if problematic_scopes:
+    # Google rejects authorization requests mixing Photos Library scopes with
+    # other Google API scopes (400 invalid_request). A photos-only flow is
+    # fine; a mixed one is not.
+    photos_scopes = [s for s in oauth_scopes if "auth/photoslibrary" in s]
+    non_photos_api_scopes = [
+        s
+        for s in oauth_scopes
+        if "auth/photoslibrary" not in s
+        and s not in ScopeRegistry.GOOGLE_API_SCOPES["base"].values()
+    ]
+    if photos_scopes and non_photos_api_scopes:
         logger.error(
-            f"Found {len(problematic_scopes)} problematic scopes in oauth_comprehensive"
+            f"Requesting {len(photos_scopes)} Photos scopes together with "
+            f"{len(non_photos_api_scopes)} other API scopes - Google will reject "
+            "this with 400 invalid_request. Photos requires its own OAuth flow "
+            "(selected_services=['photos'])."
         )
+
+    if problematic_scopes:
+        logger.error(f"Found {len(problematic_scopes)} problematic scopes")
         for scope in problematic_scopes:
             logger.error(f"Problematic scope: {scope}")
     else:
-        logger.info("✅ No problematic scopes found in oauth_comprehensive")
+        logger.info("✅ No problematic scopes found in requested OAuth scopes")
 
     # Create OAuth flow
     flow = Flow.from_client_config(
