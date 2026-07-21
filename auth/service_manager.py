@@ -375,9 +375,27 @@ async def get_google_service(
             )
             return cached_service
 
-    # Get valid credentials
-    credentials = get_valid_credentials(user_email)
+    # Get valid credentials from the credential slot this service belongs to.
+    # Separate-auth services (e.g. Photos — Google refuses to combine its
+    # scopes with Drive's in one authorization) have their own token group,
+    # stored independently of the Workspace token.
+    from .scope_registry import ScopeRegistry
+
+    token_group = ScopeRegistry.get_token_group_for_service(service_type)
+    credentials = get_valid_credentials(user_email, token_group=token_group)
     if not credentials:
+        if token_group != ScopeRegistry.DEFAULT_TOKEN_GROUP:
+            raise GoogleServiceError(
+                f"**Separate Authorization Required for {service_type.title()}**\n\n"
+                f"Google requires {service_type.title()} to be authorized in its "
+                f"own OAuth flow, with its own token — it cannot share the "
+                f"combined Workspace authorization.\n\n"
+                f"**Run:** `start_google_auth` with your email ({user_email}) "
+                f"and `service_name=[\"{service_type}\"]`\n\n"
+                f"Your existing Workspace sign-in is unaffected; this adds a "
+                f"second, {service_type}-only token for the same account."
+            )
+
         # Check if user is authenticated via GoogleProvider (identity-only)
         # and just needs a scope upgrade for API access
         try:

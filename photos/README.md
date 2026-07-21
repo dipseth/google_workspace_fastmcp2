@@ -20,8 +20,13 @@ This document describes the Google Photos API integration following FastMCP2 pat
 >    that combines Photos Library scopes with Drive (or other Workspace)
 >    scopes — `Error 400: invalid_request — This request contains scopes that
 >    cannot be requested together`. Photos is therefore excluded from the
->    combined `oauth_comprehensive` flow and must be authorized on its own
->    (e.g., `selected_services=["photos"]`).
+>    combined `oauth_comprehensive` flow and must be authorized on its own:
+>    run `start_google_auth` with `service_name=["photos"]`.
+>
+> The resulting Photos token is stored in its own credential slot (token
+> group `photos`, under `credentials/token_groups/photos/`), separate from
+> the Workspace token for the same account — authorizing Photos does not
+> overwrite your Workspace sign-in, and both tokens refresh independently.
 
 ## Overview
 
