@@ -725,6 +725,13 @@ def main():
                     f"🌐 Starting server with {transport_mode.upper()} transport"
                 )
 
+            # Host/Origin request guard (FastMCP 3.4.4+): "auto" blocks DNS
+            # rebinding against localhost-bound servers and leaves public binds
+            # (e.g. FastMCP Cloud) untouched. An explicit
+            # FASTMCP_HTTP_HOST_ORIGIN_PROTECTION env var takes precedence.
+            if os.getenv("FASTMCP_HTTP_HOST_ORIGIN_PROTECTION") is None:
+                run_args["host_origin_protection"] = "auto"
+
             # Run the server with appropriate transport and SSL configuration
             mcp.run(**run_args)
 
