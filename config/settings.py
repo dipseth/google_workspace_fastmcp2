@@ -356,6 +356,25 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "SEARCH_MODE"},
     )
 
+    # Card-builder slot assignment: how much say the learned model gets over
+    # where content lands. "always" pins an item whenever its current pool has
+    # unmet DSL demand (legacy — the model is then never consulted).
+    # "confidence" lets UnifiedTRN release an item when it prefers a different,
+    # still-demanded pool. See gchat/card_builder/slot_assignment.py.
+    slot_pin_mode: str = Field(
+        default="always",
+        description="Slot assignment pinning: 'always' (legacy) or 'confidence' (model may reroute)",
+        json_schema_extra={"env": "SLOT_PIN_MODE"},
+    )
+
+    # NOTE: pool_head is not calibrated (label_smoothing=0.1 caps max-prob near
+    # 0.92), so this behaves as an on/off switch rather than a tuning dial.
+    slot_reroute_confidence: float = Field(
+        default=0.70,
+        description="Min model confidence to move an item out of its current pool",
+        json_schema_extra={"env": "SLOT_REROUTE_CONFIDENCE"},
+    )
+
     # Shadow A/B scoring — runs all 3 search modes on every query, logs comparison
     search_shadow_scoring: bool = Field(
         default=False,

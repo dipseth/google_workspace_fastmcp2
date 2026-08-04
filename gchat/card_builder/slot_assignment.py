@@ -121,7 +121,7 @@ def _load_slot_model():
 
     if unified_path and Path(unified_path).exists():
         try:
-            from research.trm.h2.unified_trn import UnifiedTRN
+            from adapters.unified_trn import UnifiedTRN
 
             checkpoint = torch.load(unified_path, map_location="cpu", weights_only=True)
             model = UnifiedTRN(
@@ -154,6 +154,17 @@ def _load_slot_model():
                 f"pool={pool_acc:.1%}, content={content_acc:.1%})"
             )
             return model
+        except ImportError as e:
+            # The model class is missing, not the checkpoint. That is a packaging
+            # bug (see tests/module/test_no_research_imports.py), not a normal
+            # degradation path -- surface it loudly instead of quietly falling
+            # back to heuristic content routing.
+            logger.error(
+                f"UnifiedTRN class unavailable ({e}) despite checkpoint at "
+                f"{unified_path} — slot assignment will fall back to heuristics. "
+                "This is a packaging bug: the model definition must be importable "
+                "from adapters/unified_trn.py."
+            )
         except Exception as e:
             logger.warning(f"Failed to load UnifiedTRN: {e} — trying SlotAffinityNet")
 
@@ -169,7 +180,7 @@ def _load_slot_model():
         return None
 
     try:
-        from research.trm.h2.slot_assigner import SlotAffinityNet
+        from adapters.slot_assigner import SlotAffinityNet
 
         checkpoint = torch.load(slot_path, map_location="cpu", weights_only=True)
         model = SlotAffinityNet(
@@ -230,6 +241,106 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
     except Exception as e:
         logger.debug(f"Embedding failed: {e}")
         return None
+
+
+def _pin_policy() -> Tuple[str, float]:
+    """Resolve the pinning policy from the environment.
+
+    "always" (default, legacy): an item stays in its current pool whenever that
+        pool still has unmet demand -- the model is never consulted for items
+        that happen to land somewhere with room. Misrouted content stays
+        misrouted whenever supply counts line up with DSL demand.
+
+    "confidence": consult the model first. An item is released for rerouting
+        only when the model confidently prefers a *different, still-demanded*
+        pool. Releasing an item hands its slot back to remaining_demand, so the
+        number of unassigned items and the unmet demand stay balanced and no
+        pool can be starved by the reroute.
+
+    Calibration caveat (measured 2026-07-25 on mw_slot_training_data.json):
+        pool_head probabilities are saturated, not calibrated. train_unified.py
+        uses label_smoothing=0.1 over 5 pools, capping the true-class target at
+        ~0.92, and observed max-probs span only 0.896-0.959 (median 0.928).
+        Top-1-vs-current margin does not separate either: correct-but-moved
+        items scored 0.900-0.905, inside the 0.835-0.910 range of genuine fixes.
+        So SLOT_REROUTE_CONFIDENCE is effectively an on/off switch, not a dial —
+        anything below ~0.89 releases on every disagreement, anything above
+        ~0.96 releases nothing. It is kept as an escape hatch, not a tuning knob.
+        Making it a real dial needs a calibrated pool_head (temperature scaling,
+        or dropping label smoothing) evaluated on a frozen eval set.
+
+    Configuration (both resolve the same two knobs):
+        .env / Settings   slot_pin_mode, slot_reroute_confidence
+        process env       SLOT_PIN_MODE, SLOT_REROUTE_CONFIDENCE  (takes priority)
+
+    Note pydantic-settings reads .env into Settings but does *not* populate
+    os.environ, so .env alone is invisible to a bare os.environ lookup -- hence
+    the Settings fallback below. Values are "always" / 0.70 if neither is set.
+    """
+    default_mode, default_threshold = "always", 0.70
+    try:
+        from config.settings import settings
+
+        default_mode = getattr(settings, "slot_pin_mode", default_mode)
+        default_threshold = getattr(
+            settings, "slot_reroute_confidence", default_threshold
+        )
+    except Exception as e:  # settings unavailable (e.g. isolated unit tests)
+        logger.debug(f"Settings unavailable for pin policy, using defaults: {e}")
+
+    mode = os.environ.get("SLOT_PIN_MODE", str(default_mode)).strip().lower()
+    if mode not in ("always", "confidence"):
+        logger.warning(f"Unknown SLOT_PIN_MODE={mode!r} — falling back to 'always'")
+        mode = "always"
+
+    raw = os.environ.get("SLOT_REROUTE_CONFIDENCE", str(default_threshold))
+    try:
+        threshold = float(raw)
+    except ValueError:
+        logger.warning(f"Invalid SLOT_REROUTE_CONFIDENCE={raw!r} — using 0.70")
+        threshold = 0.70
+    threshold = min(max(threshold, 0.0), 1.0)
+
+    return mode, threshold
+
+
+def _should_release(
+    scores: Any,
+    source_pool: str,
+    remaining_demand: Dict[str, int],
+    vocab: Dict[str, int],
+    threshold: float,
+) -> bool:
+    """True when the model confidently wants this item in a different pool.
+
+    Deliberately conservative — every guard here fails toward pinning:
+      * no score for the item  -> pin
+      * model agrees with the current pool -> pin
+      * the preferred pool has no unmet demand -> pin (nowhere to move it)
+      * confidence below threshold -> pin
+    """
+    if scores is None:
+        return False
+
+    try:
+        import torch
+
+        probs = torch.softmax(scores, dim=-1)
+        best_id = int(probs.argmax())
+        confidence = float(probs[best_id])
+    except Exception as e:  # never let the policy break card building
+        logger.debug(f"Release check failed, pinning instead: {e}")
+        return False
+
+    id_to_pool = {v: k for k, v in vocab.items()}
+    preferred = id_to_pool.get(best_id)
+
+    if preferred is None or preferred == source_pool:
+        return False
+    if remaining_demand.get(preferred, 0) <= 0:
+        return False
+
+    return confidence >= threshold
 
 
 def _get_constants(domain_config: Any = None):
@@ -338,16 +449,35 @@ def reassign_supply_map(
     new_pools: Dict[str, List[Any]] = {k: [] for k in VOCAB}
     remaining_demand: Dict[str, int] = dict(pool_demands)
 
+    pin_mode, reroute_confidence = _pin_policy()
+    released = 0
+
     for i, (item, source_pool) in enumerate(all_items):
         demand_for_pool = remaining_demand.get(source_pool, 0)
-        if demand_for_pool > 0:
-            # This item's pool is demanded and not yet full — pin it
-            new_pools[source_pool].append(item)
-            assigned[i] = True
-            remaining_demand[source_pool] = demand_for_pool - 1
+        if demand_for_pool <= 0:
+            continue
+
+        # Under "confidence" mode the model gets a say *before* the pin:
+        # an item is released for rerouting only when the model confidently
+        # prefers a different pool that is itself demanded.
+        if pin_mode == "confidence" and _should_release(
+            item_scores[i], source_pool, remaining_demand, VOCAB, reroute_confidence
+        ):
+            released += 1
+            continue
+
+        # This item's pool is demanded and not yet full — pin it
+        new_pools[source_pool].append(item)
+        assigned[i] = True
+        remaining_demand[source_pool] = demand_for_pool - 1
 
     pinned = sum(assigned)
     unpinned = len(all_items) - pinned
+    if released:
+        logger.info(
+            f"🧠 Slot assignment: {released} item(s) released for rerouting by the "
+            f"model (pin_mode=confidence, threshold={reroute_confidence:.2f})"
+        )
     if unpinned > 0:
         logger.debug(f"🧠 Slot assignment: {pinned} pinned, {unpinned} to reroute")
 

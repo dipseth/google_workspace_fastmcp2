@@ -2058,7 +2058,7 @@ async def search_evaluation():
     if model is None or not val_groups:
         return {"error": "Model or validation data not available"}
 
-    from research.trm.h2.eval_metrics import (
+    from adapters.eval_metrics import (
         evaluate_ranked_results,
         reciprocal_rank,
     )
@@ -2158,7 +2158,7 @@ async def model_comparison():
     if not val_groups:
         return {"error": "Validation data not available"}
 
-    from research.trm.h2.eval_metrics import reciprocal_rank
+    from adapters.eval_metrics import reciprocal_rank
 
     results = {}
 
@@ -2195,7 +2195,7 @@ async def model_comparison():
 
     if unified_path.exists():
         try:
-            from research.trm.h2.unified_trn import UnifiedTRN
+            from adapters.unified_trn import UnifiedTRN
 
             ckpt = torch.load(str(unified_path), map_location="cpu", weights_only=False)
             unified_model = UnifiedTRN(
