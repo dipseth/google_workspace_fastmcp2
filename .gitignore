@@ -59,9 +59,11 @@ credentials/
 htmlcov/
 
 # Research / ML artifacts
-research/trm/h2/*_training_data.json
-research/trm/h2/checkpoints/*.pt
-research/trm/official-repo/
+# The whole research/ tree is internal-only and excluded from the public repo
+# (removed in 59207e9). Production must NOT import from it -- model definitions
+# live in adapters/ (unified_trn.py, slot_assigner.py, domain_config.py) and are
+# trained by the scripts here.
+research/
 .claude/worktrees/
 
 # Google OAuth credential files (CRITICAL - never commit these)

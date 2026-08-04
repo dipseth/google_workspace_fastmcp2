@@ -121,7 +121,7 @@ def _load_slot_model():
 
     if unified_path and Path(unified_path).exists():
         try:
-            from research.trm.h2.unified_trn import UnifiedTRN
+            from adapters.unified_trn import UnifiedTRN
 
             checkpoint = torch.load(unified_path, map_location="cpu", weights_only=True)
             model = UnifiedTRN(
@@ -154,6 +154,17 @@ def _load_slot_model():
                 f"pool={pool_acc:.1%}, content={content_acc:.1%})"
             )
             return model
+        except ImportError as e:
+            # The model class is missing, not the checkpoint. That is a packaging
+            # bug (see tests/module/test_no_research_imports.py), not a normal
+            # degradation path -- surface it loudly instead of quietly falling
+            # back to heuristic content routing.
+            logger.error(
+                f"UnifiedTRN class unavailable ({e}) despite checkpoint at "
+                f"{unified_path} — slot assignment will fall back to heuristics. "
+                "This is a packaging bug: the model definition must be importable "
+                "from adapters/unified_trn.py."
+            )
         except Exception as e:
             logger.warning(f"Failed to load UnifiedTRN: {e} — trying SlotAffinityNet")
 
@@ -169,7 +180,7 @@ def _load_slot_model():
         return None
 
     try:
-        from research.trm.h2.slot_assigner import SlotAffinityNet
+        from adapters.slot_assigner import SlotAffinityNet
 
         checkpoint = torch.load(slot_path, map_location="cpu", weights_only=True)
         model = SlotAffinityNet(

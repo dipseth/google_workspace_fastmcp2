@@ -184,7 +184,7 @@ def _load_learned_model(cls, domain: str | None = None):
 
         if model_type in ("unified", "unified_trn"):
             # UnifiedTRN: dual-encoder with 4 task heads
-            from research.trm.h2.unified_trn import UnifiedTRN
+            from adapters.unified_trn import UnifiedTRN
 
             model = UnifiedTRN(
                 structural_dim=ckpt.get("structural_dim", 17),
@@ -226,6 +226,15 @@ def _load_learned_model(cls, domain: str | None = None):
             f"V{cls._learned_feature_version})"
         )
         return model
+    except ImportError as e:
+        # Checkpoint resolved but the model class is missing -- a packaging bug
+        # (see tests/module/test_no_research_imports.py), not a normal fallback.
+        logger.error(
+            f"Scorer class unavailable ({e}) despite checkpoint at {checkpoint_path} "
+            "— learned search will silently degrade to multidim. The model "
+            "definition must be importable from adapters/unified_trn.py."
+        )
+        return None
     except Exception as e:
         logger.error(f"Failed to load learned scorer: {e}")
         return None
