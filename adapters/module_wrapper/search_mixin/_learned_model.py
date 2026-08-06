@@ -39,11 +39,21 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
                 if os.path.exists(path):
                     logger.debug(f"Using cloud artifact (default): {path}")
                     return path
-            # Try first available
-            for d, path in artifact_paths.items():
-                if os.path.exists(path):
-                    logger.debug(f"Using cloud artifact (domain={d}): {path}")
-                    return path
+            # Try first available -- ONLY when no specific domain was requested.
+            # A model carries its domain's pool vocabulary and component mapping,
+            # so handing an email request a gchat checkpoint produces confident
+            # nonsense rather than a visible failure.
+            if domain is None:
+                for d, path in artifact_paths.items():
+                    if os.path.exists(path):
+                        logger.debug(f"Using cloud artifact (domain={d}): {path}")
+                        return path
+            else:
+                logger.warning(
+                    f"No cloud artifact for domain={domain!r} "
+                    f"(available: {sorted(artifact_paths)}) — refusing to fall back "
+                    "to another domain's model"
+                )
     except ImportError:
         pass  # lifespans not available (e.g., during testing)
 
@@ -56,10 +66,17 @@ def _resolve_checkpoint_path(cls, domain: str | None = None) -> str | None:
                 path = registry[domain]
                 if os.path.exists(path):
                     return path
-            # Fallback to first available in registry
-            for d, path in registry.items():
-                if os.path.exists(path):
-                    return path
+            # Fallback to first available -- same domain-safety rule as above.
+            if domain is None:
+                for d, path in registry.items():
+                    if os.path.exists(path):
+                        return path
+            else:
+                logger.warning(
+                    f"No registry entry for domain={domain!r} "
+                    f"(available: {sorted(registry)}) — refusing to fall back "
+                    "to another domain's model"
+                )
         except _json.JSONDecodeError:
             logger.warning("LEARNED_SCORER_REGISTRY is not valid JSON")
 
@@ -181,6 +198,18 @@ def _load_learned_model(cls, domain: str | None = None):
             "feature_version", 5 if model_type == "unified" else 1
         )
         cls._learned_model_domain = ckpt.get("domain_id")
+
+        # Defence in depth: resolution can hand back the right *path* and still
+        # be the wrong model if the artifact itself was published under the
+        # wrong prefix. The checkpoint's own domain_id is the authority.
+        ckpt_domain = ckpt.get("domain_id")
+        if domain and ckpt_domain and ckpt_domain != domain:
+            logger.warning(
+                f"Checkpoint at {checkpoint_path} is for domain={ckpt_domain!r} "
+                f"but domain={domain!r} was requested. Pool vocabulary and "
+                "component mapping will not match — check how this artifact was "
+                "published."
+            )
 
         if model_type in ("unified", "unified_trn"):
             # UnifiedTRN: dual-encoder with 4 task heads

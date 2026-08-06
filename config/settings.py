@@ -428,7 +428,12 @@ class Settings(BaseSettings):
         description=(
             "JSON mapping of domain->artifact URI, or single URI for all domains. "
             "Supports gs://, s3://, az://, https:// schemes. "
-            'Example: \'{"gchat": "gs://my-bucket/trm/best_model_unified.pt"}\''
+            'Example: \'{"gchat": "gs://my-bucket/trm/best_model_unified.pt"}\'. '
+            "Only map a domain you have actually trained a model for: a checkpoint "
+            "carries its domain's pool vocabulary and component mapping, so pointing "
+            "two domains at the same file makes one of them score confident nonsense. "
+            "Unmapped domains now resolve to no model rather than borrowing another "
+            "domain's — see tests/module/test_checkpoint_domain_resolution.py."
         ),
         json_schema_extra={"env": "MODEL_ARTIFACT_URI"},
     )
