@@ -30,11 +30,12 @@ Dependencies:
 import asyncio
 import io
 import re
-from typing import List, Optional, Union, cast
+from typing import Annotated, List, Optional, Union, cast
 
 from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from pydantic import Field
 
 from auth.service_helpers import get_injected_service, get_service, request_service
 from config.enhanced_logging import setup_logger
@@ -1363,17 +1364,46 @@ def setup_docs_tools(mcp: FastMCP):
     """
 
     @mcp.tool(
-        name="search_docs", description="Search for Google Docs by name using Drive API"
+        name="search_docs",
+        description=(
+            "Find Google Docs whose NAME contains the query (Drive name-contains match, Docs mime type only).\n"
+            "Use when: locating a Doc by title. For full-text/content search or non-Doc file types, use search_drive_files; to read a found Doc, pass its id to get_doc_content.\n"
+            "Behavior: read-only; excludes trashed files.\n"
+            "Returns: matching docs with id, name, modified time, and webViewLink. Errors: auth failure (run start_google_auth) or Drive permission denial."
+        ),
+        tags={"docs", "search", "google"},
+        annotations={
+            "title": "Search Google Docs by Name",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
     )
     async def search_docs_tool(
-        query: str, page_size: int = 10, user_google_email: UserGoogleEmail = None
+        query: Annotated[
+            str,
+            Field(
+                description="Substring matched against document names (not content); case-insensitive Drive 'name contains' semantics"
+            ),
+        ],
+        page_size: Annotated[
+            int,
+            Field(description="Maximum documents to return (1-100)", ge=1, le=100),
+        ] = 10,
+        user_google_email: UserGoogleEmail = None,
     ) -> SearchDocsResponse:
         """Search for Google Docs by name."""
         return await search_docs(query, page_size, user_google_email)
 
     @mcp.tool(
         name="get_doc_content",
-        description="Get content of a Google Doc or Drive file (like .docx)",
+        description=(
+            "Read the text content of a native Google Doc (Docs API) or a Word file stored in Drive (.docx download + text extraction).\n"
+            "Use when: reading Docs or .docx documents. For other Drive file types (sheets, PDFs, images, plain text), use get_drive_file_content; to find the document id first, use search_docs.\n"
+            "Behavior: read-only; Office files are downloaded and parsed, which is slower than native Docs.\n"
+            "Returns: extracted text plus title, mime type, and webViewLink. Errors: file not found / no access for bad ids; auth failure (run start_google_auth)."
+        ),
         tags={"docs", "content", "read", "google"},
         annotations={
             "title": "Get Google Doc Content",
@@ -1384,14 +1414,25 @@ def setup_docs_tools(mcp: FastMCP):
         },
     )
     async def get_doc_content_tool(
-        document_id: str, user_google_email: UserGoogleEmail = None
+        document_id: Annotated[
+            str,
+            Field(
+                description="Drive file ID of the Google Doc or Office file (from search_docs, list_docs_in_folder, or a Docs URL)"
+            ),
+        ],
+        user_google_email: UserGoogleEmail = None,
     ) -> GetDocContentResponse:
         """Get content of a Google Doc or Drive file."""
         return await get_doc_content(document_id, user_google_email)
 
     @mcp.tool(
         name="list_docs_in_folder",
-        description="List Google Docs within a specific Drive folder",
+        description=(
+            "List the Google Docs (Docs mime type only) directly inside one Drive folder.\n"
+            "Use when: browsing a known folder's documents. To find Docs by name across Drive, use search_docs; to list all file types in a folder, use list_drive_items.\n"
+            "Behavior: read-only; not recursive — subfolder contents are not included.\n"
+            "Returns: docs with id, name, modified time, and webViewLink. Errors: unknown folder_id or no access; auth failure (run start_google_auth)."
+        ),
         tags={"docs", "list", "folder", "google"},
         annotations={
             "title": "List Google Docs in Folder",
@@ -1402,8 +1443,16 @@ def setup_docs_tools(mcp: FastMCP):
         },
     )
     async def list_docs_in_folder_tool(
-        folder_id: str = "root",
-        page_size: int = 100,
+        folder_id: Annotated[
+            str,
+            Field(
+                description="Drive folder ID to list; 'root' targets My Drive's top level"
+            ),
+        ] = "root",
+        page_size: Annotated[
+            int,
+            Field(description="Maximum documents to return (1-1000)", ge=1, le=1000),
+        ] = 100,
         user_google_email: UserGoogleEmail = None,
     ) -> DocsListResponse:
         """List Google Docs within a specific folder."""

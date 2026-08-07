@@ -325,11 +325,12 @@ class Settings(BaseSettings):
     )
 
     # Code Mode Configuration
-    # When enabled, replaces the full tool catalog with BM25 search + sandboxed execution
+    # Enabled by default: replaces the full tool catalog with BM25 search + sandboxed execution
     # LLMs discover tools via search instead of loading all schemas upfront
+    # Set ENABLE_CODE_MODE=false to expose the classic full tool catalog instead
     enable_code_mode: bool = Field(
-        default=False,
-        description="Enable CodeMode transform for BM25 tool discovery",
+        default=True,
+        description="Enable CodeMode transform for BM25 tool discovery (default). Set false for the classic full tool catalog.",
         json_schema_extra={"env": "ENABLE_CODE_MODE"},
     )
 

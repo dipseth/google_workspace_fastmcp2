@@ -812,7 +812,12 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="send_message",
-        description="Sends a message to a Google Chat space with full markdown formatting support",
+        description=(
+            "Post a plain-text message (Google Chat markdown supported) to a Chat space, optionally threaded via thread_key.\n"
+            "Use when: sending text. For interactive cards, buttons, or rich layouts, use send_dynamic_card; for space administration, use manage_space.\n"
+            "Behavior: posts immediately to the space; not idempotent — repeated calls post duplicates. Chat markdown differs from standard: *bold*, _italic_, ~strike~, <url|text> links.\n"
+            "Returns: the created message name and thread info. Errors: unknown space_id, or the service account/user lacks access to the space."
+        ),
         tags={"chat", "message", "send", "google", "markdown", "formatting"},
         annotations={
             "title": "Send Chat Message",
@@ -1079,12 +1084,17 @@ def setup_chat_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="manage_space",
-        description="Unified tool for Google Chat space administration: manage members, create/update/delete spaces",
+        description=(
+            "Administer a Google Chat space: members (list/add/remove), space lifecycle (create/update/delete), messages (get/update/delete), and reactions.\n"
+            "Use when: changing a space or its membership. To post content, use send_message (text) or send_dynamic_card (cards); to read history, use list_messages.\n"
+            "Behavior: DESTRUCTIVE for delete_space (removes the space and all its messages), delete_message, and remove_member — these are immediate and irreversible. Reaction actions require delegated user auth.\n"
+            "Returns: per-action result with the affected resource name. Errors: missing required params for the chosen action; 403 when the authenticated user lacks space-manager rights."
+        ),
         tags={"chat", "spaces", "members", "management"},
         annotations={
             "title": "Manage Chat Space",
             "readOnlyHint": False,
-            "destructiveHint": False,
+            "destructiveHint": True,
             "idempotentHint": False,
             "openWorldHint": True,
         },

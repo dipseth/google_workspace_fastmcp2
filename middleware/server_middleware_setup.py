@@ -70,7 +70,10 @@ def setup_all_middleware(
 
         setup_code_mode(mcp)
     else:
-        logger.info("Code Mode disabled — set ENABLE_CODE_MODE=true in .env to enable")
+        logger.info(
+            "Code Mode disabled — serving the classic full tool catalog "
+            "(unset ENABLE_CODE_MODE or set it to true to restore the default)"
+        )
 
     # ─── 3. Auth Middleware ───
     from auth.context import set_auth_middleware

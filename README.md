@@ -4,11 +4,22 @@
 [![pypi](https://img.shields.io/pypi/v/google-workspace-unlimited?color=blue)](https://pypi.org/project/google-workspace-unlimited/)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/dipseth/google_workspace_fastmcp2/blob/main/LICENSE)
 
+[![google_workspace_fastmcp2 MCP server](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2/badges/card.svg)](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2)
+
 **GoogleUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos services using a unified, secure API.
+
+**What sets it apart:**
+
+- ⚡ **Code Mode by default** — instead of flooding your client with 90+ tool schemas, the server exposes 7 lightweight meta-tools; the AI discovers tools on demand and chains real API calls inside a single sandboxed `execute` block
+- 🚀 **Zero-config startup** — the server runs immediately with no `.env` file; OAuth happens lazily on first use
+- 🔧 **Per-session tool control** — URL-based service filtering and session-scoped enable/disable, so each connected client sees exactly the tools it needs
+- 🎨 **Template & card DSL system** — Jinja2 macros and a compact card notation turn raw API data into rich emails, dashboards, and Google Chat cards
+- 🧠 **Semantic memory** — every tool response is embedded into Qdrant, searchable later with natural language
 
 ## 📋 Table of Contents
 
 - [Quick Installation Instructions](#-quick-installation-instructions)
+- [Code Mode (Default)](#-code-mode-default)
 - [Service Capabilities](#-service-capabilities)
 - [Middleware Architecture](#-middleware-architecture)
 - [Tool Management Dashboard](#️-tool-management-dashboard)
@@ -44,7 +55,7 @@ The fastest way to get started - install directly from PyPI:
 }
 ```
 
-> ⚡ **That's it!** The server runs in stdio mode by default, perfect for MCP clients like Claude Desktop, Cursor, Roo, etc.
+> ⚡ **That's it!** The server runs in stdio mode by default, perfect for MCP clients like Claude Desktop, Cursor, Roo, etc. [Code Mode](#-code-mode-default) is on out of the box, so your client sees 7 lean meta-tools instead of 90+ schemas.
 
 #### Method 2: Clone and Development Setup
 
@@ -133,7 +144,7 @@ All environment variables are **optional** — the server starts with sensible d
 |----------|---------|-------------|
 | `MINIMAL_TOOLS_STARTUP` | `true` | Start with only 5 protected tools enabled |
 | `MINIMAL_STARTUP_SERVICES` | _(empty)_ | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
-| `ENABLE_CODE_MODE` | `false` | Enable CodeMode transform — replaces full tool catalog with BM25 search + sandboxed `execute` |
+| `ENABLE_CODE_MODE` | `true` | Code Mode (default) — replaces the full tool catalog with 7 meta-tools + sandboxed `execute`; set `false` for the classic catalog |
 | `ENABLE_SKILLS_PROVIDER` | `false` | Enable FastMCP SkillsDirectoryProvider for dynamic skill generation |
 | `SKILLS_DIRECTORY` | `~/.claude/skills` | Directory for generated skill documents |
 | `RESPONSE_LIMIT_MAX_SIZE` | `500000` | Max tool response size in bytes (0 = disabled) |
@@ -230,6 +241,33 @@ Each connection gets its own **isolated session** with only the requested servic
 
 > See [URL-Based Service Filtering](#-url-based-service-filtering-http-transport) for the full list of query parameters.
 
+### 🤖 Claude Code & Claude Desktop
+
+**Claude Code (CLI)** — one command, using the published PyPI package:
+
+```bash
+# Local stdio (recommended): uvx fetches and runs the server on demand
+claude mcp add google-workspace -- uvx google-workspace-unlimited
+
+# Or connect to an already-running HTTP server
+claude mcp add --transport http google-workspace https://localhost:8002/mcp
+```
+
+**Claude Desktop (local dev path)** — add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "google-workspace-unlimited": {
+      "command": "uvx",
+      "args": ["google-workspace-unlimited"]
+    }
+  }
+}
+```
+
+**Claude.ai / Claude Desktop (hosted connector)** — run the server behind a public HTTPS endpoint (e.g. a Cloudflare or ngrok tunnel), then add it under **Settings → Connectors → Add custom connector** with your `https://your-domain/mcp` URL. The server's OAuth 2.1 + PKCE flow handles authentication, including the `https://claude.ai/api/mcp/auth_callback` redirect. See the [Claude.ai Integration Guide](documentation/config/claude_ai_integration_guide.md) for the full walkthrough.
+
 ### 📚 Complete Connection Guide
 
 For detailed setup instructions, troubleshooting, and configurations for all supported clients including:
@@ -240,6 +278,46 @@ For detailed setup instructions, troubleshooting, and configurations for all sup
 - And more...
 
 > 🔗 **[Complete Client Connection Guide](documentation/config/MCP_CLIENT_CONNECTIONS.md)** - Comprehensive setup instructions, troubleshooting, and advanced configurations for all supported AI clients and development environments
+
+## ⚡ Code Mode (Default)
+
+Code Mode is GoogleUnlimited's flagship feature — and it's **on by default**. Instead of loading 90+ tool schemas upfront (expensive on tokens), your MCP client sees just **7 meta-tools**. The AI discovers tools on demand, then chains any number of real API calls inside a single sandboxed Python `execute` block.
+
+| Meta-Tool | Purpose |
+|-----------|---------|
+| `tags` | Browse tools by service category (Gmail, Drive, Calendar, etc.) |
+| `search` | BM25-powered keyword search across tool names and descriptions |
+| `get_schema` | Get full parameter schemas for selected tools |
+| `semantic_search` | Natural-language search over previously stored tool responses (Qdrant-backed) |
+| `fetch_document` | Retrieve a full stored response by point ID from search results |
+| `tool_activity` | Summarize recent tool usage patterns and activity |
+| `execute` | Run a sandboxed Python block that chains real tool calls via `await call_tool(name, params)` |
+
+**Why it matters:**
+
+- 💰 **Massive token savings** — 7 schemas instead of 90+, with full schemas fetched only for the tools actually used
+- 🔗 **One round-trip instead of many** — search → filter → act happens inside a single `execute` block, not a chain of client round-trips
+- 🧰 **Batteries-included sandbox** — 40+ built-in helpers (`now()`, `days_ago()`, `to_json()`, `re_find()`, `gather_tools()`, …) cover dates, JSON, URLs, regex, math, and batch calls without any imports
+
+```python
+# One execute block: find a Drive file, then email its link
+files = await call_tool("search_drive_files", {"query": "Q4 report"})
+link = files["files"][0]["webViewLink"]
+result = await call_tool("send_gmail_message", {
+    "to": "manager@company.com",
+    "subject": "Q4 Report",
+    "body": "Here's the Q4 report: " + link,
+})
+return result
+```
+
+**Prefer the classic catalog?** Opt out and every tool is exposed directly to the client:
+
+```bash
+ENABLE_CODE_MODE=false   # expose the full 90+ tool catalog instead
+```
+
+> Code Mode and the classic catalog are mutually exclusive — when Code Mode is active, direct tool calls are replaced by the search + `execute` pattern. Discovery tools always see the full catalog, regardless of session-level filtering.
 
 ## 🎯 Service Capabilities
 
@@ -373,32 +451,6 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
   "message": "Kept 5 tools, disabled 89 tools for this session"
 }
 ```
-
-### 🧠 CodeMode Transform (Experimental)
-
-When enabled via `ENABLE_CODE_MODE=true`, CodeMode replaces the full 92+ tool catalog with **4 meta-tools**, dramatically reducing token usage for LLM clients:
-
-| Meta-Tool | Purpose |
-|-----------|---------|
-| `get_tags` | Browse tools by service category (Gmail, Drive, Calendar, etc.) |
-| `search` | BM25-powered keyword search across tool names and descriptions |
-| `get_schema` | Get full parameter schemas for selected tools |
-| `execute` | Run tool calls in a sandboxed Python block via `await call_tool(name, params)` |
-
-**How it works:** Instead of loading all 92+ tool schemas upfront (expensive on tokens), LLMs discover tools on-demand via search, then chain multiple `call_tool()` calls in a single `execute` block:
-
-```python
-# Single execute block can chain multiple tool calls
-result = await call_tool("search_drive_files", {"query": "Q4 report"})
-return result
-```
-
-**Configuration:**
-```bash
-ENABLE_CODE_MODE=true   # Enable CodeMode transform
-```
-
-> CodeMode and the standard tool catalog are mutually exclusive — when CodeMode is active, direct tool calls are replaced by the search + execute pattern.
 
 ### 📚 Skills Provider
 

@@ -1,0 +1,672 @@
+{
+  "add_questions_to_form": [
+    "form_id",
+    "questions",
+    "user_google_email"
+  ],
+  "add_slide": [
+    "index",
+    "layout_id",
+    "presentation_id",
+    "user_google_email"
+  ],
+  "bulk_calendar_operations": [
+    "attendee_email",
+    "calendar_id",
+    "dry_run",
+    "location_pattern",
+    "max_results",
+    "operation",
+    "time_max",
+    "time_min",
+    "title_pattern",
+    "user_google_email"
+  ],
+  "check_drive_auth": [
+    "cross_oauth_password",
+    "user_google_email"
+  ],
+  "cleanup_qdrant_data": [
+    "user_google_email"
+  ],
+  "compose_dynamic_email": [
+    "action",
+    "bcc",
+    "cc",
+    "email_description",
+    "email_params",
+    "to",
+    "user_google_email"
+  ],
+  "create_calendar": [
+    "description",
+    "location",
+    "summary",
+    "time_zone",
+    "user_google_email"
+  ],
+  "create_doc": [
+    "content",
+    "content_mime_type",
+    "document_id",
+    "edit_config",
+    "title",
+    "user_google_email"
+  ],
+  "create_drive_file": [
+    "content",
+    "fileUrl",
+    "file_name",
+    "folder_id",
+    "mime_type",
+    "user_google_email"
+  ],
+  "create_event": [
+    "attachments",
+    "attendees",
+    "calendar_id",
+    "description",
+    "duration",
+    "end_time",
+    "events",
+    "location",
+    "recurrence",
+    "start_time",
+    "summary",
+    "timezone",
+    "user_google_email"
+  ],
+  "create_form": [
+    "description",
+    "document_title",
+    "title",
+    "user_google_email"
+  ],
+  "create_gmail_filter": [
+    "add_label_ids",
+    "exclude_chats",
+    "forward_to",
+    "from_address",
+    "has_attachment",
+    "mark_as_important",
+    "mark_as_spam",
+    "never_mark_as_important",
+    "never_mark_as_spam",
+    "query",
+    "remove_label_ids",
+    "size",
+    "size_comparison",
+    "subject_contains",
+    "to_address",
+    "user_google_email"
+  ],
+  "create_photos_album": [
+    "title",
+    "user_google_email"
+  ],
+  "create_presentation": [
+    "title",
+    "user_google_email"
+  ],
+  "create_sheet": [
+    "sheet_name",
+    "spreadsheet_id",
+    "user_google_email"
+  ],
+  "create_spreadsheet": [
+    "sheet_names",
+    "title",
+    "user_google_email"
+  ],
+  "create_template_macro": [
+    "description",
+    "macro_content",
+    "macro_name",
+    "persist_to_file",
+    "usage_example",
+    "user_google_email"
+  ],
+  "delete_event": [
+    "calendar_id",
+    "event_id",
+    "user_google_email"
+  ],
+  "delete_gmail_filter": [
+    "filter_id",
+    "user_google_email"
+  ],
+  "download_gmail_attachment": [
+    "filename",
+    "message_id",
+    "return_content",
+    "return_url",
+    "save_dir",
+    "user_google_email"
+  ],
+  "draft_gmail_forward": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "html_body",
+    "message_id",
+    "to",
+    "user_google_email"
+  ],
+  "draft_gmail_message": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "email_spec",
+    "html_body",
+    "subject",
+    "to",
+    "user_google_email"
+  ],
+  "draft_gmail_reply": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "html_body",
+    "message_id",
+    "reply_mode",
+    "to",
+    "user_google_email"
+  ],
+  "export_and_download_presentation": [
+    "download_directory",
+    "download_to_local",
+    "export_format",
+    "presentation_id",
+    "user_google_email"
+  ],
+  "fetch": [
+    "order_by",
+    "order_direction",
+    "point_id",
+    "point_ids",
+    "user_google_email"
+  ],
+  "format_sheet_range": [
+    "apply_borders",
+    "background_color",
+    "bold",
+    "border_color",
+    "border_positions",
+    "border_style",
+    "bottom_border",
+    "cell_format",
+    "column_width",
+    "condition_format_background_color",
+    "condition_format_bold",
+    "condition_format_italic",
+    "condition_format_text_color",
+    "condition_type",
+    "condition_value",
+    "conditional_rules",
+    "font_size",
+    "freeze_columns",
+    "freeze_rows",
+    "horizontal_alignment",
+    "inner_horizontal_border",
+    "inner_vertical_border",
+    "italic",
+    "left_border",
+    "merge_cells_option",
+    "number_format_pattern",
+    "number_format_type",
+    "range_end_col",
+    "range_end_row",
+    "range_start_col",
+    "range_start_row",
+    "right_border",
+    "row_height",
+    "sheet_id",
+    "spreadsheet_id",
+    "text_color",
+    "text_rotation",
+    "top_border",
+    "user_google_email",
+    "vertical_alignment",
+    "wrap_strategy"
+  ],
+  "forward_gmail_message": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "html_body",
+    "message_id",
+    "to",
+    "user_google_email"
+  ],
+  "get_doc_content": [
+    "document_id",
+    "user_google_email"
+  ],
+  "get_drive_file_content": [
+    "file_id",
+    "user_google_email"
+  ],
+  "get_event": [
+    "calendar_id",
+    "event_id",
+    "user_google_email"
+  ],
+  "get_form": [
+    "form_id",
+    "user_google_email"
+  ],
+  "get_form_response": [
+    "form_id",
+    "response_id",
+    "user_google_email"
+  ],
+  "get_gmail_filter": [
+    "filter_id",
+    "user_google_email"
+  ],
+  "get_gmail_message_content": [
+    "message_id",
+    "user_google_email"
+  ],
+  "get_gmail_messages_content_batch": [
+    "format",
+    "message_ids",
+    "user_google_email"
+  ],
+  "get_gmail_thread_content": [
+    "thread_id",
+    "user_google_email"
+  ],
+  "get_people_contact_group_members": [
+    "label",
+    "user_google_email"
+  ],
+  "get_photo_details": [
+    "media_item_id",
+    "user_google_email"
+  ],
+  "get_photos_library_info": [
+    "user_google_email"
+  ],
+  "get_presentation_info": [
+    "presentation_id",
+    "user_google_email"
+  ],
+  "get_response_details": [
+    "point_id",
+    "user_google_email"
+  ],
+  "get_spreadsheet_info": [
+    "spreadsheet_id",
+    "user_google_email"
+  ],
+  "get_tool_analytics": [
+    "end_date",
+    "group_by",
+    "start_date",
+    "summary_only",
+    "user_google_email"
+  ],
+  "health_check": [
+    "user_google_email"
+  ],
+  "list_album_photos": [
+    "album_id",
+    "max_results",
+    "user_google_email"
+  ],
+  "list_calendars": [
+    "user_google_email"
+  ],
+  "list_docs_in_folder": [
+    "folder_id",
+    "page_size",
+    "user_google_email"
+  ],
+  "list_drive_items": [
+    "folder_id",
+    "include_files",
+    "include_subfolders",
+    "page_size",
+    "user_google_email"
+  ],
+  "list_events": [
+    "calendar_id",
+    "max_results",
+    "time_max",
+    "time_min",
+    "user_google_email"
+  ],
+  "list_form_responses": [
+    "form_id",
+    "page_size",
+    "page_token",
+    "user_google_email"
+  ],
+  "list_gmail_filters": [
+    "user_google_email"
+  ],
+  "list_gmail_labels": [
+    "user_google_email"
+  ],
+  "list_messages": [
+    "order_by",
+    "page_size",
+    "space_id",
+    "user_google_email"
+  ],
+  "list_people_contact_labels": [
+    "user_google_email"
+  ],
+  "list_photos_albums": [
+    "exclude_non_app_created",
+    "max_results",
+    "user_google_email"
+  ],
+  "list_spaces": [
+    "page_size",
+    "space_type",
+    "user_google_email"
+  ],
+  "list_spreadsheets": [
+    "max_results",
+    "user_google_email"
+  ],
+  "make_drive_files_public": [
+    "file_ids",
+    "public",
+    "role",
+    "user_google_email"
+  ],
+  "manage_credentials": [
+    "action",
+    "email",
+    "new_storage_mode"
+  ],
+  "manage_drive_files": [
+    "file_ids",
+    "name_prefix",
+    "new_name",
+    "operation",
+    "permanent",
+    "remove_from_all_parents",
+    "target_folder_id",
+    "user_google_email"
+  ],
+  "manage_gmail_allow_list": [
+    "action",
+    "email",
+    "label",
+    "user_google_email"
+  ],
+  "manage_gmail_label": [
+    "action",
+    "background_color",
+    "label_id",
+    "label_list_visibility",
+    "message_list_visibility",
+    "name",
+    "text_color",
+    "user_google_email"
+  ],
+  "manage_people_contact_labels": [
+    "action",
+    "email",
+    "label",
+    "user_google_email"
+  ],
+  "manage_space": [
+    "action",
+    "description",
+    "display_name",
+    "emoji",
+    "member_email",
+    "member_name",
+    "member_role",
+    "message_name",
+    "message_text",
+    "reaction_name",
+    "space_id",
+    "space_type",
+    "user_google_email"
+  ],
+  "manage_tools": [
+    "action",
+    "include_internal",
+    "scope",
+    "service_filter",
+    "tool_names",
+    "user_google_email"
+  ],
+  "modify_event": [
+    "attendees",
+    "calendar_id",
+    "description",
+    "duration",
+    "end_time",
+    "event_id",
+    "location",
+    "recurrence",
+    "start_time",
+    "summary",
+    "timezone",
+    "user_google_email"
+  ],
+  "modify_gmail_message_labels": [
+    "add_label_ids",
+    "message_id",
+    "remove_label_ids",
+    "user_google_email"
+  ],
+  "modify_sheet_values": [
+    "clear_values",
+    "range_name",
+    "spreadsheet_id",
+    "user_google_email",
+    "value_input_option",
+    "values"
+  ],
+  "move_events_between_calendars": [
+    "delete_from_source",
+    "max_results",
+    "source_calendar_id",
+    "target_calendar_id",
+    "time_max",
+    "time_min",
+    "title_pattern",
+    "user_google_email"
+  ],
+  "photos_batch_details": [
+    "media_item_ids",
+    "user_google_email"
+  ],
+  "photos_optimized_album_sync": [
+    "album_id",
+    "analyze_metadata",
+    "max_items",
+    "user_google_email"
+  ],
+  "photos_performance_stats": [
+    "clear_cache",
+    "user_google_email"
+  ],
+  "photos_smart_search": [
+    "content_categories",
+    "date_end",
+    "date_start",
+    "include_photos",
+    "include_videos",
+    "max_results",
+    "user_google_email"
+  ],
+  "publish_form_publicly": [
+    "anyone_can_respond",
+    "form_id",
+    "share_with_emails",
+    "user_google_email"
+  ],
+  "qdrant_search": [
+    "collection",
+    "dry_run",
+    "filter_dsl",
+    "limit",
+    "negative_point_ids",
+    "positive_point_ids",
+    "prefetch_dsl",
+    "query",
+    "query_dsl",
+    "score_threshold",
+    "user_google_email"
+  ],
+  "read_sheet_values": [
+    "date_time_render_option",
+    "range_name",
+    "spreadsheet_id",
+    "user_google_email",
+    "value_render_option"
+  ],
+  "reply_to_gmail_message": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "html_body",
+    "message_id",
+    "reply_mode",
+    "to",
+    "user_google_email"
+  ],
+  "search_docs": [
+    "page_size",
+    "query",
+    "user_google_email"
+  ],
+  "search_drive_files": [
+    "corpora",
+    "drive_id",
+    "include_items_from_all_drives",
+    "mime_type",
+    "page_size",
+    "query",
+    "user_google_email"
+  ],
+  "search_gmail_messages": [
+    "page_size",
+    "query",
+    "user_google_email"
+  ],
+  "search_messages": [
+    "page_size",
+    "query",
+    "space_id",
+    "user_google_email"
+  ],
+  "search_photos": [
+    "album_id",
+    "content_categories",
+    "date_end",
+    "date_start",
+    "max_results",
+    "user_google_email"
+  ],
+  "search_tool_history": [
+    "limit",
+    "query",
+    "tool_name",
+    "user_email",
+    "user_google_email"
+  ],
+  "send_dynamic_card": [
+    "card_description",
+    "card_params",
+    "draft_variations",
+    "space_id",
+    "thread_key",
+    "user_google_email",
+    "webhook_url"
+  ],
+  "send_gmail_message": [
+    "bcc",
+    "body",
+    "cc",
+    "content_type",
+    "email_spec",
+    "html_body",
+    "subject",
+    "to",
+    "user_google_email"
+  ],
+  "send_message": [
+    "message_text",
+    "space_id",
+    "thread_key",
+    "user_google_email"
+  ],
+  "set_form_publish_state": [
+    "accepting_responses",
+    "form_id",
+    "user_google_email"
+  ],
+  "set_privacy_mode": [
+    "additional_fields",
+    "mask_content",
+    "mode",
+    "user_google_email"
+  ],
+  "share_drive_files": [
+    "email_addresses",
+    "file_ids",
+    "message",
+    "role",
+    "send_notification",
+    "user_google_email"
+  ],
+  "start_google_auth": [
+    "auth_method",
+    "auto_open_browser",
+    "cross_oauth_password",
+    "service_name",
+    "show_service_selection",
+    "user_google_email"
+  ],
+  "update_form_questions": [
+    "form_id",
+    "questions_to_update",
+    "user_google_email"
+  ],
+  "update_slide_content": [
+    "presentation_id",
+    "requests",
+    "user_google_email"
+  ],
+  "upload_folder_photos": [
+    "album_id",
+    "create_album",
+    "folder_path",
+    "recursive",
+    "user_google_email"
+  ],
+  "upload_photos": [
+    "album_id",
+    "create_album",
+    "description",
+    "file_paths",
+    "user_google_email"
+  ],
+  "upload_to_drive": [
+    "filename",
+    "folder_id",
+    "path",
+    "user_google_email"
+  ],
+  "verify_payment": [
+    "chain_id",
+    "payment_payload_b64",
+    "tx_hash",
+    "user_google_email"
+  ]
+}

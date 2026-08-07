@@ -575,7 +575,12 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
     # Register the search_drive_files tool (module-level function)
     mcp.tool(
         name="search_drive_files",
-        description="Search Google Drive files with easy file type filtering. Use mime_type parameter for simple filtering (PDF, GOOGLE_DOCS, EXCEL, etc.) or query parameter for advanced Google Drive Query Language searches.",
+        description=(
+            "Search all of Google Drive: name/content queries via Drive Query Language plus simple mime_type filters (PDF, GOOGLE_DOCS, EXCEL, ...).\n"
+            "Use when: searching across file types or by content. To find Google Docs by title only, search_docs is simpler; to read a hit, pass its id to get_drive_file_content.\n"
+            "Behavior: read-only; supports shared drives.\n"
+            "Returns: files with id, name, mime type, size, and links. Errors: malformed query strings are rejected by the Drive API; auth failure (run start_google_auth)."
+        ),
         tags={
             "drive",
             "search",
@@ -597,7 +602,12 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="get_drive_file_content",
-        description="Retrieve the content of a Google Drive file by ID, supporting multiple formats",
+        description=(
+            "Read any Drive file's content as text: native Docs/Sheets/Slides are exported (text/CSV), Office files are parsed, other types are UTF-8 decoded or flagged as binary.\n"
+            "Use when: reading arbitrary Drive files by id. For Google Docs/.docx specifically, get_doc_content returns structured metadata; find ids first with search_drive_files.\n"
+            "Behavior: read-only; supports shared drives.\n"
+            "Returns: plain text with a metadata header (name, mime type, link). Errors: file not found / no access; binary formats yield a notation instead of content."
+        ),
         tags={"drive", "file", "content", "download", "read"},
         annotations={
             "title": "Get Drive File Content",

@@ -533,12 +533,12 @@ def setup_card_tools(mcp: FastMCP) -> None:
     gitem_sym = symbols.get("GridItem", "ǵ")
 
     tool_description = (
-        "Send cards to Google Chat using DSL notation for precise structure control. "
-        "REQUIRED: Use DSL symbols in card_description to define card structure. "
-        f"Common patterns: {section_sym}[{dtext_sym}] = text card, "
-        f"{section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = text + 2 buttons, "
-        f"{section_sym}[{grid_sym}[{gitem_sym}×4]] = grid with 4 items. "
-        f"{dsl_field_desc}"
+        "Send a rich interactive card (text, buttons, grids, images) to Google Chat, structured with DSL symbols in card_description.\n"
+        "Use when: content needs layout or interactivity. For plain text messages, use send_message instead.\n"
+        f"Canonical example: {section_sym}[{dtext_sym}, {btnlist_sym}[{btn_sym}×2]] = one section with text and 2 buttons. "
+        "The full symbol table and worked examples live in this tool's annotations (dsl_documentation, examples) and the card_description parameter help — don't guess symbols.\n"
+        "Behavior: posts immediately via webhook (default) or Chat API (space_id); not idempotent — repeated calls post duplicate cards. Without DSL symbols the card degrades to plain text. draft_variations=true sends 3 design drafts to a shared thread instead of the original card.\n"
+        "Returns: delivery result with card type, thread key, and validation status. Errors: invalid DSL fails validation before anything is sent; webhook or Chat-API auth failures are reported per delivery method."
     )
 
     # Build dynamic field help - DSL is primary, NL is fallback

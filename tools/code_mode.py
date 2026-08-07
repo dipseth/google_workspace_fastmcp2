@@ -283,9 +283,11 @@ class EnhancedSandboxProvider(MontySandboxProvider):
 
 # Description shown to LLMs for the execute tool — documents every available helper.
 EXECUTE_DESCRIPTION = (
-    "Chain `await call_tool(...)` calls in one Python block; prefer returning the final answer from a single block.\n"
-    "Use `return` to produce output.\n"
-    "Only `call_tool(tool_name: str, params: dict) -> Any` is available in scope.\n"
+    "Run sandboxed Python that calls this server's Google Workspace tools via `await call_tool(tool_name, params)`, chaining calls in one block.\n"
+    "Use when: you know which tools to call. To find tool names first use `search` or `tags`; for exact parameters use `get_schema`; to look up past results instead, use `semantic_search`.\n"
+    "Behavior: each call_tool runs the real tool immediately — sends, edits, and deletes take effect; there is no dry-run.\n"
+    "Use `return` to produce output; prefer returning the final answer from a single block.\n"
+    "Only `call_tool(tool_name: str, params: dict) -> Any` is available in scope. Unknown tool names raise NotFoundError; disallowed syntax raises SandboxError.\n"
     "\n"
     "**SANDBOX RESTRICTIONS — these produce SandboxError, avoid them:**\n"
     "- `[*a, *b]` → use `a + b` instead\n"
@@ -423,7 +425,7 @@ def _get_qdrant_dsl_reference() -> str:
 
         lines = ["DSL filter symbols: " + ", ".join(filter_syms)]
         if query_syms:
-            lines.append("Advanced query symbols: " + ", ".join(query_syms))
+            lines.append("Query-DSL symbols: " + ", ".join(query_syms))
 
         # Build dynamic examples from actual symbols
         f_sym = symbols.get("Filter", "")
@@ -475,7 +477,7 @@ class SemanticSearch:
             ] = None,
             query_dsl: Annotated[
                 str | None,
-                "Advanced query DSL for recommend, discover, fusion, or order-by queries",
+                "Query DSL for recommend, discover, fusion, or order-by queries",
             ] = None,
             prefetch_dsl: Annotated[
                 str | None,
@@ -572,16 +574,19 @@ class SemanticSearch:
         # Dynamic docstring — symbols generated from wrapper, never hardcoded
         dsl_ref = _get_qdrant_dsl_reference()
         semantic_search.__doc__ = (
-            "Search the Qdrant vector database.\n\n"
-            "Supports multiple search modes:\n"
-            "- Semantic: natural language query matched by embedding similarity\n"
-            "- Service history: 'service:gmail last week', 'tool:search recent'\n"
-            "- Analytics: 'overview', 'dashboard', 'usage stats'\n"
-            "- DSL filter: filter_dsl for precise structured filtering\n"
-            "- Recommendation: find similar via positive/negative point IDs\n"
-            "- Advanced: query_dsl for fusion, discover, order-by queries\n"
-            "- Multi-stage: prefetch_dsl for hierarchical retrieval\n\n"
-            "Returns point IDs usable with fetch_document for content preview.\n"
+            "Search the Qdrant vector store of this server's past tool responses and card templates.\n\n"
+            "Use when: looking up previous results, usage history, or analytics "
+            "('service:gmail last week', 'tool:search recent', 'overview'). "
+            "For discovering tools to call, use search; to preview one stored document, "
+            "pass its point ID to fetch_document.\n\n"
+            "Modes: semantic text similarity; service/tool history queries; analytics "
+            "('overview', 'usage stats'); filter_dsl for structured filters; "
+            "positive/negative point IDs for recommendation; query_dsl for "
+            "fusion/discover/order-by; prefetch_dsl for multi-stage retrieval.\n\n"
+            "Behavior: read-only against the local Qdrant instance; no Google APIs are called.\n"
+            "Returns: scored rows 'score service/tool timestamp id:<point_id>'.\n"
+            "Errors: 'Search failed' when Qdrant is unreachable; 'No results' when nothing "
+            "clears score_threshold (default 0.3 — lower it to widen the net).\n"
             + (f"\n{dsl_ref}" if dsl_ref else "")
         )
 
@@ -616,11 +621,16 @@ class FetchDocument:
             user_google_email: UserGoogleEmail = None,
             ctx: Context = None,  # type: ignore[assignment]
         ) -> str:
-            """Peek at a stored response by point ID.
+            """Preview one stored tool response by its Qdrant point ID.
 
-            Returns tool name, service, timestamp, arguments, and a
-            truncated content preview. For full content, use fetch in
-            an execute block.
+            Use when: inspecting a hit returned by semantic_search. To find
+            point IDs in the first place, use semantic_search; for the full
+            untruncated content, call the `fetch` tool inside an execute block.
+
+            Behavior: read-only.
+            Returns: tool name, service, timestamp, user, argument count, and
+            the first 500 characters of stored content.
+            Errors: 'Document not found' for unknown or expired point IDs.
             """
             params: dict[str, Any] = {"point_id": point_id}
             if user_google_email:
@@ -687,10 +697,16 @@ class ToolActivity:
             user_google_email: UserGoogleEmail = None,
             ctx: Context = None,  # type: ignore[assignment]
         ) -> str:
-            """Show a dashboard of tool usage activity.
+            """Show usage analytics for this server's tools: call counts, error rates, last-used times.
 
-            Returns which tools have been called, how often, error rates,
-            and sample point IDs for deeper inspection via fetch_document.
+            Use when: answering 'what has been used or failing lately'. To read
+            an individual response, pass a sample point ID to fetch_document;
+            to discover tools to call, use search instead.
+
+            Behavior: read-only aggregation over the Qdrant response store.
+            Returns: a text dashboard grouped by tool_name or user_email, with
+            sample point IDs per group.
+            Errors: 'Analytics failed' when the response store is unreachable.
             """
             params: dict[str, Any] = {"summary_only": True, "group_by": group_by}
             if user_google_email:
@@ -759,6 +775,70 @@ class ToolActivity:
 # ---------------------------------------------------------------------------
 
 
+class _DescribedFactory:
+    """Wrap a discovery-tool factory to override the built Tool's description.
+
+    The upstream factories (``GetTags``, ``Search``, ``GetSchemas``) take their
+    descriptions from inner-function docstrings with no override hook, so we
+    patch the ``Tool`` after construction.
+    """
+
+    def __init__(self, factory: Any, description: str) -> None:
+        self._factory = factory
+        self._description = description
+
+    def __call__(self, get_catalog: GetToolCatalog) -> Tool:
+        tool = self._factory(get_catalog)
+        try:
+            tool.description = self._description
+        except (AttributeError, TypeError, ValueError):
+            tool = tool.model_copy(update={"description": self._description})
+        return tool
+
+
+TAGS_DESCRIPTION = (
+    "List this server's tool tags (service areas like gmail, drive, docs, photos) with tool counts.\n"
+    "Use when: browsing what capability areas exist before a targeted lookup. "
+    "For keyword lookup use search; for parameters of known tools use get_schema.\n"
+    "Returns: '- tag (N tools)' lines at detail='brief' (default), or every tool listed under each tag at detail='full'."
+)
+
+SEARCH_DESCRIPTION = (
+    "Find this server's Google Workspace tools by keyword (BM25 over names, descriptions, and tags).\n"
+    "Use when: you don't know the exact tool name yet. To browse by category use tags; "
+    "once you have names, use get_schema for parameters, then execute to call them. "
+    "To search past results rather than tools, use semantic_search.\n"
+    "Returns: matching tools as names + descriptions ('brief', default), parameter markdown "
+    "('detailed'), or complete JSON definitions ('full'). An empty result means no keyword "
+    "match — retry with different terms."
+)
+
+GET_SCHEMA_DESCRIPTION = (
+    "Get parameter schemas for named tools before calling them via execute.\n"
+    "Use when: you already have tool names (from search or tags) and need exact parameters. "
+    "Not for discovery — use search for that.\n"
+    "Returns: per-tool parameter markdown ('detailed', default), names + descriptions "
+    "('brief'), or full JSON schemas ('full'); unknown names are reported under "
+    "'Tools not found'."
+)
+
+
+def get_discovery_tool_factories() -> list[Any]:
+    """Return the discovery-tool factories used by Code Mode.
+
+    Shared by ``setup_code_mode`` and ``scripts/lint_tool_descriptions.py``
+    so the lint checks the exact tools the server registers.
+    """
+    return [
+        _DescribedFactory(GetTags(), TAGS_DESCRIPTION),
+        _DescribedFactory(Search(default_limit=10), SEARCH_DESCRIPTION),
+        _DescribedFactory(GetSchemas(), GET_SCHEMA_DESCRIPTION),
+        SemanticSearch(),
+        FetchDocument(),
+        ToolActivity(),
+    ]
+
+
 def setup_code_mode(mcp: FastMCP) -> None:
     """Register the CodeMode transform on *mcp*.
 
@@ -772,14 +852,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
     """
     code_mode = CodeMode(
         sandbox_provider=EnhancedSandboxProvider(),
-        discovery_tools=[
-            GetTags(),
-            Search(default_limit=10),
-            GetSchemas(),
-            SemanticSearch(),
-            FetchDocument(),
-            ToolActivity(),
-        ],
+        discovery_tools=get_discovery_tool_factories(),
         execute_description=EXECUTE_DESCRIPTION,
     )
 
