@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -436,6 +437,28 @@ def _synthesize_query(components: List[str], domain_config: Any) -> str:
     return f"Create a card that has {comp_text}"
 
 
+@contextmanager
+def _pinned_feature_version(wrapper: Any, model_meta: dict):
+    """Pin the wrapper's feature pipeline to the slot checkpoint's version.
+
+    The wrapper's feature pipeline emits the version its OWN search model
+    was loaded with (class default V1/9D when none is loaded). The slot
+    model needs its checkpoint's version, so pin it for the duration of
+    scoring and restore afterwards.
+    """
+    feature_version = int(model_meta.get("feature_version", 5) or 5)
+    had_own_version = "_learned_feature_version" in wrapper.__dict__
+    prev_version = wrapper.__dict__.get("_learned_feature_version")
+    wrapper._learned_feature_version = feature_version
+    try:
+        yield
+    finally:
+        if had_own_version:
+            wrapper._learned_feature_version = prev_version
+        else:
+            wrapper.__dict__.pop("_learned_feature_version", None)
+
+
 def _structure_aware_scores(
     embeddings: Any,
     demands: Dict[str, int],
@@ -490,17 +513,9 @@ def _structure_aware_scores(
         if not query_colbert or not query_minilm:
             return None
 
-        # The wrapper's feature pipeline emits the version its OWN search
-        # model was loaded with (class default V1/9D when none is loaded).
-        # The pool head needs the slot checkpoint's version, so pin it for
-        # the duration of scoring and restore afterwards.
         model_meta = _model_meta_for(getattr(domain_config, "domain_id", None), model)
-        feature_version = int(model_meta.get("feature_version", 5) or 5)
         structural_dim = getattr(model, "structural_dim", 17)
-        had_own_version = "_learned_feature_version" in wrapper.__dict__
-        prev_version = wrapper.__dict__.get("_learned_feature_version")
-        wrapper._learned_feature_version = feature_version
-        try:
+        with _pinned_feature_version(wrapper, model_meta):
             n_items = embeddings.shape[0]
             scores = base_scores.clone()
             for i in range(n_items):
@@ -537,11 +552,6 @@ def _structure_aware_scores(
                         pool_best[pool_id] = val
                 for pool_id, val in pool_best.items():
                     scores[i, pool_id] = val
-        finally:
-            if had_own_version:
-                wrapper._learned_feature_version = prev_version
-            else:
-                wrapper.__dict__.pop("_learned_feature_version", None)
         logger.debug(
             f"🧠 Structural slot scoring: {n_items} items × {len(comp_names)} components"
         )
@@ -551,6 +561,217 @@ def _structure_aware_scores(
             f"Structural slot scoring unavailable ({e}) — using text-only scores"
         )
         return None
+
+
+# Per-domain component content prototypes: domain_id -> {component: unit tensor}
+_prototype_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _model_domain_config_for(domain_id: Optional[str]):
+    """The checkpoint-resolved DomainConfig serving this domain, if loaded.
+
+    Registry configs carry pool structure only; content knowledge
+    (real_content, templates, affinity) rides on checkpoint metadata and
+    is only present on the config resolved at model load.
+    """
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry:
+            return entry[3]
+    return _cached_domain_config
+
+
+def _component_content_prototypes(
+    domain_config: Any, wrapper: Any = None
+) -> Optional[Dict[str, Any]]:
+    """Mean-pooled MiniLM prototypes of each component's content exemplars.
+
+    Sources, per component: harvested real_content, content_templates, and
+    the content_affinity keyword patterns. Cached per domain for the
+    process lifetime. Components with no exemplars get no prototype.
+    """
+    domain_id = getattr(domain_config, "domain_id", "default")
+    cached = _prototype_cache.get(domain_id)
+    if cached is not None:
+        return cached
+
+    real = getattr(domain_config, "real_content", {}) or {}
+    templates = getattr(domain_config, "content_templates", {}) or {}
+    affinity = getattr(domain_config, "content_affinity", {}) or {}
+
+    protos: Dict[str, Any] = {}
+    for comp in getattr(domain_config, "component_to_pool", {}):
+        texts = list(real.get(comp, [])) + list(templates.get(comp, []))
+        patterns = (affinity.get(comp) or {}).get("patterns")
+        if patterns:
+            texts.append(", ".join(patterns))
+        if not texts:
+            continue
+        emb = _embed_texts(texts, wrapper)
+        if emb is None:
+            return None
+        proto = emb.mean(dim=0)
+        norm = proto.norm()
+        if norm > 1e-9:
+            protos[comp] = proto / norm
+
+    _prototype_cache[domain_id] = protos
+    return protos
+
+
+def score_items_for_components(
+    items: List[Any],
+    components: List[str],
+    wrapper: Any = None,
+    domain_config: Any = None,
+) -> Optional[List[List[float]]]:
+    """Score each item against each *specific component*, not just its pool.
+
+    Resolves the ambiguity pool-level routing cannot: two demanded
+    components sharing a pool (e.g. HeaderBlock and FooterBlock, both
+    chrome) are indistinguishable to the pool head, so which one consumes
+    an item is decided by ordering accidents. Each (item, component) score
+    is the cosine between the item's text embedding and the component's
+    content prototype — the mean embedding of its harvested real-content
+    exemplars and templates, carried on checkpoint metadata.
+
+    (The model's content/form heads were measured at chance on this task —
+    per-component score bias swamps them — so prototypes, not heads.)
+
+    Returns an [n_items][n_components] matrix (rows follow ``items``,
+    columns follow ``components``), or None when component-level scoring is
+    not possible (no prototypes for a requested component, no usable text,
+    no embedder) — callers should fall back to pool-level routing.
+    """
+    try:
+        import torch
+
+        if not items or not components:
+            return None
+
+        domain = domain_config if domain_config is not None else _get_domain_config()
+        domain_id = getattr(domain, "domain_id", None)
+        # Ensure the checkpoint (and its content knowledge) is loaded, then
+        # prefer the checkpoint-resolved config over the registry one.
+        _load_slot_model(domain_id)
+        knowledge = _model_domain_config_for(domain_id) or domain
+        if getattr(knowledge, "domain_id", None) != domain_id:
+            knowledge = domain
+
+        protos = _component_content_prototypes(knowledge, wrapper)
+        if not protos:
+            return None
+        missing = [c for c in components if c not in protos]
+        if missing:
+            logger.debug(f"No content prototypes for {missing} — pool-level fallback")
+            return None
+
+        texts = [_extract_item_text(it) for it in items]
+        if not any(texts):
+            return None
+        emb = _embed_texts([t or " " for t in texts], wrapper)
+        if emb is None:
+            return None
+        emb = emb / emb.norm(dim=1, keepdim=True).clamp_min(1e-9)
+
+        cols = torch.stack([protos[c] for c in components])
+        matrix = (emb @ cols.T).tolist()
+        logger.debug(
+            f"🧠 Component-level scoring: {len(items)} items × "
+            f"{len(components)} components"
+        )
+        return matrix
+    except Exception as e:
+        logger.debug(f"Component-level scoring unavailable ({e}) — pool-level fallback")
+        return None
+
+
+def assign_items_to_components(
+    items: List[Any],
+    component_demands: Dict[str, int],
+    wrapper: Any = None,
+    domain_config: Any = None,
+) -> Optional[Dict[str, List[Any]]]:
+    """Assign items to specific demanded components via content prototypes.
+
+    Solves a small max-cardinality, max-total-score matching over
+    (item, capacity-slot) pairs. Absolute cosine levels differ per
+    component (prototype tightness), but a per-component offset is
+    constant across the column and cancels in the assignment total — so
+    the optimal matching needs no normalization, and per-item preference
+    margins survive intact (z-scoring collapses them to ±1 at n=2;
+    mean-centering lets wide-spread columns dominate). Oversized inputs
+    fall back to greedy, where the bias is second-order for cosines.
+
+    Returns {component: [items]} (best matches first, unfilled components
+    map to fewer/no items), or None when component-level scoring is
+    unavailable — callers should fall back to pool-level routing.
+    """
+    components = [c for c, n in component_demands.items() if n > 0]
+    if not components or not items:
+        return None
+
+    matrix = score_items_for_components(items, components, wrapper, domain_config)
+    if matrix is None:
+        return None
+
+    n_items = len(matrix)
+    # One slot per unit of demand, tagged with its component column
+    slots = [j for j, c in enumerate(components) for _ in range(component_demands[c])]
+
+    if len(slots) <= 10 and n_items <= 12:
+        pairs = _optimal_assignment(matrix, slots, n_items)
+    else:
+        pairs = {}
+        cells = sorted(
+            ((matrix[i][s], i, k) for i in range(n_items) for k, s in enumerate(slots)),
+            reverse=True,
+        )
+        used_slots: set = set()
+        for _, i, k in cells:
+            if i in pairs or k in used_slots:
+                continue
+            pairs[i] = k
+            used_slots.add(k)
+
+    result: Dict[str, List[Any]] = {c: [] for c in components}
+    assigned = sorted(
+        pairs.items(), key=lambda ik: matrix[ik[0]][slots[ik[1]]], reverse=True
+    )
+    for i, k in assigned:
+        result[components[slots[k]]].append(items[i])
+    return result
+
+
+def _optimal_assignment(
+    matrix: List[List[float]], slots: List[int], n_items: int
+) -> Dict[int, int]:
+    """Max-cardinality, then max-total-score matching via bitmask DP.
+
+    Returns {item_index: slot_index}. Exponential in len(slots) — callers
+    keep it small.
+    """
+    from functools import lru_cache
+
+    m = len(slots)
+
+    @lru_cache(maxsize=None)
+    def solve(i: int, mask: int):
+        if i == n_items:
+            return (0, 0.0, ())
+        best = solve(i + 1, mask)  # leave item i unassigned
+        for k in range(m):
+            if mask & (1 << k):
+                continue
+            cnt, score, pairs = solve(i + 1, mask | (1 << k))
+            cand = (cnt + 1, score + matrix[i][slots[k]], ((i, k),) + pairs)
+            if (cand[0], cand[1]) > (best[0], best[1]):
+                best = cand
+        return best
+
+    _, _, pairs = solve(0, 0)
+    solve.cache_clear()
+    return dict(pairs)
 
 
 def _pin_policy() -> Tuple[str, float]:

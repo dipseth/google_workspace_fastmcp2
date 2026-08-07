@@ -37,6 +37,10 @@ class DomainConfig:
     content_affinity: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     content_templates: Dict[str, List[str]] = field(default_factory=dict)
     confusion_pairs: List[tuple] = field(default_factory=list)
+    # Harvested real content exemplars, keyed by component name. Rides on
+    # checkpoint metadata (research trains with it; production reads it via
+    # from_checkpoint) and powers per-component content prototypes.
+    real_content: Dict[str, List[str]] = field(default_factory=dict)
 
     @property
     def pool_names(self) -> Dict[int, str]:
@@ -98,6 +102,7 @@ class DomainConfig:
             content_affinity=checkpoint.get("content_affinity", {}),
             content_templates=checkpoint.get("content_templates", {}),
             confusion_pairs=[tuple(p) for p in checkpoint.get("confusion_pairs", [])],
+            real_content=checkpoint.get("real_content", {}),
         )
 
 

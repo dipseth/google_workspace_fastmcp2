@@ -804,3 +804,102 @@ class TestStructureAwareScores:
                 sa._cached_model_type,
                 sa._cached_domain_config,
             ) = old
+
+
+class TestComponentLevelAssignment:
+    """assign_items_to_components — class-level disambiguation within pools."""
+
+    def test_column_bias_cancelled_by_optimal_matching(self):
+        """A component whose scores run uniformly high must not win every item.
+
+        Raw greedy takes the global max cell (footer text -> HeaderBlock,
+        1.30) and misassigns. Optimal matching compares totals:
+        1.10 + 0.40 beats 0.10 + 1.30, so each text keeps its slot.
+        """
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        matrix = [
+            [1.10, 0.10],  # header text
+            [1.30, 0.40],  # footer text — beats header text in BOTH raw columns
+        ]
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=[row[:] for row in matrix],
+        ):
+            result = assign_items_to_components(
+                ["HEADER TEXT", "footer text"],
+                {"HeaderBlock": 1, "FooterBlock": 1},
+            )
+        assert result == {
+            "HeaderBlock": ["HEADER TEXT"],
+            "FooterBlock": ["footer text"],
+        }
+
+    def test_capacities_respected_and_items_assigned_once(self):
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        matrix = [
+            [0.9, 0.1],
+            [0.8, 0.2],
+            [0.1, 0.9],
+        ]
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=[row[:] for row in matrix],
+        ):
+            result = assign_items_to_components(
+                ["t1", "t2", "cta"],
+                {"TextBlock": 2, "ButtonBlock": 1},
+            )
+        assert sorted(result["TextBlock"]) == ["t1", "t2"]
+        assert result["ButtonBlock"] == ["cta"]
+        assigned = result["TextBlock"] + result["ButtonBlock"]
+        assert len(assigned) == len(set(assigned)) == 3
+
+    def test_unavailable_scoring_returns_none(self):
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=None,
+        ):
+            assert assign_items_to_components(["x"], {"TextBlock": 1}) is None
+
+    def test_no_items_or_demands_returns_none(self):
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        assert assign_items_to_components([], {"TextBlock": 1}) is None
+        assert assign_items_to_components(["x"], {}) is None
+        assert assign_items_to_components(["x"], {"TextBlock": 0}) is None
+
+
+class TestContentPrototypes:
+    """Content prototypes come from checkpoint-carried domain knowledge."""
+
+    def test_registry_domain_without_knowledge_yields_no_prototypes(self):
+        import gchat.card_builder.slot_assignment as sa
+
+        # Registry EMAIL_DOMAIN carries pool structure only.
+        sa._prototype_cache.pop("email", None)
+        protos = sa._component_content_prototypes(EMAIL_DOMAIN, wrapper=None)
+        sa._prototype_cache.pop("email", None)
+        assert protos == {}
+
+    def test_real_content_survives_checkpoint_roundtrip(self):
+        from adapters.domain_config import DomainConfig
+
+        ckpt = {
+            "domain_id": "email",
+            "pool_vocab": dict(EMAIL_DOMAIN.pool_vocab),
+            "component_to_pool": dict(EMAIL_DOMAIN.component_to_pool),
+            "real_content": {"FooterBlock": ["Unsubscribe anytime"]},
+        }
+        config = DomainConfig.from_checkpoint(ckpt)
+        assert config is not None
+        assert config.real_content == {"FooterBlock": ["Unsubscribe anytime"]}
