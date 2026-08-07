@@ -132,7 +132,12 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="photos_smart_search",
-        description="Advanced photo search with smart filtering and optimization",
+        description=(
+            "Search the user's entire Google Photos library by content category (PEOPLE, ANIMALS, FOOD, ...) and/or date range, with photo/video type toggles.\n"
+            "Use when: filtering the whole library. To search within one album, use search_photos with album_id; to list an album's full contents, use list_album_photos.\n"
+            "Behavior: read-only; API responses are cached per user, so repeated identical searches may return cached results.\n"
+            "Returns: matched media items with metadata plus timing/cache stats. Errors: invalid date format (dates must be YYYY-MM-DD) or missing Photos auth (run start_google_auth)."
+        ),
         tags={"photos", "search", "advanced", "optimized", "google"},
         annotations={
             "title": "Smart Photo Search",
@@ -623,7 +628,12 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="photos_optimized_album_sync",
-        description="Efficiently sync and analyze album contents with smart caching",
+        description=(
+            "Fetch one album's contents and summarize its metadata: photo/video counts, years covered, cameras, and file types.\n"
+            "Use when: you need an album overview or statistics. For the raw item list, use list_album_photos; for filtered searches, use search_photos.\n"
+            "Behavior: read-only; processes at most max_items (default 200) — larger albums are truncated without warning; per-user response cache may serve repeated calls.\n"
+            "Returns: analysis counts plus cache-hit statistics. Errors: unknown album_id, or missing Photos auth."
+        ),
         tags={"photos", "album", "sync", "optimized", "google"},
         annotations={
             "title": "Optimized Album Sync",
@@ -793,7 +803,12 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="upload_photos",
-        description="Upload one or more photos to Google Photos with batch optimization",
+        description=(
+            "Upload one local photo (string path) or a batch (list of paths) to Google Photos, optionally adding them to an existing album (album_id) or a newly created one (create_album).\n"
+            "Use when: uploading specific files. To upload a whole directory, use upload_folder_photos instead.\n"
+            "Behavior: writes to the user's library; batch items are independent — some can succeed while others fail, and partial success is NOT reported as an error. If create_album fails, uploads continue without an album.\n"
+            "Returns: successful[] and failed[] lists with per-file detail plus totals. Errors: per-file entries in failed[] (missing path, unsupported format, quota); auth failures fail the whole call."
+        ),
         tags={"photos", "upload", "batch", "single", "google"},
         annotations={
             "title": "Upload Photos",
@@ -1035,7 +1050,12 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="upload_folder_photos",
-        description="Upload all photos from a folder (with optional recursion) to Google Photos",
+        description=(
+            "Scan a local folder (recursive by default) for image files and upload them all to Google Photos.\n"
+            "Use when: uploading a directory wholesale. For an explicit list of files, use upload_photos instead.\n"
+            "Behavior: writes to the user's library; files upload independently with partial-failure semantics (some succeed, some fail, no rollback). create_album works; album_id is currently NOT applied — photos land unorganized if only album_id is given.\n"
+            "Returns: per-file results with success/failure counts and any created album id. Errors: nonexistent folder path; per-file failures listed individually."
+        ),
         tags={"photos", "upload", "folder", "batch", "recursive", "google"},
         annotations={
             "title": "Upload Folder Photos",

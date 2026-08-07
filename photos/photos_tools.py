@@ -221,7 +221,12 @@ def setup_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="search_photos",
-        description="Search for photos in Google Photos using filters",
+        description=(
+            "Search Google Photos by content category and/or date range, optionally scoped to one album via album_id.\n"
+            "Use when: filtering photos inside a specific album, or simple library filters. To list an entire album unfiltered, use list_album_photos; for library-wide search with photo/video toggles and cached performance, use photos_smart_search.\n"
+            "Behavior: read-only.\n"
+            "Returns: matching photos with metadata and URLs (max_results caps output, default 25). Errors: invalid YYYY-MM-DD dates, unknown album_id, or missing Photos auth."
+        ),
         tags={"photos", "search", "filter", "google"},
         annotations={
             "title": "Search Google Photos",
@@ -382,7 +387,12 @@ def setup_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="list_album_photos",
-        description="List all photos from a specific album",
+        description=(
+            "List every photo in one Google Photos album, unfiltered.\n"
+            "Use when: you have an album_id and want its full contents. To filter within an album, use search_photos with album_id; for library-wide search, use photos_smart_search.\n"
+            "Behavior: read-only.\n"
+            "Returns: photos with metadata and URLs, capped at max_results (default 50). Errors: unknown album_id or missing Photos auth."
+        ),
         tags={"photos", "album", "list", "google"},
         annotations={
             "title": "List Album Photos",

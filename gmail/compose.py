@@ -3758,10 +3758,12 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     )
 
     compose_tool_description = (
-        "Compose responsive HTML emails using DSL notation for block structure. "
-        f"Common patterns: {spec_sym}[{hero_sym}, {text_sym}] = hero + text, "
-        f"{spec_sym}[{hero_sym}, {text_sym}x2, {btn_sym}] = hero + 2 text blocks + button. "
-        f"{email_dsl_field_desc}"
+        "Compose a responsive HTML (MJML) email from DSL block notation, then save it as a Gmail draft or send it.\n"
+        "Use when: the email needs styled layout (hero, buttons, sections). For plain-text or simple HTML mail, use send_gmail_message instead.\n"
+        f"Canonical example: {spec_sym}[{hero_sym}, {text_sym}] = hero + text block. "
+        "The full symbol table and worked examples live in this tool's annotations (dsl_documentation, examples) and the email_description parameter help — don't guess symbols.\n"
+        "Behavior: action='draft' (default) only creates a draft; action='send' delivers immediately to to/cc/bcc with no confirmation step. Not idempotent — repeated sends deliver duplicates.\n"
+        "Returns: message/draft id and delivery status. Errors: missing DSL notation in email_description fails before any send; invalid recipients or Gmail auth failures are reported per attempt."
     )
 
     email_description_help = (

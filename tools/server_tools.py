@@ -586,7 +586,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="health_check",
-        description="Check server health and configuration",
+        description=(
+            "Report this MCP server's runtime status: OAuth configuration and migration state, active credential sessions, and enabled feature flags.\n"
+            "Use when: diagnosing auth problems or confirming server configuration. For a specific user's credential storage details, use manage_credentials with action='status'; to verify Drive access works end-to-end, use check_drive_auth.\n"
+            "Behavior: read-only; touches no Google APIs.\n"
+            "Returns: structured health status (oauth status, session counts, configuration summary). Errors: none expected — degraded subsystems are reported in the response body."
+        ),
         tags={"server", "health", "monitoring", "status", "system"},
         annotations={
             "title": "Server Health Check",
@@ -618,7 +623,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="manage_credentials",
-        description="Manage credential storage and security settings",
+        description=(
+            "Inspect or change how one user's Google OAuth credentials are stored: 'status' and 'summary' report state, 'migrate' moves between storage modes (FILE_PLAINTEXT, FILE_ENCRYPTED, MEMORY_ONLY, MEMORY_WITH_BACKUP), 'delete' removes stored credentials.\n"
+            "Use when: auditing or changing credential storage. For overall server health, use health_check; to (re)authenticate a user, use start_google_auth.\n"
+            "Behavior: DESTRUCTIVE for action='delete' — the user's stored credentials are permanently removed with no undo, and they must re-run start_google_auth. 'migrate' rewrites credentials into the new mode; MEMORY_ONLY modes do not survive a server restart.\n"
+            "Returns: structured result with the action outcome and current storage mode. Errors: no credentials found for the email; invalid new_storage_mode when action='migrate'."
+        ),
         tags={"credentials", "security", "migration", "management", "storage"},
         annotations={
             "title": "Credential Management",
