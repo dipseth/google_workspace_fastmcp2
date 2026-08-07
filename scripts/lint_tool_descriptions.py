@@ -22,6 +22,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -175,4 +176,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Hard-exit to skip interpreter teardown: importing `server` loads C++
+    # extensions (qdrant-client, tokenizers) that abort with SIGABRT (exit
+    # 134) during normal shutdown, which would fail CI after a passing lint.
+    os._exit(rc)
