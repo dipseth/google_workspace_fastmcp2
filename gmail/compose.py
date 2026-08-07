@@ -592,6 +592,118 @@ _CLASS_TO_BLOCK_TYPE = {
 }
 
 
+# Where rerouted text lands when a block class has no plain "text" field.
+_PRIMARY_TEXT_FIELD = {
+    "HeroBlock": "title",
+    "HeaderBlock": "title",
+    "ImageBlock": "alt",
+}
+
+
+def _params_entry_items(entry) -> list:
+    """Flatten a normalized_params entry into its list of item dicts."""
+    if not isinstance(entry, dict):
+        return []
+    items = entry.get("_items")
+    if isinstance(items, list):
+        shared = entry.get("_shared", {})
+        return [{**shared, **item} for item in items if isinstance(item, dict)]
+    return [entry]
+
+
+def _reroute_orphan_params(parse_result, normalized_params: dict) -> dict:
+    """Route surplus/misplaced param items into unfilled DSL slots via TRM.
+
+    The zipper in ``_build_email_spec_from_dsl`` consumes params per class:
+    anything supplied beyond a class's DSL demand — or under a class the DSL
+    never demands — is silently dropped, and demanded blocks with no params
+    render empty. Here those orphans go through the email slot model
+    (``EmailBuilder.reassign_slots``): they are pooled by their source
+    class's pool, reassigned against the unfilled demand, and appended to
+    the under-supplied classes so the zipper picks them up naturally.
+
+    No model / no torch degrades to a pool-affinity match; any error leaves
+    the params untouched.
+    """
+    from gmail.mjml_types import _BLOCK_TYPE_MAP
+
+    demands = dict(getattr(parse_result, "component_counts", {}) or {})
+
+    # Classes that can meaningfully absorb rerouted content
+    routable = set(_CLASS_TO_BLOCK_TYPE) - {
+        "ColumnsBlock",
+        "SpacerBlock",
+        "DividerBlock",
+    }
+
+    orphans: list = []  # (item_dict, source_class)
+    deficits: dict = {}
+    for class_name in _CLASS_TO_BLOCK_TYPE:
+        supplied = _params_entry_items(normalized_params.get(class_name))
+        demand = demands.get(class_name, 0)
+        for item in supplied[demand:]:
+            orphans.append((item, class_name))
+        if class_name in routable and demand > len(supplied):
+            deficits[class_name] = demand - len(supplied)
+
+    if not orphans or not deficits:
+        return normalized_params
+
+    from adapters.domain_config import EMAIL_DOMAIN
+    from gmail.email_builder import EmailBuilder
+
+    supply_map: dict = {pool: [] for pool in EMAIL_DOMAIN.pool_vocab}
+    for item, source_class in orphans:
+        pool = EMAIL_DOMAIN.component_to_pool.get(source_class, "content")
+        supply_map[pool].append(item)
+
+    reassigned = EmailBuilder().reassign_slots(supply_map, deficits)
+
+    pool_queues = {pool: list(items) for pool, items in reassigned.items()}
+    result = dict(normalized_params)
+    rescued_total = 0
+    for class_name, deficit in deficits.items():
+        pool = EMAIL_DOMAIN.component_to_pool.get(class_name, "content")
+        queue = pool_queues.get(pool, [])
+        if not queue:
+            continue
+
+        block_type = _CLASS_TO_BLOCK_TYPE[class_name]
+        block_cls = _BLOCK_TYPE_MAP[block_type]
+        allowed = set(block_cls.model_fields)
+        primary = _PRIMARY_TEXT_FIELD.get(class_name, "text")
+
+        rescued = []
+        while queue and len(rescued) < deficit:
+            item = queue.pop(0)
+            if not isinstance(item, dict):
+                item = {"text": str(item)}
+            fitted = {k: v for k, v in item.items() if k in allowed}
+            if primary in allowed and not fitted.get(primary) and item.get("text"):
+                fitted[primary] = item["text"]
+            if fitted:
+                rescued.append(fitted)
+        if not rescued:
+            continue
+        rescued_total += len(rescued)
+
+        entry = result.get(class_name)
+        if isinstance(entry, dict) and isinstance(entry.get("_items"), list):
+            entry = {**entry, "_items": [*entry["_items"], *rescued]}
+        elif isinstance(entry, dict):
+            entry = {"_items": [entry, *rescued]}
+        else:
+            entry = {"_items": rescued}
+        result[class_name] = entry
+
+    if rescued_total:
+        logger.info(
+            f"[compose_dynamic_email] TRM rerouted {rescued_total} orphan "
+            f"param item(s) into unfilled slots: {sorted(deficits)}"
+        )
+    return result
+
+
 def _build_email_spec_from_dsl(
     parse_result,
     email_params: Optional[dict],
@@ -637,6 +749,13 @@ def _build_email_spec_from_dsl(
         else:
             # Pass through (e.g. "subject", "preheader")
             normalized_params[key] = value
+
+    # Reroute surplus/misplaced items into unfilled DSL slots via the
+    # email slot model before the per-class zipper consumes them.
+    try:
+        normalized_params = _reroute_orphan_params(parse_result, normalized_params)
+    except Exception as e:
+        logger.warning(f"[compose_dynamic_email] Orphan rerouting skipped: {e}")
 
     # Track consumption index per class for _items lists
     item_indices: dict = {}

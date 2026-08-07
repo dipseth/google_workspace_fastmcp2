@@ -28,6 +28,12 @@ _cached_model_type: str = ""  # "unified" or "slot"
 _cached_domain_config = None  # DomainConfig resolved from checkpoint
 _model_load_attempted = False
 
+# Per-domain model cache for domains other than the default one above
+# (e.g. "email" when the default resolution chain found the gchat model).
+# domain_id -> (model, checkpoint_meta, model_type, domain_config)
+_domain_model_cache: Dict[str, tuple] = {}
+_domain_load_attempted: set = set()
+
 
 def _extract_item_text(item: Any) -> str:
     """Extract text from a supply_map item (dict or string)."""
@@ -71,7 +77,129 @@ def _get_domain_config():
     return GCHAT_DOMAIN
 
 
-def _load_slot_model():
+def _load_slot_model(domain_id: Optional[str] = None):
+    """Load the slot model, optionally for a specific domain.
+
+    Without ``domain_id`` (or when the default cache already holds a model
+    for that domain), this uses the legacy default resolution chain below.
+    With a ``domain_id`` the default cache doesn't satisfy, resolution is
+    strictly per-domain (see ``_load_domain_slot_model``) — one domain's
+    checkpoint is never served to another.
+    """
+    if domain_id:
+        default_model = _load_default_slot_model()
+        if (
+            default_model is not None
+            and getattr(_cached_domain_config, "domain_id", None) == domain_id
+        ):
+            return default_model
+        return _load_domain_slot_model(domain_id)
+    return _load_default_slot_model()
+
+
+def _load_domain_slot_model(domain_id: str):
+    """Load a UnifiedTRN checkpoint for one specific domain.
+
+    Resolution: MODEL_ARTIFACT_URI artifact registered under this exact
+    domain key, then a UNIFIED_TRN_CHECKPOINT_<DOMAIN> env override. A
+    checkpoint whose own domain_id disagrees with the request is refused —
+    the domain then runs on heuristics rather than a foreign model.
+    """
+    if domain_id in _domain_load_attempted:
+        entry = _domain_model_cache.get(domain_id)
+        return entry[0] if entry else None
+
+    _domain_load_attempted.add(domain_id)
+
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    path = None
+    try:
+        from lifespans import get_model_artifact_paths
+
+        artifact_paths = get_model_artifact_paths()
+        if artifact_paths and domain_id in artifact_paths:
+            candidate = artifact_paths[domain_id]
+            if Path(candidate).exists():
+                path = candidate
+    except ImportError:
+        pass
+
+    if not path:
+        path = os.environ.get(f"UNIFIED_TRN_CHECKPOINT_{domain_id.upper()}")
+
+    if not path or not Path(path).exists():
+        logger.debug(
+            f"No checkpoint for domain '{domain_id}' — refusing to fall back to "
+            "another domain's model; slot assignment disabled for this domain"
+        )
+        return None
+
+    try:
+        from adapters.unified_trn import UnifiedTRN
+
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+
+        ckpt_domain = checkpoint.get("domain_id")
+        if ckpt_domain and ckpt_domain != domain_id:
+            logger.warning(
+                f"Checkpoint at {path} declares domain_id={ckpt_domain!r} but was "
+                f"requested for domain {domain_id!r} — refusing to serve a "
+                "cross-domain model; slot assignment falls back to heuristics. "
+                "Re-publish the correct artifact under this domain's key."
+            )
+            return None
+
+        model = UnifiedTRN(
+            structural_dim=checkpoint.get("structural_dim", 17),
+            content_dim=checkpoint.get("content_dim", 384),
+            hidden=checkpoint.get("hidden", 64),
+            n_pools=checkpoint.get("n_pools", 5),
+            dropout=0.0,
+        )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+
+        from adapters.domain_config import resolve_domain
+
+        domain_cfg = resolve_domain(checkpoint=checkpoint)
+        _domain_model_cache[domain_id] = (model, checkpoint, "unified", domain_cfg)
+
+        pool_acc = checkpoint.get("best_pool_acc", checkpoint.get("val_pool_acc", 0))
+        content_acc = checkpoint.get("best_content_top1", 0)
+        logger.info(
+            f"Loaded UnifiedTRN for domain '{domain_id}' "
+            f"(epoch {checkpoint.get('epoch')}, pools={domain_cfg.n_pools}, "
+            f"pool={pool_acc:.1%}, content={content_acc:.1%})"
+        )
+        return model
+    except Exception as e:
+        logger.warning(f"Failed to load slot model for domain '{domain_id}': {e}")
+        return None
+
+
+def _model_type_for(domain_id: Optional[str], model: Any) -> str:
+    """Model type ("unified"/"slot") for the model serving this domain."""
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry and entry[0] is model:
+            return entry[2]
+    return _cached_model_type
+
+
+def _model_meta_for(domain_id: Optional[str], model: Any) -> dict:
+    """Checkpoint metadata for the model serving this domain."""
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry and entry[0] is model:
+            return entry[1]
+    return _cached_model_meta
+
+
+def _load_default_slot_model():
     """Load UnifiedTRN (preferred) or SlotAffinityNet from checkpoint.
 
     Checks for UNIFIED_TRN_CHECKPOINT / SLOT_ASSIGNER_CHECKPOINT env vars,
@@ -366,7 +494,8 @@ def _structure_aware_scores(
         # model was loaded with (class default V1/9D when none is loaded).
         # The pool head needs the slot checkpoint's version, so pin it for
         # the duration of scoring and restore afterwards.
-        feature_version = int(_cached_model_meta.get("feature_version", 5) or 5)
+        model_meta = _model_meta_for(getattr(domain_config, "domain_id", None), model)
+        feature_version = int(model_meta.get("feature_version", 5) or 5)
         structural_dim = getattr(model, "structural_dim", 17)
         had_own_version = "_learned_feature_version" in wrapper.__dict__
         prev_version = wrapper.__dict__.get("_learned_feature_version")
@@ -558,9 +687,13 @@ def reassign_supply_map(
 
     VOCAB, COMP_TO_POOL, SPEC_ORDER = _get_constants(domain_config)
 
-    model = _load_slot_model()
+    requested_domain = (
+        getattr(domain_config, "domain_id", None) if domain_config is not None else None
+    )
+    model = _load_slot_model(requested_domain)
     if model is None:
         return supply_map
+    model_type = _model_type_for(requested_domain, model)
 
     # Flatten all items from all pools (domain-driven pool keys)
     all_items: List[Tuple[Any, str]] = []  # (item, source_pool)
@@ -588,7 +721,7 @@ def reassign_supply_map(
 
     # Score all items against all slot types
     with torch.no_grad():
-        if _cached_model_type == "unified":
+        if model_type == "unified":
             # UnifiedTRN: use pool_head in build mode. Text-only baseline
             # first (zero structural features), then upgrade to
             # structure-aware scores when the wrapper can provide the same
