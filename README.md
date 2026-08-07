@@ -239,6 +239,33 @@ Each connection gets its own **isolated session** with only the requested servic
 
 > See [URL-Based Service Filtering](#-url-based-service-filtering-http-transport) for the full list of query parameters.
 
+### 🤖 Claude Code & Claude Desktop
+
+**Claude Code (CLI)** — one command, using the published PyPI package:
+
+```bash
+# Local stdio (recommended): uvx fetches and runs the server on demand
+claude mcp add google-workspace -- uvx google-workspace-unlimited
+
+# Or connect to an already-running HTTP server
+claude mcp add --transport http google-workspace https://localhost:8002/mcp
+```
+
+**Claude Desktop (local dev path)** — add to `claude_desktop_config.json` (Settings → Developer → Edit Config):
+
+```json
+{
+  "mcpServers": {
+    "google-workspace-unlimited": {
+      "command": "uvx",
+      "args": ["google-workspace-unlimited"]
+    }
+  }
+}
+```
+
+**Claude.ai / Claude Desktop (hosted connector)** — run the server behind a public HTTPS endpoint (e.g. a Cloudflare or ngrok tunnel), then add it under **Settings → Connectors → Add custom connector** with your `https://your-domain/mcp` URL. The server's OAuth 2.1 + PKCE flow handles authentication, including the `https://claude.ai/api/mcp/auth_callback` redirect. See the [Claude.ai Integration Guide](documentation/config/claude_ai_integration_guide.md) for the full walkthrough.
+
 ### 📚 Complete Connection Guide
 
 For detailed setup instructions, troubleshooting, and configurations for all supported clients including:
