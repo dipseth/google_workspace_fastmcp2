@@ -362,34 +362,57 @@ def _structure_aware_scores(
         if not query_colbert or not query_minilm:
             return None
 
-        n_items = embeddings.shape[0]
-        scores = base_scores.clone()
-        for i in range(n_items):
-            item_emb = embeddings[i]
-            features_list, _ = wrapper._compute_learned_features(
-                points,
-                query_colbert,
-                query_minilm,
-                component_paths=comp_names,
-                query_content_minilm=item_emb.tolist(),
-            )
-            feats = torch.tensor(features_list, dtype=torch.float32)
-            item_batch = item_emb.unsqueeze(0).expand(len(comp_names), -1)
-            with torch.no_grad():
-                logits = model(feats, item_batch, mode="build")["pool_logits"]
-            # Per demanded pool: max over that pool's demanded components.
-            # Pools with no demanded component keep the base (text-only) score.
-            pool_best: Dict[int, float] = {}
-            for j, comp in enumerate(comp_names):
-                pool_key = comp_to_pool.get(comp)
-                pool_id = vocab.get(pool_key) if pool_key else None
-                if pool_id is None:
-                    continue
-                val = logits[j, pool_id].item()
-                if pool_id not in pool_best or val > pool_best[pool_id]:
-                    pool_best[pool_id] = val
-            for pool_id, val in pool_best.items():
-                scores[i, pool_id] = val
+        # The wrapper's feature pipeline emits the version its OWN search
+        # model was loaded with (class default V1/9D when none is loaded).
+        # The pool head needs the slot checkpoint's version, so pin it for
+        # the duration of scoring and restore afterwards.
+        feature_version = int(_cached_model_meta.get("feature_version", 5) or 5)
+        structural_dim = getattr(model, "structural_dim", 17)
+        had_own_version = "_learned_feature_version" in wrapper.__dict__
+        prev_version = wrapper.__dict__.get("_learned_feature_version")
+        wrapper._learned_feature_version = feature_version
+        try:
+            n_items = embeddings.shape[0]
+            scores = base_scores.clone()
+            for i in range(n_items):
+                item_emb = embeddings[i]
+                features_list, _ = wrapper._compute_learned_features(
+                    points,
+                    query_colbert,
+                    query_minilm,
+                    component_paths=comp_names,
+                    query_content_minilm=item_emb.tolist(),
+                )
+                if not features_list or len(features_list[0]) != structural_dim:
+                    logger.debug(
+                        f"Structural features are "
+                        f"{len(features_list[0]) if features_list else 0}D, "
+                        f"model expects {structural_dim}D — using text-only scores"
+                    )
+                    return None
+                feats = torch.tensor(features_list, dtype=torch.float32)
+                item_batch = item_emb.unsqueeze(0).expand(len(comp_names), -1)
+                with torch.no_grad():
+                    logits = model(feats, item_batch, mode="build")["pool_logits"]
+                # Per demanded pool: max over that pool's demanded components.
+                # Pools with no demanded component keep the base (text-only)
+                # score.
+                pool_best: Dict[int, float] = {}
+                for j, comp in enumerate(comp_names):
+                    pool_key = comp_to_pool.get(comp)
+                    pool_id = vocab.get(pool_key) if pool_key else None
+                    if pool_id is None:
+                        continue
+                    val = logits[j, pool_id].item()
+                    if pool_id not in pool_best or val > pool_best[pool_id]:
+                        pool_best[pool_id] = val
+                for pool_id, val in pool_best.items():
+                    scores[i, pool_id] = val
+        finally:
+            if had_own_version:
+                wrapper._learned_feature_version = prev_version
+            else:
+                wrapper.__dict__.pop("_learned_feature_version", None)
         logger.debug(
             f"🧠 Structural slot scoring: {n_items} items × {len(comp_names)} components"
         )
