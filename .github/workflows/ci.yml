@@ -55,12 +55,17 @@ jobs:
         run: |
           # Some C++ extensions (qdrant-client, tokenizers) call terminate()
           # during interpreter shutdown, producing exit code 134 (SIGABRT)
-          # even when all tests pass. We treat 134 as success.
-          uv run pytest tests/ -v --tb=short --ignore=tests/client --ignore=tests/content_mapping
+          # even when all tests pass — which also masks pytest's real exit
+          # code. Trust the junit report instead of the exit code: 134 only
+          # counts as success when the report shows zero failures/errors.
+          uv run pytest tests/ -v --tb=short --ignore=tests/client --ignore=tests/content_mapping --junitxml=pytest-report.xml
           rc=$?
-          if [ $rc -eq 0 ] || [ $rc -eq 134 ]; then
-            echo "Tests passed (pytest exit code: $rc)"
+          if [ $rc -eq 0 ]; then
             exit 0
-          else
-            exit $rc
           fi
+          if [ $rc -eq 134 ] && [ -f pytest-report.xml ] && \
+             ! grep -qE '(failures|errors)="[1-9]' pytest-report.xml; then
+            echo "Tests passed (SIGABRT during interpreter shutdown ignored)"
+            exit 0
+          fi
+          exit $rc

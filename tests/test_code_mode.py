@@ -471,12 +471,18 @@ def test_execute_description_documents_all_text_helpers():
 
 
 def test_execute_description_documents_sandbox_restrictions():
-    """LLMs must be warned about starred expressions and lambda keys."""
+    """LLMs must be warned about the restrictions that still exist.
+
+    Starred expressions are supported since pydantic-monty 0.0.17, so the
+    description must NOT warn about them anymore — stale restrictions make
+    the model write worse code.
+    """
     from tools.code_mode import EXECUTE_DESCRIPTION
 
-    assert "[*a, *b]" in EXECUTE_DESCRIPTION, "Missing starred list warning"
-    assert "{**" in EXECUTE_DESCRIPTION, "Missing starred dict warning"
     assert "lambda" in EXECUTE_DESCRIPTION, "Missing lambda key warning"
+    assert "import" in EXECUTE_DESCRIPTION, "Missing import restriction note"
+    assert "[*a, *b]" not in EXECUTE_DESCRIPTION, "Stale starred list warning"
+    assert "{**" not in EXECUTE_DESCRIPTION, "Stale starred dict warning"
 
 
 # =============================================================================
@@ -537,30 +543,28 @@ class TestFormatSandboxError:
 
 
 # =============================================================================
-# EnhancedSandboxProvider.run() — parse-time crash recovery
+# EnhancedSandboxProvider.run() — sandbox capability contract
 # =============================================================================
 # These require pydantic_monty (installed in .venv) and asyncio.
-# They test that starred expressions no longer crash the tool — they return
-# a SandboxError string instead.
+# pydantic-monty >= 0.0.17 parses starred expressions natively, so they
+# evaluate normally; lambdas passed as function arguments still fail and
+# must come back as a SandboxError string (never a raised exception).
 
 
 @pytest.mark.asyncio
-async def test_run_starred_list_returns_error_not_raises():
-    """[*a, *b] must NOT crash the tool — run() must return SandboxError."""
+async def test_run_starred_list_is_supported():
+    """[*a, *b] parses and evaluates on current pydantic-monty."""
     provider = EnhancedSandboxProvider()
     result = await provider.run("a = [1, 2]\nb = [3, 4]\nreturn [*a, *b]")
-    assert isinstance(result, str), f"Expected str, got {type(result)}: {result!r}"
-    assert "SandboxError" in result
-    assert "starred" in result.lower() or "a + b" in result
+    assert result == [1, 2, 3, 4]
 
 
 @pytest.mark.asyncio
-async def test_run_starred_dict_returns_error_not_raises():
-    """{**d1, **d2} must NOT crash the tool."""
+async def test_run_starred_dict_is_supported():
+    """{**d1, **d2} parses and evaluates on current pydantic-monty."""
     provider = EnhancedSandboxProvider()
     result = await provider.run("d1 = {'a': 1}\nd2 = {'b': 2}\nreturn {**d1, **d2}")
-    assert isinstance(result, str)
-    assert "SandboxError" in result
+    assert result == {"a": 1, "b": 2}
 
 
 @pytest.mark.asyncio
@@ -572,26 +576,16 @@ async def test_run_normal_code_unaffected():
 
 
 @pytest.mark.asyncio
-async def test_run_try_except_inside_code_cannot_catch_parse_errors():
-    """Demonstrates why wrapping [*a, *b] in try/except inside the code is useless:
-    the parser fails on the whole file before any try/except can run.
-
-    After the fix, run() itself catches the error and returns SandboxError.
-    The try/except in the code is irrelevant — it never executes.
-    """
+async def test_run_lambda_key_returns_error_not_raises():
+    """Lambdas as function arguments still fail — run() must return a
+    SandboxError string with the workaround hint, never raise."""
     provider = EnhancedSandboxProvider()
-    # This code has [*a, *b] inside a try/except — the try/except is irrelevant
-    # because Monty rejects the whole file at parse time.
     result = await provider.run(
-        "a = [1]\nb = [2]\ntry:\n  r = [*a, *b]\nexcept Exception as e:\n  return 'caught: ' + str(e)"
+        "items = [[2], [1, 1]]\nreturn sorted_(items, key=lambda x: x[0])"
     )
-    # If the try/except worked, result would be "caught: ..."
-    # If run() catches it correctly, result is "SandboxError: ..."
-    assert isinstance(result, str)
-    assert "SandboxError" in result, (
-        "Expected run() to catch the parse error — "
-        "a try/except inside Monty code cannot catch parse-time failures"
-    )
+    assert isinstance(result, str), f"Expected str, got {type(result)}: {result!r}"
+    assert "SandboxError" in result
+    assert "lambda" in result.lower()
 
 
 # =============================================================================
