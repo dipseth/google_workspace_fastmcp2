@@ -2,11 +2,15 @@
 
 import base64
 import json
+import secrets
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import middleware.payment.payment_flow as payment_flow_module
+import middleware.payment.receipt as receipt_module
+from config.settings import settings
 from middleware.payment.constants import X402_TOOL_ARG_KEY
 from middleware.payment.middleware import X402PaymentMiddleware
 from middleware.payment.types import (
@@ -15,6 +19,31 @@ from middleware.payment.types import (
     X402PaymentContext,
 )
 from middleware.payment.verifier import X402Verifier
+
+
+@pytest.fixture(autouse=True)
+def _payment_test_env(tmp_path, monkeypatch):
+    """Make payment tests self-contained and side-effect free.
+
+    - PAYMENT_TESTNET_STUBS: the verifier only accepts the well-known test
+      tx hashes when this is set; without it these tests only pass on
+      machines that happen to export it.
+    - Disable the interactive payment flow: with it enabled, a 402 on a
+      gated tool opens a real browser tab and blocks up to
+      payment_poll_timeout_seconds (300s) awaiting payment.
+    - Provide an isolated .auth_encryption_key: receipt creation inside
+      _cache_payment_in_session requires it; reset the HMAC key caches.
+    """
+    monkeypatch.setenv("PAYMENT_TESTNET_STUBS", "true")
+    monkeypatch.setattr(settings, "payment_auto_open_browser", False)
+    monkeypatch.setattr(settings, "payment_send_email", False)
+    (tmp_path / ".auth_encryption_key").write_text(secrets.token_hex(32))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(receipt_module, "_hmac_key_cache", None)
+    monkeypatch.setattr(payment_flow_module, "_hmac_key_cache", None)
+    yield
+    receipt_module._hmac_key_cache = None
+    payment_flow_module._hmac_key_cache = None
 
 
 def _make_context(tool_name: str, arguments: dict | None = None) -> MagicMock:

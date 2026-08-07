@@ -1,9 +1,11 @@
 """Tests for x402 payment receipt HMAC signing and identity binding."""
 
+import secrets
 from unittest.mock import patch
 
 import pytest
 
+import middleware.payment.receipt as receipt_module
 from middleware.payment.receipt import (
     build_payer_identity,
     compute_receipt_hmac,
@@ -12,6 +14,21 @@ from middleware.payment.receipt import (
     verify_receipt_hmac,
 )
 from middleware.payment.types import PayerIdentity, PaymentReceipt
+
+
+@pytest.fixture(autouse=True)
+def _isolated_receipt_key(tmp_path, monkeypatch):
+    """Receipt HMAC reads .auth_encryption_key from the CWD.
+
+    Give each test an isolated temp key so the suite is self-contained
+    (no dependency on a developer's real key file), and reset the derived
+    HMAC key cache so tests never reuse a key from another CWD.
+    """
+    (tmp_path / ".auth_encryption_key").write_text(secrets.token_hex(32))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(receipt_module, "_hmac_key_cache", None)
+    yield
+    receipt_module._hmac_key_cache = None
 
 
 class TestReceiptHMAC:
