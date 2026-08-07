@@ -4,6 +4,8 @@
 [![pypi](https://img.shields.io/pypi/v/google-workspace-unlimited?color=blue)](https://pypi.org/project/google-workspace-unlimited/)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/dipseth/google_workspace_fastmcp2/blob/main/LICENSE)
 
+[![google_workspace_fastmcp2 MCP server](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2/badges/card.svg)](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2)
+
 **GoogleUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos services using a unified, secure API.
 
 **What sets it apart:**
