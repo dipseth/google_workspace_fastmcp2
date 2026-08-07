@@ -43,6 +43,11 @@ jobs:
         run: uv run python scripts/lint_no_dag_bypass.py
 
       - name: Check tool description quality
+        # HF_HUB_OFFLINE keeps the server import from spawning background
+        # model downloads that outlive this step and corrupt the HF cache
+        # for later steps; the lint only reads tool descriptions.
+        env:
+          HF_HUB_OFFLINE: "1"
         run: uv run python scripts/lint_tool_descriptions.py
 
       - name: Run unit tests
