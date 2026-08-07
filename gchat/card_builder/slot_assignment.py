@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,6 +28,12 @@ _cached_model_meta: dict = {}
 _cached_model_type: str = ""  # "unified" or "slot"
 _cached_domain_config = None  # DomainConfig resolved from checkpoint
 _model_load_attempted = False
+
+# Per-domain model cache for domains other than the default one above
+# (e.g. "email" when the default resolution chain found the gchat model).
+# domain_id -> (model, checkpoint_meta, model_type, domain_config)
+_domain_model_cache: Dict[str, tuple] = {}
+_domain_load_attempted: set = set()
 
 
 def _extract_item_text(item: Any) -> str:
@@ -71,7 +78,129 @@ def _get_domain_config():
     return GCHAT_DOMAIN
 
 
-def _load_slot_model():
+def _load_slot_model(domain_id: Optional[str] = None):
+    """Load the slot model, optionally for a specific domain.
+
+    Without ``domain_id`` (or when the default cache already holds a model
+    for that domain), this uses the legacy default resolution chain below.
+    With a ``domain_id`` the default cache doesn't satisfy, resolution is
+    strictly per-domain (see ``_load_domain_slot_model``) — one domain's
+    checkpoint is never served to another.
+    """
+    if domain_id:
+        default_model = _load_default_slot_model()
+        if (
+            default_model is not None
+            and getattr(_cached_domain_config, "domain_id", None) == domain_id
+        ):
+            return default_model
+        return _load_domain_slot_model(domain_id)
+    return _load_default_slot_model()
+
+
+def _load_domain_slot_model(domain_id: str):
+    """Load a UnifiedTRN checkpoint for one specific domain.
+
+    Resolution: MODEL_ARTIFACT_URI artifact registered under this exact
+    domain key, then a UNIFIED_TRN_CHECKPOINT_<DOMAIN> env override. A
+    checkpoint whose own domain_id disagrees with the request is refused —
+    the domain then runs on heuristics rather than a foreign model.
+    """
+    if domain_id in _domain_load_attempted:
+        entry = _domain_model_cache.get(domain_id)
+        return entry[0] if entry else None
+
+    _domain_load_attempted.add(domain_id)
+
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    path = None
+    try:
+        from lifespans import get_model_artifact_paths
+
+        artifact_paths = get_model_artifact_paths()
+        if artifact_paths and domain_id in artifact_paths:
+            candidate = artifact_paths[domain_id]
+            if Path(candidate).exists():
+                path = candidate
+    except ImportError:
+        pass
+
+    if not path:
+        path = os.environ.get(f"UNIFIED_TRN_CHECKPOINT_{domain_id.upper()}")
+
+    if not path or not Path(path).exists():
+        logger.debug(
+            f"No checkpoint for domain '{domain_id}' — refusing to fall back to "
+            "another domain's model; slot assignment disabled for this domain"
+        )
+        return None
+
+    try:
+        from adapters.unified_trn import UnifiedTRN
+
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+
+        ckpt_domain = checkpoint.get("domain_id")
+        if ckpt_domain and ckpt_domain != domain_id:
+            logger.warning(
+                f"Checkpoint at {path} declares domain_id={ckpt_domain!r} but was "
+                f"requested for domain {domain_id!r} — refusing to serve a "
+                "cross-domain model; slot assignment falls back to heuristics. "
+                "Re-publish the correct artifact under this domain's key."
+            )
+            return None
+
+        model = UnifiedTRN(
+            structural_dim=checkpoint.get("structural_dim", 17),
+            content_dim=checkpoint.get("content_dim", 384),
+            hidden=checkpoint.get("hidden", 64),
+            n_pools=checkpoint.get("n_pools", 5),
+            dropout=0.0,
+        )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+
+        from adapters.domain_config import resolve_domain
+
+        domain_cfg = resolve_domain(checkpoint=checkpoint)
+        _domain_model_cache[domain_id] = (model, checkpoint, "unified", domain_cfg)
+
+        pool_acc = checkpoint.get("best_pool_acc", checkpoint.get("val_pool_acc", 0))
+        content_acc = checkpoint.get("best_content_top1", 0)
+        logger.info(
+            f"Loaded UnifiedTRN for domain '{domain_id}' "
+            f"(epoch {checkpoint.get('epoch')}, pools={domain_cfg.n_pools}, "
+            f"pool={pool_acc:.1%}, content={content_acc:.1%})"
+        )
+        return model
+    except Exception as e:
+        logger.warning(f"Failed to load slot model for domain '{domain_id}': {e}")
+        return None
+
+
+def _model_type_for(domain_id: Optional[str], model: Any) -> str:
+    """Model type ("unified"/"slot") for the model serving this domain."""
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry and entry[0] is model:
+            return entry[2]
+    return _cached_model_type
+
+
+def _model_meta_for(domain_id: Optional[str], model: Any) -> dict:
+    """Checkpoint metadata for the model serving this domain."""
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry and entry[0] is model:
+            return entry[1]
+    return _cached_model_meta
+
+
+def _load_default_slot_model():
     """Load UnifiedTRN (preferred) or SlotAffinityNet from checkpoint.
 
     Checks for UNIFIED_TRN_CHECKPOINT / SLOT_ASSIGNER_CHECKPOINT env vars,
@@ -243,6 +372,408 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
         return None
 
 
+# Cache of class points fetched for structural scoring: (collection, name) → point
+_class_point_cache: Dict[Tuple[str, str], Any] = {}
+
+
+def _fetch_class_points(wrapper: Any, names: List[str]) -> Dict[str, Any]:
+    """Fetch class points (with named vectors) for the given component names.
+
+    Class points carry the components/inputs/relationships/content vectors
+    that structural feature computation needs. Results are cached per
+    (collection, name) for the process lifetime.
+    """
+    client = getattr(wrapper, "client", None)
+    collection = getattr(wrapper, "collection_name", None)
+    if client is None or not collection:
+        return {}
+
+    found: Dict[str, Any] = {}
+    missing: List[str] = []
+    for name in names:
+        cached = _class_point_cache.get((collection, name))
+        if cached is not None:
+            found[name] = cached
+        else:
+            missing.append(name)
+
+    if missing:
+        from qdrant_client import models
+
+        batch, _ = client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="type", match=models.MatchValue(value="class")
+                    ),
+                    models.FieldCondition(
+                        key="name", match=models.MatchAny(any=missing)
+                    ),
+                ]
+            ),
+            limit=len(missing),
+            with_vectors=True,
+            with_payload=True,
+        )
+        for p in batch:
+            name = (p.payload or {}).get("name")
+            if name:
+                _class_point_cache[(collection, name)] = p
+                found[name] = p
+    return found
+
+
+def _synthesize_query(components: List[str], domain_config: Any) -> str:
+    """Build a query description from demanded components.
+
+    Mirrors the synthetic query templates the model trained on
+    ("An email with ...", "Create a card that has ...").
+    """
+    comp_text = ", ".join(components)
+    domain_id = getattr(domain_config, "domain_id", "gchat")
+    if domain_id == "email":
+        return f"An email with {comp_text}"
+    return f"Create a card that has {comp_text}"
+
+
+@contextmanager
+def _pinned_feature_version(wrapper: Any, model_meta: dict):
+    """Pin the wrapper's feature pipeline to the slot checkpoint's version.
+
+    The wrapper's feature pipeline emits the version its OWN search model
+    was loaded with (class default V1/9D when none is loaded). The slot
+    model needs its checkpoint's version, so pin it for the duration of
+    scoring and restore afterwards.
+    """
+    feature_version = int(model_meta.get("feature_version", 5) or 5)
+    had_own_version = "_learned_feature_version" in wrapper.__dict__
+    prev_version = wrapper.__dict__.get("_learned_feature_version")
+    wrapper._learned_feature_version = feature_version
+    try:
+        yield
+    finally:
+        if had_own_version:
+            wrapper._learned_feature_version = prev_version
+        else:
+            wrapper.__dict__.pop("_learned_feature_version", None)
+
+
+def _structure_aware_scores(
+    embeddings: Any,
+    demands: Dict[str, int],
+    wrapper: Any,
+    vocab: Dict[str, int],
+    comp_to_pool: Dict[str, str],
+    model: Any,
+    domain_config: Any,
+    base_scores: Any,
+) -> Optional[Any]:
+    """Score items with real structural context instead of zero features.
+
+    For each demanded component, computes the same 17D candidate-vs-query
+    features the model saw in training (via the wrapper's search-mixin
+    feature pipeline), runs the pool head per (item, component), and takes
+    each item's score for a pool as the max over that pool's demanded
+    components. Pools with no demanded component keep the text-only
+    (zero-structural) score from base_scores.
+
+    Returns a [N, n_pools] tensor, or None when structural scoring is not
+    possible (no wrapper, no class points, any error) — caller falls back
+    to base_scores.
+    """
+    try:
+        import torch
+
+        if wrapper is None:
+            return None
+        for attr in (
+            "_compute_learned_features",
+            "_embed_with_colbert",
+            "_embed_with_minilm",
+        ):
+            if not hasattr(wrapper, attr):
+                return None
+
+        components = [c for c in demands if c in comp_to_pool]
+        if not components:
+            return None
+
+        class_points = _fetch_class_points(wrapper, components)
+        if not class_points:
+            return None
+        comp_names = list(class_points.keys())
+        points = [class_points[c] for c in comp_names]
+
+        description = _synthesize_query(comp_names, domain_config)
+        query_colbert = wrapper._embed_with_colbert(description, 1.0)
+        query_minilm = wrapper._embed_with_minilm(
+            f"{description} components: {', '.join(comp_names)}"
+        )
+        if not query_colbert or not query_minilm:
+            return None
+
+        model_meta = _model_meta_for(getattr(domain_config, "domain_id", None), model)
+        structural_dim = getattr(model, "structural_dim", 17)
+        with _pinned_feature_version(wrapper, model_meta):
+            n_items = embeddings.shape[0]
+            scores = base_scores.clone()
+            for i in range(n_items):
+                item_emb = embeddings[i]
+                features_list, _ = wrapper._compute_learned_features(
+                    points,
+                    query_colbert,
+                    query_minilm,
+                    component_paths=comp_names,
+                    query_content_minilm=item_emb.tolist(),
+                )
+                if not features_list or len(features_list[0]) != structural_dim:
+                    logger.debug(
+                        f"Structural features are "
+                        f"{len(features_list[0]) if features_list else 0}D, "
+                        f"model expects {structural_dim}D — using text-only scores"
+                    )
+                    return None
+                feats = torch.tensor(features_list, dtype=torch.float32)
+                item_batch = item_emb.unsqueeze(0).expand(len(comp_names), -1)
+                with torch.no_grad():
+                    logits = model(feats, item_batch, mode="build")["pool_logits"]
+                # Per demanded pool: max over that pool's demanded components.
+                # Pools with no demanded component keep the base (text-only)
+                # score.
+                pool_best: Dict[int, float] = {}
+                for j, comp in enumerate(comp_names):
+                    pool_key = comp_to_pool.get(comp)
+                    pool_id = vocab.get(pool_key) if pool_key else None
+                    if pool_id is None:
+                        continue
+                    val = logits[j, pool_id].item()
+                    if pool_id not in pool_best or val > pool_best[pool_id]:
+                        pool_best[pool_id] = val
+                for pool_id, val in pool_best.items():
+                    scores[i, pool_id] = val
+        logger.debug(
+            f"🧠 Structural slot scoring: {n_items} items × {len(comp_names)} components"
+        )
+        return scores
+    except Exception as e:
+        logger.debug(
+            f"Structural slot scoring unavailable ({e}) — using text-only scores"
+        )
+        return None
+
+
+# Per-domain component content prototypes: domain_id -> {component: unit tensor}
+_prototype_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _model_domain_config_for(domain_id: Optional[str]):
+    """The checkpoint-resolved DomainConfig serving this domain, if loaded.
+
+    Registry configs carry pool structure only; content knowledge
+    (real_content, templates, affinity) rides on checkpoint metadata and
+    is only present on the config resolved at model load.
+    """
+    if domain_id:
+        entry = _domain_model_cache.get(domain_id)
+        if entry:
+            return entry[3]
+    return _cached_domain_config
+
+
+def _component_content_prototypes(
+    domain_config: Any, wrapper: Any = None
+) -> Optional[Dict[str, Any]]:
+    """Mean-pooled MiniLM prototypes of each component's content exemplars.
+
+    Sources, per component: harvested real_content, content_templates, and
+    the content_affinity keyword patterns. Cached per domain for the
+    process lifetime. Components with no exemplars get no prototype.
+    """
+    domain_id = getattr(domain_config, "domain_id", "default")
+    cached = _prototype_cache.get(domain_id)
+    if cached is not None:
+        return cached
+
+    real = getattr(domain_config, "real_content", {}) or {}
+    templates = getattr(domain_config, "content_templates", {}) or {}
+    affinity = getattr(domain_config, "content_affinity", {}) or {}
+
+    protos: Dict[str, Any] = {}
+    for comp in getattr(domain_config, "component_to_pool", {}):
+        texts = list(real.get(comp, [])) + list(templates.get(comp, []))
+        patterns = (affinity.get(comp) or {}).get("patterns")
+        if patterns:
+            texts.append(", ".join(patterns))
+        if not texts:
+            continue
+        emb = _embed_texts(texts, wrapper)
+        if emb is None:
+            return None
+        proto = emb.mean(dim=0)
+        norm = proto.norm()
+        if norm > 1e-9:
+            protos[comp] = proto / norm
+
+    _prototype_cache[domain_id] = protos
+    return protos
+
+
+def score_items_for_components(
+    items: List[Any],
+    components: List[str],
+    wrapper: Any = None,
+    domain_config: Any = None,
+) -> Optional[List[List[float]]]:
+    """Score each item against each *specific component*, not just its pool.
+
+    Resolves the ambiguity pool-level routing cannot: two demanded
+    components sharing a pool (e.g. HeaderBlock and FooterBlock, both
+    chrome) are indistinguishable to the pool head, so which one consumes
+    an item is decided by ordering accidents. Each (item, component) score
+    is the cosine between the item's text embedding and the component's
+    content prototype — the mean embedding of its harvested real-content
+    exemplars and templates, carried on checkpoint metadata.
+
+    (The model's content/form heads were measured at chance on this task —
+    per-component score bias swamps them — so prototypes, not heads.)
+
+    Returns an [n_items][n_components] matrix (rows follow ``items``,
+    columns follow ``components``), or None when component-level scoring is
+    not possible (no prototypes for a requested component, no usable text,
+    no embedder) — callers should fall back to pool-level routing.
+    """
+    try:
+        import torch
+
+        if not items or not components:
+            return None
+
+        domain = domain_config if domain_config is not None else _get_domain_config()
+        domain_id = getattr(domain, "domain_id", None)
+        # Ensure the checkpoint (and its content knowledge) is loaded, then
+        # prefer the checkpoint-resolved config over the registry one.
+        _load_slot_model(domain_id)
+        knowledge = _model_domain_config_for(domain_id) or domain
+        if getattr(knowledge, "domain_id", None) != domain_id:
+            knowledge = domain
+
+        protos = _component_content_prototypes(knowledge, wrapper)
+        if not protos:
+            return None
+        missing = [c for c in components if c not in protos]
+        if missing:
+            logger.debug(f"No content prototypes for {missing} — pool-level fallback")
+            return None
+
+        texts = [_extract_item_text(it) for it in items]
+        if not any(texts):
+            return None
+        emb = _embed_texts([t or " " for t in texts], wrapper)
+        if emb is None:
+            return None
+        emb = emb / emb.norm(dim=1, keepdim=True).clamp_min(1e-9)
+
+        cols = torch.stack([protos[c] for c in components])
+        matrix = (emb @ cols.T).tolist()
+        logger.debug(
+            f"🧠 Component-level scoring: {len(items)} items × "
+            f"{len(components)} components"
+        )
+        return matrix
+    except Exception as e:
+        logger.debug(f"Component-level scoring unavailable ({e}) — pool-level fallback")
+        return None
+
+
+def assign_items_to_components(
+    items: List[Any],
+    component_demands: Dict[str, int],
+    wrapper: Any = None,
+    domain_config: Any = None,
+) -> Optional[Dict[str, List[Any]]]:
+    """Assign items to specific demanded components via content prototypes.
+
+    Solves a small max-cardinality, max-total-score matching over
+    (item, capacity-slot) pairs. Absolute cosine levels differ per
+    component (prototype tightness), but a per-component offset is
+    constant across the column and cancels in the assignment total — so
+    the optimal matching needs no normalization, and per-item preference
+    margins survive intact (z-scoring collapses them to ±1 at n=2;
+    mean-centering lets wide-spread columns dominate). Oversized inputs
+    fall back to greedy, where the bias is second-order for cosines.
+
+    Returns {component: [items]} (best matches first, unfilled components
+    map to fewer/no items), or None when component-level scoring is
+    unavailable — callers should fall back to pool-level routing.
+    """
+    components = [c for c, n in component_demands.items() if n > 0]
+    if not components or not items:
+        return None
+
+    matrix = score_items_for_components(items, components, wrapper, domain_config)
+    if matrix is None:
+        return None
+
+    n_items = len(matrix)
+    # One slot per unit of demand, tagged with its component column
+    slots = [j for j, c in enumerate(components) for _ in range(component_demands[c])]
+
+    if len(slots) <= 10 and n_items <= 12:
+        pairs = _optimal_assignment(matrix, slots, n_items)
+    else:
+        pairs = {}
+        cells = sorted(
+            ((matrix[i][s], i, k) for i in range(n_items) for k, s in enumerate(slots)),
+            reverse=True,
+        )
+        used_slots: set = set()
+        for _, i, k in cells:
+            if i in pairs or k in used_slots:
+                continue
+            pairs[i] = k
+            used_slots.add(k)
+
+    result: Dict[str, List[Any]] = {c: [] for c in components}
+    assigned = sorted(
+        pairs.items(), key=lambda ik: matrix[ik[0]][slots[ik[1]]], reverse=True
+    )
+    for i, k in assigned:
+        result[components[slots[k]]].append(items[i])
+    return result
+
+
+def _optimal_assignment(
+    matrix: List[List[float]], slots: List[int], n_items: int
+) -> Dict[int, int]:
+    """Max-cardinality, then max-total-score matching via bitmask DP.
+
+    Returns {item_index: slot_index}. Exponential in len(slots) — callers
+    keep it small.
+    """
+    from functools import lru_cache
+
+    m = len(slots)
+
+    @lru_cache(maxsize=None)
+    def solve(i: int, mask: int):
+        if i == n_items:
+            return (0, 0.0, ())
+        best = solve(i + 1, mask)  # leave item i unassigned
+        for k in range(m):
+            if mask & (1 << k):
+                continue
+            cnt, score, pairs = solve(i + 1, mask | (1 << k))
+            cand = (cnt + 1, score + matrix[i][slots[k]], ((i, k),) + pairs)
+            if (cand[0], cand[1]) > (best[0], best[1]):
+                best = cand
+        return best
+
+    _, _, pairs = solve(0, 0)
+    solve.cache_clear()
+    return dict(pairs)
+
+
 def _pin_policy() -> Tuple[str, float]:
     """Resolve the pinning policy from the environment.
 
@@ -377,9 +908,13 @@ def reassign_supply_map(
 
     VOCAB, COMP_TO_POOL, SPEC_ORDER = _get_constants(domain_config)
 
-    model = _load_slot_model()
+    requested_domain = (
+        getattr(domain_config, "domain_id", None) if domain_config is not None else None
+    )
+    model = _load_slot_model(requested_domain)
     if model is None:
         return supply_map
+    model_type = _model_type_for(requested_domain, model)
 
     # Flatten all items from all pools (domain-driven pool keys)
     all_items: List[Tuple[Any, str]] = []  # (item, source_pool)
@@ -407,11 +942,26 @@ def reassign_supply_map(
 
     # Score all items against all slot types
     with torch.no_grad():
-        if _cached_model_type == "unified":
-            # UnifiedTRN: use pool_head in build mode
+        if model_type == "unified":
+            # UnifiedTRN: use pool_head in build mode. Text-only baseline
+            # first (zero structural features), then upgrade to
+            # structure-aware scores when the wrapper can provide the same
+            # 17D candidate-vs-query features the model trained on.
             structural_zeros = torch.zeros(embeddings.shape[0], 17)
             result = model(structural_zeros, embeddings, mode="build")
             scores = result["pool_logits"]  # [N_valid, 5]
+            struct_scores = _structure_aware_scores(
+                embeddings,
+                demands,
+                wrapper,
+                VOCAB,
+                COMP_TO_POOL,
+                model,
+                domain_config or _get_domain_config(),
+                base_scores=scores,
+            )
+            if struct_scores is not None:
+                scores = struct_scores
         else:
             # SlotAffinityNet: legacy path
             scores = model.score_all_slots(embeddings)  # [N_valid, n_slot_types]

@@ -657,3 +657,249 @@ class TestSlotAssignmentWithDomainConfig:
         """Both domains have 5 pools for compatibility with UnifiedTRN."""
         assert GCHAT_DOMAIN.n_pools == 5
         assert EMAIL_DOMAIN.n_pools == 5
+
+
+# ── Structure-aware scoring tests ──────────────────────────────────
+
+
+class TestStructureAwareScores:
+    """Tests for _structure_aware_scores (structural context in build mode)."""
+
+    def _base(self, n_items=2):
+        return torch.zeros(n_items, 5)
+
+    def test_returns_none_without_wrapper(self):
+        from gchat.card_builder.slot_assignment import _structure_aware_scores
+
+        out = _structure_aware_scores(
+            torch.zeros(2, 384),
+            {"Button": 1},
+            None,
+            GCHAT_DOMAIN.pool_vocab,
+            GCHAT_DOMAIN.component_to_pool,
+            model=None,
+            domain_config=GCHAT_DOMAIN,
+            base_scores=self._base(),
+        )
+        assert out is None
+
+    def test_returns_none_without_demanded_components(self):
+        from gchat.card_builder.slot_assignment import _structure_aware_scores
+
+        class FakeWrapper:
+            def _compute_learned_features(self, *a, **k):
+                return [], []
+
+            def _embed_with_colbert(self, text, ratio):
+                return [[0.1] * 8]
+
+            def _embed_with_minilm(self, text):
+                return [0.1] * 384
+
+        out = _structure_aware_scores(
+            torch.zeros(2, 384),
+            {"NotAComponent": 1},
+            FakeWrapper(),
+            GCHAT_DOMAIN.pool_vocab,
+            GCHAT_DOMAIN.component_to_pool,
+            model=None,
+            domain_config=GCHAT_DOMAIN,
+            base_scores=self._base(),
+        )
+        assert out is None
+
+    def test_overrides_demanded_pool_keeps_others(self):
+        import gchat.card_builder.slot_assignment as sa
+        from gchat.card_builder.slot_assignment import _structure_aware_scores
+
+        class FakePoint:
+            payload = {"name": "Button", "type": "class"}
+            vector = {}
+
+        class FakeWrapper:
+            collection_name = "fake_collection"
+            client = object()  # never used: cache is pre-populated
+
+            def _compute_learned_features(
+                self, points, qc, qm, component_paths=None, query_content_minilm=None
+            ):
+                return [[0.5] * 17 for _ in points], []
+
+            def _embed_with_colbert(self, text, ratio):
+                return [[0.1] * 8]
+
+            def _embed_with_minilm(self, text):
+                return [0.1] * 384
+
+        class FakeModel:
+            def __call__(self, structural, content, mode="build"):
+                logits = torch.full((structural.shape[0], 5), 2.0)
+                return {"pool_logits": logits}
+
+        sa._class_point_cache[("fake_collection", "Button")] = FakePoint()
+        try:
+            base = self._base(2)
+            base[:, :] = -1.0
+            out = _structure_aware_scores(
+                torch.zeros(2, 384),
+                {"Button": 1},
+                FakeWrapper(),
+                GCHAT_DOMAIN.pool_vocab,
+                GCHAT_DOMAIN.component_to_pool,
+                model=FakeModel(),
+                domain_config=GCHAT_DOMAIN,
+                base_scores=base,
+            )
+            assert out is not None
+            buttons_id = GCHAT_DOMAIN.pool_vocab["buttons"]
+            for i in range(2):
+                for pool_id in range(5):
+                    if pool_id == buttons_id:
+                        assert out[i, pool_id].item() == pytest.approx(2.0)
+                    else:
+                        assert out[i, pool_id].item() == pytest.approx(-1.0)
+        finally:
+            sa._class_point_cache.pop(("fake_collection", "Button"), None)
+
+    def test_reassign_falls_back_when_wrapper_lacks_methods(self):
+        """reassign_supply_map with a bare wrapper must still work (text-only)."""
+        import gchat.card_builder.slot_assignment as sa
+        from gchat.card_builder.slot_assignment import reassign_supply_map
+
+        old = (
+            sa._model_load_attempted,
+            sa._cached_model,
+            sa._cached_model_type,
+            sa._cached_domain_config,
+        )
+
+        class MockModel:
+            def __call__(self, structural, content, mode="build"):
+                logits = torch.zeros(content.shape[0], 5)
+                logits[:, 0] = 5.0
+                return {"pool_logits": logits}
+
+        try:
+            sa._model_load_attempted = True
+            sa._cached_model = MockModel()
+            sa._cached_model_type = "unified"
+            sa._cached_domain_config = GCHAT_DOMAIN
+
+            supply_map = {
+                "buttons": [],
+                "content_texts": [{"text": "Deploy"}, {"text": "Cancel"}],
+                "chips": [],
+                "grid_items": [],
+                "carousel_cards": [],
+            }
+            result = reassign_supply_map(
+                supply_map, {"Button": 2}, wrapper=object(), domain_config=GCHAT_DOMAIN
+            )
+            assert isinstance(result, dict)
+            assert len(result["buttons"]) == 2
+        finally:
+            (
+                sa._model_load_attempted,
+                sa._cached_model,
+                sa._cached_model_type,
+                sa._cached_domain_config,
+            ) = old
+
+
+class TestComponentLevelAssignment:
+    """assign_items_to_components — class-level disambiguation within pools."""
+
+    def test_column_bias_cancelled_by_optimal_matching(self):
+        """A component whose scores run uniformly high must not win every item.
+
+        Raw greedy takes the global max cell (footer text -> HeaderBlock,
+        1.30) and misassigns. Optimal matching compares totals:
+        1.10 + 0.40 beats 0.10 + 1.30, so each text keeps its slot.
+        """
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        matrix = [
+            [1.10, 0.10],  # header text
+            [1.30, 0.40],  # footer text — beats header text in BOTH raw columns
+        ]
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=[row[:] for row in matrix],
+        ):
+            result = assign_items_to_components(
+                ["HEADER TEXT", "footer text"],
+                {"HeaderBlock": 1, "FooterBlock": 1},
+            )
+        assert result == {
+            "HeaderBlock": ["HEADER TEXT"],
+            "FooterBlock": ["footer text"],
+        }
+
+    def test_capacities_respected_and_items_assigned_once(self):
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        matrix = [
+            [0.9, 0.1],
+            [0.8, 0.2],
+            [0.1, 0.9],
+        ]
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=[row[:] for row in matrix],
+        ):
+            result = assign_items_to_components(
+                ["t1", "t2", "cta"],
+                {"TextBlock": 2, "ButtonBlock": 1},
+            )
+        assert sorted(result["TextBlock"]) == ["t1", "t2"]
+        assert result["ButtonBlock"] == ["cta"]
+        assigned = result["TextBlock"] + result["ButtonBlock"]
+        assert len(assigned) == len(set(assigned)) == 3
+
+    def test_unavailable_scoring_returns_none(self):
+        from unittest.mock import patch
+
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        with patch(
+            "gchat.card_builder.slot_assignment.score_items_for_components",
+            return_value=None,
+        ):
+            assert assign_items_to_components(["x"], {"TextBlock": 1}) is None
+
+    def test_no_items_or_demands_returns_none(self):
+        from gchat.card_builder.slot_assignment import assign_items_to_components
+
+        assert assign_items_to_components([], {"TextBlock": 1}) is None
+        assert assign_items_to_components(["x"], {}) is None
+        assert assign_items_to_components(["x"], {"TextBlock": 0}) is None
+
+
+class TestContentPrototypes:
+    """Content prototypes come from checkpoint-carried domain knowledge."""
+
+    def test_registry_domain_without_knowledge_yields_no_prototypes(self):
+        import gchat.card_builder.slot_assignment as sa
+
+        # Registry EMAIL_DOMAIN carries pool structure only.
+        sa._prototype_cache.pop("email", None)
+        protos = sa._component_content_prototypes(EMAIL_DOMAIN, wrapper=None)
+        sa._prototype_cache.pop("email", None)
+        assert protos == {}
+
+    def test_real_content_survives_checkpoint_roundtrip(self):
+        from adapters.domain_config import DomainConfig
+
+        ckpt = {
+            "domain_id": "email",
+            "pool_vocab": dict(EMAIL_DOMAIN.pool_vocab),
+            "component_to_pool": dict(EMAIL_DOMAIN.component_to_pool),
+            "real_content": {"FooterBlock": ["Unsubscribe anytime"]},
+        }
+        config = DomainConfig.from_checkpoint(ckpt)
+        assert config is not None
+        assert config.real_content == {"FooterBlock": ["Unsubscribe anytime"]}
