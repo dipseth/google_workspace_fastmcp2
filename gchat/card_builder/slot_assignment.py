@@ -243,6 +243,164 @@ def _embed_texts(texts: List[str], wrapper: Any) -> Optional[Any]:
         return None
 
 
+# Cache of class points fetched for structural scoring: (collection, name) → point
+_class_point_cache: Dict[Tuple[str, str], Any] = {}
+
+
+def _fetch_class_points(wrapper: Any, names: List[str]) -> Dict[str, Any]:
+    """Fetch class points (with named vectors) for the given component names.
+
+    Class points carry the components/inputs/relationships/content vectors
+    that structural feature computation needs. Results are cached per
+    (collection, name) for the process lifetime.
+    """
+    client = getattr(wrapper, "client", None)
+    collection = getattr(wrapper, "collection_name", None)
+    if client is None or not collection:
+        return {}
+
+    found: Dict[str, Any] = {}
+    missing: List[str] = []
+    for name in names:
+        cached = _class_point_cache.get((collection, name))
+        if cached is not None:
+            found[name] = cached
+        else:
+            missing.append(name)
+
+    if missing:
+        from qdrant_client import models
+
+        batch, _ = client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="type", match=models.MatchValue(value="class")
+                    ),
+                    models.FieldCondition(
+                        key="name", match=models.MatchAny(any=missing)
+                    ),
+                ]
+            ),
+            limit=len(missing),
+            with_vectors=True,
+            with_payload=True,
+        )
+        for p in batch:
+            name = (p.payload or {}).get("name")
+            if name:
+                _class_point_cache[(collection, name)] = p
+                found[name] = p
+    return found
+
+
+def _synthesize_query(components: List[str], domain_config: Any) -> str:
+    """Build a query description from demanded components.
+
+    Mirrors the synthetic query templates the model trained on
+    ("An email with ...", "Create a card that has ...").
+    """
+    comp_text = ", ".join(components)
+    domain_id = getattr(domain_config, "domain_id", "gchat")
+    if domain_id == "email":
+        return f"An email with {comp_text}"
+    return f"Create a card that has {comp_text}"
+
+
+def _structure_aware_scores(
+    embeddings: Any,
+    demands: Dict[str, int],
+    wrapper: Any,
+    vocab: Dict[str, int],
+    comp_to_pool: Dict[str, str],
+    model: Any,
+    domain_config: Any,
+    base_scores: Any,
+) -> Optional[Any]:
+    """Score items with real structural context instead of zero features.
+
+    For each demanded component, computes the same 17D candidate-vs-query
+    features the model saw in training (via the wrapper's search-mixin
+    feature pipeline), runs the pool head per (item, component), and takes
+    each item's score for a pool as the max over that pool's demanded
+    components. Pools with no demanded component keep the text-only
+    (zero-structural) score from base_scores.
+
+    Returns a [N, n_pools] tensor, or None when structural scoring is not
+    possible (no wrapper, no class points, any error) — caller falls back
+    to base_scores.
+    """
+    try:
+        import torch
+
+        if wrapper is None:
+            return None
+        for attr in (
+            "_compute_learned_features",
+            "_embed_with_colbert",
+            "_embed_with_minilm",
+        ):
+            if not hasattr(wrapper, attr):
+                return None
+
+        components = [c for c in demands if c in comp_to_pool]
+        if not components:
+            return None
+
+        class_points = _fetch_class_points(wrapper, components)
+        if not class_points:
+            return None
+        comp_names = list(class_points.keys())
+        points = [class_points[c] for c in comp_names]
+
+        description = _synthesize_query(comp_names, domain_config)
+        query_colbert = wrapper._embed_with_colbert(description, 1.0)
+        query_minilm = wrapper._embed_with_minilm(
+            f"{description} components: {', '.join(comp_names)}"
+        )
+        if not query_colbert or not query_minilm:
+            return None
+
+        n_items = embeddings.shape[0]
+        scores = base_scores.clone()
+        for i in range(n_items):
+            item_emb = embeddings[i]
+            features_list, _ = wrapper._compute_learned_features(
+                points,
+                query_colbert,
+                query_minilm,
+                component_paths=comp_names,
+                query_content_minilm=item_emb.tolist(),
+            )
+            feats = torch.tensor(features_list, dtype=torch.float32)
+            item_batch = item_emb.unsqueeze(0).expand(len(comp_names), -1)
+            with torch.no_grad():
+                logits = model(feats, item_batch, mode="build")["pool_logits"]
+            # Per demanded pool: max over that pool's demanded components.
+            # Pools with no demanded component keep the base (text-only) score.
+            pool_best: Dict[int, float] = {}
+            for j, comp in enumerate(comp_names):
+                pool_key = comp_to_pool.get(comp)
+                pool_id = vocab.get(pool_key) if pool_key else None
+                if pool_id is None:
+                    continue
+                val = logits[j, pool_id].item()
+                if pool_id not in pool_best or val > pool_best[pool_id]:
+                    pool_best[pool_id] = val
+            for pool_id, val in pool_best.items():
+                scores[i, pool_id] = val
+        logger.debug(
+            f"🧠 Structural slot scoring: {n_items} items × {len(comp_names)} components"
+        )
+        return scores
+    except Exception as e:
+        logger.debug(
+            f"Structural slot scoring unavailable ({e}) — using text-only scores"
+        )
+        return None
+
+
 def _pin_policy() -> Tuple[str, float]:
     """Resolve the pinning policy from the environment.
 
@@ -408,10 +566,25 @@ def reassign_supply_map(
     # Score all items against all slot types
     with torch.no_grad():
         if _cached_model_type == "unified":
-            # UnifiedTRN: use pool_head in build mode
+            # UnifiedTRN: use pool_head in build mode. Text-only baseline
+            # first (zero structural features), then upgrade to
+            # structure-aware scores when the wrapper can provide the same
+            # 17D candidate-vs-query features the model trained on.
             structural_zeros = torch.zeros(embeddings.shape[0], 17)
             result = model(structural_zeros, embeddings, mode="build")
             scores = result["pool_logits"]  # [N_valid, 5]
+            struct_scores = _structure_aware_scores(
+                embeddings,
+                demands,
+                wrapper,
+                VOCAB,
+                COMP_TO_POOL,
+                model,
+                domain_config or _get_domain_config(),
+                base_scores=scores,
+            )
+            if struct_scores is not None:
+                scores = struct_scores
         else:
             # SlotAffinityNet: legacy path
             scores = model.score_all_slots(embeddings)  # [N_valid, n_slot_types]

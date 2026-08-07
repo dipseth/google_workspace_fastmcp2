@@ -137,7 +137,18 @@ class GchatCardBuilder:
         from adapters.domain_config import GCHAT_DOMAIN
         from gchat.card_builder.slot_assignment import reassign_supply_map
 
-        return reassign_supply_map(supply_map, demands, domain_config=GCHAT_DOMAIN)
+        # The wrapper gives slot assignment access to embedders and class
+        # points so the pool head can score with structural context instead
+        # of zero features. Reassignment works without it (text-only).
+        wrapper = None
+        try:
+            wrapper = self._get_v2()._get_wrapper()
+        except Exception:
+            pass
+
+        return reassign_supply_map(
+            supply_map, demands, wrapper=wrapper, domain_config=GCHAT_DOMAIN
+        )
 
     def render_component(self, name: str, params: Dict[str, Any]) -> Any:
         """Render a gchat component via the wrapper's cached class loader."""

@@ -148,7 +148,20 @@ class EmailBuilder:
         from adapters.domain_config import EMAIL_DOMAIN
         from gchat.card_builder.slot_assignment import reassign_supply_map
 
-        return reassign_supply_map(supply_map, demands, domain_config=EMAIL_DOMAIN)
+        # The wrapper gives slot assignment access to embedders and class
+        # points so the pool head can score with structural context instead
+        # of zero features. Reassignment works without it (text-only).
+        wrapper = None
+        try:
+            from gmail.email_wrapper_setup import get_email_wrapper
+
+            wrapper = get_email_wrapper()
+        except Exception:
+            pass
+
+        return reassign_supply_map(
+            supply_map, demands, wrapper=wrapper, domain_config=EMAIL_DOMAIN
+        )
 
     def render_component(self, name: str, params: Dict[str, Any]) -> Any:
         """Render an email block to MJML markup.
