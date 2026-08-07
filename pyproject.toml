@@ -200,7 +200,7 @@ known-third-party = ["card_framework", "google", "googleapiclient", "google_auth
 known-first-party = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools", "skills", "lifespans"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools"]
+packages = ["auth", "config", "drive", "gmail", "photos", "middleware", "gcalendar", "gchat", "docs", "forms", "sheets", "slides", "resources", "prompts", "people", "adapters", "tools", "lifespans", "skills"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "server.py" = "server.py"
