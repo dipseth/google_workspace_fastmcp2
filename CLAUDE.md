@@ -10,6 +10,12 @@
 - Semver-ish: patch for fixes, minor for new tools/features or behavior-default changes.
 - Downstream consumers: PyPI (`uvx google-workspace-unlimited`) and Glama's Docker build (clones this repo and runs `uv sync`). The wheel must include all runtime packages — check `[tool.hatch.build.targets.wheel]` when adding a new top-level package dir (a missing `lifespans/` broke 2.4.x on PyPI).
 
+### Glama hosted deploy (admin build spec)
+
+- `cmdArguments` must use `uv run --no-sync` — plain `uv run` rebuilds the package on every container start (~33s), blowing Glama's ~35s health-check timeout and marking the server "unhealthy" (503s on every request).
+- `buildSteps`: `uv sync --compile-bytecode`, then `uv run --no-sync python -c 'import server' || true` to warm imports at build time (~12s cold start, measured).
+- Set `QDRANT_AUTO_LAUNCH=false` in hosted env vars (default `true` tries to launch Qdrant via Docker, which doesn't exist in the container).
+
 ## Python version
 
 - `requires-python = ">=3.11,<3.13"`; `.python-version` pins **3.12**. Keep the pin — Glama auto-detects the Docker Python version from it and previously picked an incompatible 3.14 when the file was absent.
