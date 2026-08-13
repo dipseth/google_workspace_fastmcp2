@@ -81,9 +81,11 @@ class TestSheetsTools:
             "get_spreadsheet_info",
             "read_sheet_values",
             "modify_sheet_values",
+            "batch_modify_sheet_values",  # Multi-range write/clear
             "create_spreadsheet",
             "create_sheet",
             "format_sheet_range",  # Master formatting tool
+            "batch_update_sheet",  # Raw batchUpdate escape hatch (charts, validation, ...)
         ]
 
         await assert_tools_registered(client, expected_tools, context="Sheets tools")

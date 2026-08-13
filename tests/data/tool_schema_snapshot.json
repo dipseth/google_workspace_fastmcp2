@@ -10,6 +10,18 @@
     "presentation_id",
     "user_google_email"
   ],
+  "batch_modify_sheet_values": [
+    "clear_ranges",
+    "data",
+    "spreadsheet_id",
+    "user_google_email",
+    "value_input_option"
+  ],
+  "batch_update_sheet": [
+    "requests",
+    "spreadsheet_id",
+    "user_google_email"
+  ],
   "bulk_calendar_operations": [
     "attendee_email",
     "calendar_id",
@@ -301,6 +313,7 @@
     "user_google_email"
   ],
   "get_spreadsheet_info": [
+    "fields",
     "spreadsheet_id",
     "user_google_email"
   ],
@@ -463,6 +476,7 @@
     "user_google_email"
   ],
   "modify_sheet_values": [
+    "append",
     "clear_values",
     "range_name",
     "spreadsheet_id",

@@ -6,7 +6,7 @@ enabling FastMCP to automatically generate JSON schemas for better MCP client in
 """
 
 from pydantic import BaseModel, Field
-from typing_extensions import List, Optional
+from typing_extensions import Any, List, Optional
 
 
 class SpreadsheetInfo(BaseModel):
@@ -56,6 +56,10 @@ class SpreadsheetDetailsResponse(BaseModel):
     spreadsheetUrl: Optional[str] = Field(
         None, description="Web URL for the spreadsheet"
     )
+    raw: Optional[dict] = Field(
+        None,
+        description="Raw spreadsheets.get response when a 'fields' mask was requested (formatting, charts, conditional formats, etc.)",
+    )
     error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
@@ -64,7 +68,10 @@ class SheetValuesResponse(BaseModel):
 
     spreadsheetId: str = Field(..., description="Unique identifier for the spreadsheet")
     range: str = Field(..., description="Range that was read from the sheet")
-    values: List[List[str]] = Field(..., description="2D array of cell values")
+    values: List[List[Any]] = Field(
+        ...,
+        description="2D array of cell values. Cells are strings for FORMATTED_VALUE/FORMULA rendering, but may be numbers or booleans with UNFORMATTED_VALUE.",
+    )
     rowCount: int = Field(..., description="Number of rows returned")
     columnCount: int = Field(..., description="Number of columns returned")
     error: Optional[str] = Field(None, description="Error message if operation failed")
@@ -76,7 +83,11 @@ class SheetModifyResponse(BaseModel):
     spreadsheetId: str = Field(..., description="Unique identifier for the spreadsheet")
     range: str = Field(..., description="Range that was modified")
     operation: str = Field(
-        ..., description="Type of operation performed ('update', 'clear')"
+        ..., description="Type of operation performed ('update', 'append', 'clear')"
+    )
+    updatedRange: Optional[str] = Field(
+        None,
+        description="Actual range that was written (useful for 'append', where the API chooses the range)",
     )
     updatedCells: Optional[int] = Field(None, description="Number of cells updated")
     updatedRows: Optional[int] = Field(None, description="Number of rows updated")
@@ -161,6 +172,38 @@ class MergeCellsResponse(BaseModel):
     range: str = Field(..., description="Cell range that was merged")
     mergeType: str = Field(..., description="Type of merge operation performed")
     success: bool = Field(..., description="Whether the merge succeeded")
+    message: str = Field(..., description="Success or error message")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+
+
+class BatchUpdateSheetResponse(BaseModel):
+    """Response structure for batch_update_sheet tool."""
+
+    spreadsheetId: str = Field(..., description="Unique identifier for the spreadsheet")
+    requestCount: int = Field(..., description="Number of requests submitted")
+    replies: Optional[List[dict]] = Field(
+        None,
+        description="Per-request replies from the API (e.g. addChart returns the chart ID, addSheet returns sheet properties)",
+    )
+    success: bool = Field(..., description="Whether the batch update succeeded")
+    message: str = Field(..., description="Success or error message")
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+
+
+class BatchModifyValuesResponse(BaseModel):
+    """Response structure for batch_modify_sheet_values tool."""
+
+    spreadsheetId: str = Field(..., description="Unique identifier for the spreadsheet")
+    totalUpdatedCells: Optional[int] = Field(
+        None, description="Total number of cells updated across all ranges"
+    )
+    totalUpdatedRanges: Optional[int] = Field(
+        None, description="Number of ranges written"
+    )
+    clearedRanges: Optional[List[str]] = Field(
+        None, description="Ranges that were cleared"
+    )
+    success: bool = Field(..., description="Whether the batch operation succeeded")
     message: str = Field(..., description="Success or error message")
     error: Optional[str] = Field(None, description="Error message if operation failed")
 
