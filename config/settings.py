@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import List, Literal, Optional
 
@@ -717,6 +717,7 @@ class Settings(BaseSettings):
     langfuse_host: str = Field(
         default="https://us.cloud.langfuse.com",
         description="Langfuse host URL",
+        validation_alias=AliasChoices("LANGFUSE_HOST", "LANGFUSE_BASE_URL"),
         json_schema_extra={"env": "LANGFUSE_HOST"},
     )
 
