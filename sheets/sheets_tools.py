@@ -21,6 +21,8 @@ from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmailSheets
 
 from .sheets_types import (
+    BatchModifyValuesResponse,
+    BatchUpdateSheetResponse,
     CreateSheetResponse,
     CreateSpreadsheetResponse,
     FormatRangeResponse,
@@ -117,6 +119,24 @@ def _parse_json_dict(value: Any, field_name: str) -> Optional[dict]:
     raise ValueError(
         f"Invalid type for {field_name}: expected string (JSON) or dict, got {type(value).__name__}"
     )
+
+
+_SCALAR_CELL_TYPES = (str, int, float, bool, type(None))
+
+
+def _validate_2d_values(parsed_values: List[Any]) -> Optional[str]:
+    """
+    Validate a parsed values payload is a 2D array of scalar cells.
+
+    Returns an error message string if invalid, or None if valid.
+    """
+    if not all(
+        isinstance(row, list)
+        and all(isinstance(cell, _SCALAR_CELL_TYPES) for cell in row)
+        for row in parsed_values
+    ):
+        return "Values must be a 2D array of scalar cells (strings, numbers, booleans, or null)."
+    return None
 
 
 async def _get_sheets_service_with_fallback(user_google_email: str):
@@ -335,7 +355,22 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         },
     )
     async def get_spreadsheet_info(
-        spreadsheet_id: str, user_google_email: UserGoogleEmailSheets = None
+        spreadsheet_id: str,
+        user_google_email: UserGoogleEmailSheets = None,
+        fields: Annotated[
+            Optional[str],
+            Field(
+                default=None,
+                description=(
+                    "Optional Google API field mask to read back detail beyond sheet titles/dimensions — "
+                    "formatting, conditional format rules, charts, merges, data validation, etc. "
+                    'Examples: "sheets(properties,conditionalFormats)", "sheets(properties,charts)", '
+                    '"sheets(properties(title,sheetId),data(rowData(values(userEnteredFormat))))". '
+                    "When provided, the raw API response is returned in the 'raw' field. "
+                    "Warning: grid-data masks can return large payloads; scope them tightly."
+                ),
+            ),
+        ] = None,
     ) -> SpreadsheetDetailsResponse:
         """
         Gets information about a specific spreadsheet including its sheets.
@@ -343,19 +378,24 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Args:
             user_google_email (str): The user's Google email address. Required.
             spreadsheet_id (str): The ID of the spreadsheet to get info for. Required.
+            fields (Optional[str]): Google API field mask for detailed read-back (formatting, charts, conditional formats, ...). The raw response is returned in 'raw'.
 
         Returns:
             SpreadsheetDetailsResponse: Structured spreadsheet information including title and sheets list.
         """
         logger.info(
-            f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}"
+            f"[get_spreadsheet_info] Invoked. Email: '{user_google_email}', Spreadsheet ID: {spreadsheet_id}, fields: {fields}"
         )
 
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
+            request_kwargs: dict = {"spreadsheetId": spreadsheet_id}
+            if fields:
+                request_kwargs["fields"] = fields
+
             spreadsheet = await asyncio.to_thread(
-                sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute
+                sheets_service.spreadsheets().get(**request_kwargs).execute
             )
 
             title = spreadsheet.get("properties", {}).get("title", "Unknown")
@@ -388,6 +428,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 sheets=sheets_info,
                 sheetCount=len(sheets),
                 spreadsheetUrl=spreadsheet_url,
+                raw=spreadsheet if fields else None,
             )
 
         except HttpError as e:
@@ -526,8 +567,8 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="modify_sheet_values",
-        description="Modify values in a specific range of a Google Sheet - can write, update, or clear values",
-        tags={"sheets", "write", "update", "clear", "google"},
+        description="Modify values in a specific range of a Google Sheet - can write, update, append, or clear values",
+        tags={"sheets", "write", "update", "append", "clear", "google"},
         annotations={
             "title": "Modify Sheet Values",
             "readOnlyHint": False,
@@ -540,10 +581,10 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         spreadsheet_id: str,
         range_name: str,
         values: Annotated[
-            Optional[Union[str, List[List[str]]]],
+            Optional[Union[str, List[List[Any]]]],
             Field(
                 default=None,
-                description='2D array of values to write/update. Can be Python list [["cell1", "cell2"], ["cell3", "cell4"]] or JSON string \'[["cell1", "cell2"], ["cell3", "cell4"]]\'. Required unless clear_values=True.',
+                description='2D array of values to write/update. Cells may be strings, numbers, booleans, or null (numbers/booleans are written as real values with RAW input). Can be Python list [["a", 1], ["b", 2.5]] or JSON string. Required unless clear_values=True.',
             ),
         ] = None,
         value_input_option: Annotated[
@@ -560,47 +601,62 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 description="If True, clears the range instead of writing values. When True, 'values' parameter is ignored.",
             ),
         ] = False,
+        append: Annotated[
+            bool,
+            Field(
+                default=False,
+                description="If True, appends values as new rows after the last row of data in the table containing range_name, instead of overwriting the range.",
+            ),
+        ] = False,
         user_google_email: UserGoogleEmailSheets = None,
     ) -> SheetModifyResponse:
         """
-        Modifies values in a specific range of a Google Sheet - can write, update, or clear values.
+        Modifies values in a specific range of a Google Sheet - can write, update, append, or clear values.
 
         Args:
             spreadsheet_id (str): The ID of the spreadsheet. Required.
             range_name (str): The range to modify (e.g., "Sheet1!A1:D10", "A1:D10"). Required.
-            values (Optional[Union[str, List[List[str]]]]): 2D array of values to write/update. Can be Python list or JSON string. Required unless clear_values=True.
+            values (Optional[Union[str, List[List[Any]]]]): 2D array of scalar values to write/update. Can be Python list or JSON string. Required unless clear_values=True.
             value_input_option (str): How to interpret input values ("RAW" or "USER_ENTERED"). Defaults to "USER_ENTERED".
             clear_values (bool): If True, clears the range instead of writing values. Defaults to False.
+            append (bool): If True, appends values after the last row of the table containing the range. Defaults to False.
             user_google_email (str): The user's Google email address. Auto-injected by middleware if not provided.
 
         Returns:
             SheetModifyResponse: Structured response with details of the modification operation.
         """
-        operation = "clear" if clear_values else "write"
+        operation = "clear" if clear_values else ("append" if append else "update")
         logger.info(
             f"[modify_sheet_values] Invoked. Operation: {operation}, Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Range: {range_name}"
         )
 
         try:
+            if clear_values and append:
+                return SheetModifyResponse(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    operation="error",
+                    success=False,
+                    message="",
+                    error="'clear_values' and 'append' are mutually exclusive.",
+                )
+
             # Parse values parameter to handle JSON strings from MCP clients
             parsed_values = None
             if values is not None:
                 try:
                     parsed_values = _parse_json_list(values, "values")
-                    # Validate that it's a 2D array of strings
-                    if parsed_values and not all(
-                        isinstance(row, list)
-                        and all(isinstance(cell, str) for cell in row)
-                        for row in parsed_values
-                    ):
-                        return SheetModifyResponse(
-                            spreadsheetId=spreadsheet_id,
-                            range=range_name,
-                            operation="error",
-                            success=False,
-                            message="",
-                            error="Values must be a 2D array of strings (List[List[str]]).",
-                        )
+                    if parsed_values:
+                        validation_error = _validate_2d_values(parsed_values)
+                        if validation_error:
+                            return SheetModifyResponse(
+                                spreadsheetId=spreadsheet_id,
+                                range=range_name,
+                                operation="error",
+                                success=False,
+                                message="",
+                                error=validation_error,
+                            )
                 except ValueError as e:
                     return SheetModifyResponse(
                         spreadsheetId=spreadsheet_id,
@@ -644,6 +700,43 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     success=True,
                     message=f"Successfully cleared range '{cleared_range}' in spreadsheet {spreadsheet_id}.",
                 )
+            elif append:
+                body = {"values": parsed_values}
+
+                result = await asyncio.to_thread(
+                    sheets_service.spreadsheets()
+                    .values()
+                    .append(
+                        spreadsheetId=spreadsheet_id,
+                        range=range_name,
+                        valueInputOption=value_input_option,
+                        insertDataOption="INSERT_ROWS",
+                        body=body,
+                    )
+                    .execute
+                )
+
+                updates = result.get("updates", {})
+                updated_range = updates.get("updatedRange")
+                updated_cells = updates.get("updatedCells", 0)
+                updated_rows = updates.get("updatedRows", 0)
+                updated_columns = updates.get("updatedColumns", 0)
+
+                logger.info(
+                    f"Successfully appended {updated_rows} rows at '{updated_range}' for {user_google_email}."
+                )
+
+                return SheetModifyResponse(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    operation="append",
+                    updatedRange=updated_range,
+                    updatedCells=updated_cells,
+                    updatedRows=updated_rows,
+                    updatedColumns=updated_columns,
+                    success=True,
+                    message=f"Successfully appended {updated_rows} rows at '{updated_range}' in spreadsheet {spreadsheet_id}.",
+                )
             else:
                 body = {"values": parsed_values}
 
@@ -671,6 +764,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     spreadsheetId=spreadsheet_id,
                     range=range_name,
                     operation="update",
+                    updatedRange=result.get("updatedRange"),
                     updatedCells=updated_cells,
                     updatedRows=updated_rows,
                     updatedColumns=updated_columns,
@@ -684,7 +778,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             return SheetModifyResponse(
                 spreadsheetId=spreadsheet_id,
                 range=range_name,
-                operation="clear" if clear_values else "update",
+                operation=operation,
                 success=False,
                 message="",
                 error=error_msg,
@@ -695,7 +789,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             return SheetModifyResponse(
                 spreadsheetId=spreadsheet_id,
                 range=range_name,
-                operation="clear" if clear_values else "update",
+                operation=operation,
                 success=False,
                 message="",
                 error=error_msg,
@@ -917,7 +1011,9 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             "title": "Unified Sheet Range Formatter",
             "readOnlyHint": False,
             "destructiveHint": False,
-            "idempotentHint": True,
+            # Not idempotent: conditional formatting rules are added (not replaced)
+            # on every call, so repeat calls with conditional rules accumulate rules.
+            "idempotentHint": False,
             "openWorldHint": True,
         },
     )
@@ -1265,22 +1361,42 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     "positions": final_border_positions,
                 }
 
-            # 3. Merge cells
+            # 3. Merge / unmerge cells
             if merge_cells_option:
-                requests.append(
-                    {
-                        "mergeCells": {
-                            "range": {
-                                "sheetId": sheet_id,
-                                "startRowIndex": range_start_row,
-                                "endRowIndex": range_end_row,
-                                "startColumnIndex": range_start_col,
-                                "endColumnIndex": range_end_col,
-                            },
-                            "mergeType": merge_cells_option,
+                merge_range = {
+                    "sheetId": sheet_id,
+                    "startRowIndex": range_start_row,
+                    "endRowIndex": range_end_row,
+                    "startColumnIndex": range_start_col,
+                    "endColumnIndex": range_end_col,
+                }
+                if merge_cells_option == "UNMERGE":
+                    # The API has no "UNMERGE" mergeType; unmerging is its own request.
+                    requests.append({"unmergeCells": {"range": merge_range}})
+                elif merge_cells_option in (
+                    "MERGE_ALL",
+                    "MERGE_ROWS",
+                    "MERGE_COLUMNS",
+                ):
+                    requests.append(
+                        {
+                            "mergeCells": {
+                                "range": merge_range,
+                                "mergeType": merge_cells_option,
+                            }
                         }
-                    }
-                )
+                    )
+                else:
+                    return FormatRangeResponse(
+                        spreadsheetId=spreadsheet_id,
+                        sheetId=sheet_id,
+                        range="",
+                        requestsApplied=0,
+                        formattingDetails={},
+                        success=False,
+                        message="",
+                        error=f"Invalid merge_cells_option '{merge_cells_option}'. Must be one of: MERGE_ALL, MERGE_ROWS, MERGE_COLUMNS, UNMERGE.",
+                    )
                 formatting_details["merge"] = merge_cells_option
 
             # 4. Column width
@@ -1479,6 +1595,331 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 range="",
                 requestsApplied=0,
                 formattingDetails={},
+                success=False,
+                message="",
+                error=error_msg,
+            )
+
+    @mcp.tool(
+        name="batch_update_sheet",
+        description=(
+            "Apply raw Google Sheets batchUpdate requests to a spreadsheet - escape hatch that unlocks the "
+            "full Sheets API Request surface not covered by other tools: charts (addChart), data validation "
+            "dropdowns (setDataValidation), protected/banded/named ranges, unmergeCells, "
+            "delete/duplicate/rename sheets, sortRange, findReplace, autoResizeDimensions, "
+            "insert/delete rows and columns, row/column grouping, filter views, slicers, and more. "
+            "Accepts a list of Request objects exactly as documented in the Sheets API batchUpdate reference; "
+            "up to 100 requests execute atomically in one API call."
+        ),
+        tags={
+            "sheets",
+            "batch",
+            "raw",
+            "charts",
+            "validation",
+            "escape-hatch",
+            "google",
+        },
+        annotations={
+            "title": "Batch Update Spreadsheet (Raw Requests)",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+    )
+    async def batch_update_sheet(
+        spreadsheet_id: str,
+        requests: Annotated[
+            Union[str, List[dict]],
+            Field(
+                description=(
+                    "List of raw Sheets API Request objects (or a JSON string of that list). Each item is a "
+                    'single-key dict naming the request type, e.g. {"addChart": {...}}, '
+                    '{"setDataValidation": {"range": {...}, "rule": {"condition": {"type": "ONE_OF_LIST", '
+                    '"values": [{"userEnteredValue": "Active"}]}, "showCustomUi": true}}}, '
+                    '{"deleteSheet": {"sheetId": 123}}. Requests are applied atomically and in order.'
+                ),
+            ),
+        ],
+        user_google_email: UserGoogleEmailSheets = None,
+    ) -> BatchUpdateSheetResponse:
+        """
+        Applies raw batchUpdate requests to a spreadsheet.
+
+        Args:
+            spreadsheet_id (str): The ID of the spreadsheet. Required.
+            requests (Union[str, List[dict]]): List of raw Sheets API Request objects, or a JSON string of that list. Required.
+            user_google_email (str): The user's Google email address. Auto-injected by middleware if not provided.
+
+        Returns:
+            BatchUpdateSheetResponse: Structured response including per-request replies (e.g. created chart/sheet IDs).
+        """
+        logger.info(
+            f"[batch_update_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}"
+        )
+
+        try:
+            try:
+                parsed_requests = _parse_json_list(requests, "requests")
+            except ValueError as e:
+                return BatchUpdateSheetResponse(
+                    spreadsheetId=spreadsheet_id,
+                    requestCount=0,
+                    success=False,
+                    message="",
+                    error=str(e),
+                )
+
+            if not parsed_requests or not all(
+                isinstance(req, dict) for req in parsed_requests
+            ):
+                return BatchUpdateSheetResponse(
+                    spreadsheetId=spreadsheet_id,
+                    requestCount=0,
+                    success=False,
+                    message="",
+                    error="'requests' must be a non-empty list of Request objects (dicts).",
+                )
+
+            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
+
+            response = await asyncio.to_thread(
+                sheets_service.spreadsheets()
+                .batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body={"requests": parsed_requests},
+                )
+                .execute
+            )
+
+            replies = response.get("replies", [])
+
+            logger.info(
+                f"Successfully applied {len(parsed_requests)} batchUpdate requests for {user_google_email}."
+            )
+
+            return BatchUpdateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                requestCount=len(parsed_requests),
+                replies=replies,
+                success=True,
+                message=f"Successfully applied {len(parsed_requests)} requests to spreadsheet {spreadsheet_id}.",
+            )
+
+        except HttpError as e:
+            error_msg = f"Failed to apply batch update: {e}"
+            logger.error(f"❌ {error_msg}")
+            return BatchUpdateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                requestCount=0,
+                success=False,
+                message="",
+                error=error_msg,
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error applying batch update: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return BatchUpdateSheetResponse(
+                spreadsheetId=spreadsheet_id,
+                requestCount=0,
+                success=False,
+                message="",
+                error=error_msg,
+            )
+
+    @mcp.tool(
+        name="batch_modify_sheet_values",
+        description=(
+            "Write values to multiple ranges of a Google Sheet in a single API call, and/or clear multiple "
+            "ranges - the batch counterpart to modify_sheet_values for multi-range workloads"
+        ),
+        tags={"sheets", "write", "batch", "clear", "google"},
+        annotations={
+            "title": "Batch Modify Sheet Values",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+    )
+    async def batch_modify_sheet_values(
+        spreadsheet_id: str,
+        data: Annotated[
+            Optional[Union[str, List[dict]]],
+            Field(
+                default=None,
+                description=(
+                    "List of write payloads (or a JSON string of that list), each "
+                    '{"range": "Sheet1!A1:B2", "values": [["a", 1], ["b", 2]]}. Cells may be strings, '
+                    "numbers, booleans, or null. All ranges are written in one API call."
+                ),
+            ),
+        ] = None,
+        value_input_option: Annotated[
+            str,
+            Field(
+                default="USER_ENTERED",
+                description="How to interpret input values: 'RAW' (values not parsed) or 'USER_ENTERED' (values parsed as if typed by user)",
+            ),
+        ] = "USER_ENTERED",
+        clear_ranges: Annotated[
+            Optional[Union[str, List[str]]],
+            Field(
+                default=None,
+                description='List of ranges to clear (or a JSON string of that list), e.g. ["Sheet1!A1:B2", "Sheet2!C:C"]. Cleared before any writes.',
+            ),
+        ] = None,
+        user_google_email: UserGoogleEmailSheets = None,
+    ) -> BatchModifyValuesResponse:
+        """
+        Writes values to multiple ranges and/or clears multiple ranges in single batched API calls.
+
+        Args:
+            spreadsheet_id (str): The ID of the spreadsheet. Required.
+            data (Optional[Union[str, List[dict]]]): List of {"range": ..., "values": [[...]]} write payloads. Can be Python list or JSON string.
+            value_input_option (str): How to interpret input values ("RAW" or "USER_ENTERED"). Defaults to "USER_ENTERED".
+            clear_ranges (Optional[Union[str, List[str]]]): Ranges to clear (before writes). Can be Python list or JSON string.
+            user_google_email (str): The user's Google email address. Auto-injected by middleware if not provided.
+
+        Returns:
+            BatchModifyValuesResponse: Structured response with totals across all ranges.
+        """
+        logger.info(
+            f"[batch_modify_sheet_values] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}"
+        )
+
+        try:
+            try:
+                parsed_data = _parse_json_list(data, "data") if data else None
+                parsed_clear_ranges = (
+                    _parse_json_list(clear_ranges, "clear_ranges")
+                    if clear_ranges
+                    else None
+                )
+            except ValueError as e:
+                return BatchModifyValuesResponse(
+                    spreadsheetId=spreadsheet_id,
+                    success=False,
+                    message="",
+                    error=str(e),
+                )
+
+            if not parsed_data and not parsed_clear_ranges:
+                return BatchModifyValuesResponse(
+                    spreadsheetId=spreadsheet_id,
+                    success=False,
+                    message="",
+                    error="Either 'data' or 'clear_ranges' must be provided.",
+                )
+
+            if parsed_data:
+                for entry in parsed_data:
+                    if (
+                        not isinstance(entry, dict)
+                        or "range" not in entry
+                        or not isinstance(entry.get("values"), list)
+                    ):
+                        return BatchModifyValuesResponse(
+                            spreadsheetId=spreadsheet_id,
+                            success=False,
+                            message="",
+                            error='Each data entry must be a dict with "range" and "values" keys.',
+                        )
+                    validation_error = _validate_2d_values(entry["values"])
+                    if validation_error:
+                        return BatchModifyValuesResponse(
+                            spreadsheetId=spreadsheet_id,
+                            success=False,
+                            message="",
+                            error=f"Invalid values for range '{entry['range']}': {validation_error}",
+                        )
+
+            if parsed_clear_ranges and not all(
+                isinstance(r, str) for r in parsed_clear_ranges
+            ):
+                return BatchModifyValuesResponse(
+                    spreadsheetId=spreadsheet_id,
+                    success=False,
+                    message="",
+                    error="'clear_ranges' must be a list of A1-notation range strings.",
+                )
+
+            sheets_service = await _get_sheets_service_with_fallback(user_google_email)
+
+            cleared: Optional[List[str]] = None
+            if parsed_clear_ranges:
+                clear_result = await asyncio.to_thread(
+                    sheets_service.spreadsheets()
+                    .values()
+                    .batchClear(
+                        spreadsheetId=spreadsheet_id,
+                        body={"ranges": parsed_clear_ranges},
+                    )
+                    .execute
+                )
+                cleared = clear_result.get("clearedRanges", parsed_clear_ranges)
+
+            total_updated_cells: Optional[int] = None
+            total_updated_ranges: Optional[int] = None
+            if parsed_data:
+                write_result = await asyncio.to_thread(
+                    sheets_service.spreadsheets()
+                    .values()
+                    .batchUpdate(
+                        spreadsheetId=spreadsheet_id,
+                        body={
+                            "valueInputOption": value_input_option,
+                            "data": [
+                                {
+                                    "range": entry["range"],
+                                    "values": entry["values"],
+                                }
+                                for entry in parsed_data
+                            ],
+                        },
+                    )
+                    .execute
+                )
+                total_updated_cells = write_result.get("totalUpdatedCells", 0)
+                total_updated_ranges = len(write_result.get("responses", parsed_data))
+
+            parts = []
+            if cleared:
+                parts.append(f"cleared {len(cleared)} ranges")
+            if parsed_data:
+                parts.append(
+                    f"updated {total_updated_cells} cells across {total_updated_ranges} ranges"
+                )
+
+            message = (
+                f"Successfully {' and '.join(parts)} in spreadsheet {spreadsheet_id}."
+            )
+            logger.info(f"[batch_modify_sheet_values] {message}")
+
+            return BatchModifyValuesResponse(
+                spreadsheetId=spreadsheet_id,
+                totalUpdatedCells=total_updated_cells,
+                totalUpdatedRanges=total_updated_ranges,
+                clearedRanges=cleared,
+                success=True,
+                message=message,
+            )
+
+        except HttpError as e:
+            error_msg = f"Failed to batch modify sheet values: {e}"
+            logger.error(f"❌ {error_msg}")
+            return BatchModifyValuesResponse(
+                spreadsheetId=spreadsheet_id,
+                success=False,
+                message="",
+                error=error_msg,
+            )
+        except Exception as e:
+            error_msg = f"Unexpected error batch modifying sheet values: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return BatchModifyValuesResponse(
+                spreadsheetId=spreadsheet_id,
                 success=False,
                 message="",
                 error=error_msg,

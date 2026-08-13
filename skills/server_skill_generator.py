@@ -291,6 +291,31 @@ Supported services: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `for
 | `gmail://messages/recent` | Recent Gmail messages |
 | `tools://list/all` | All available tools |"""
 
+_SHEETS_POWER_SECTION = """\
+## Sheets Power Tools
+
+Beyond simple reads/writes, three tools cover advanced spreadsheet work:
+
+- **`batch_update_sheet`** — raw `spreadsheets.batchUpdate` passthrough (up to 100 requests,
+  atomic: one bad request rolls back the whole batch). This is the route to everything the
+  dedicated tools don't cover: **charts** (`addChart` — all 9 chart families: basic
+  BAR/LINE/AREA/COLUMN/SCATTER/COMBO/STEPPED_AREA, pie, bubble, candlestick, histogram, org,
+  scorecard, treemap, waterfall), **data-validation dropdowns** (`setDataValidation` with
+  `ONE_OF_LIST` + `showCustomUi`), protected/banded/named ranges, `unmergeCells`,
+  delete/duplicate/rename sheets, `sortRange`, `findReplace`, `autoResizeDimensions`,
+  row/column grouping, filter views, and slicers. Request objects follow the Sheets API
+  batchUpdate reference verbatim; replies return created IDs (e.g. chart IDs).
+  Gotcha: BAR chart series must target `BOTTOM_AXIS`; other basic charts use `LEFT_AXIS`.
+- **`batch_modify_sheet_values`** — write many ranges and/or clear ranges in single API calls;
+  prefer it over looping `modify_sheet_values` whenever touching more than ~2 ranges.
+- **`get_spreadsheet_info` with `fields`** — read back formatting, conditional-format rules,
+  charts, merges, and validation via a Google API field mask (raw response in `raw`), e.g.
+  `sheets(properties,charts(chartId,spec(title)))`. Scope grid-data masks tightly.
+
+Cell values are real scalars: numbers/booleans round-trip properly (`RAW` input writes real
+numbers; `UNFORMATTED_VALUE` reads them back typed). `modify_sheet_values` also supports
+`append=True` to add rows after existing data."""
+
 _SKILL_RESOURCES_SECTION = """\
 ## Skill Resources
 
@@ -329,7 +354,7 @@ to see currently active tools.
 | **Chat Cards** | `send_simple_card`, `send_rich_card`, `send_enhanced_card`, `send_interactive_card`, `send_smart_card`, `preview_card_from_description`, `validate_card`, `find_card_templates`, `save_card_template` |
 | **Calendar** | `list_calendars`, `list_events`, `create_event`, `modify_event`, `delete_event`, `get_event`, `create_calendar`, `bulk_calendar_operations`, `move_events_between_calendars` |
 | **Docs** | `search_docs`, `get_doc_content`, `list_docs_in_folder`, `create_doc` |
-| **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range` |
+| **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `batch_modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range`, `batch_update_sheet` |
 | **Slides** | `create_presentation`, `get_presentation_info`, `add_slide`, `update_slide_content`, `export_and_download_presentation` |
 | **Forms** | `create_form`, `add_questions_to_form`, `get_form`, `set_form_publish_state`, `publish_form_publicly`, `get_form_response`, `list_form_responses`, `update_form_questions` |
 | **Photos** | `list_photos_albums`, `search_photos`, `upload_photos`, `upload_folder_photos`, `photos_smart_search`, `photos_batch_details`, `create_photos_album`, `get_photo_details` |
@@ -642,6 +667,10 @@ def generate_server_skill(
         "---",
         "",
         _SERVICES_SECTION,
+        "",
+        "---",
+        "",
+        _SHEETS_POWER_SECTION,
         "",
         "---",
         "",
