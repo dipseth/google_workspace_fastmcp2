@@ -291,6 +291,31 @@ Supported services: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `for
 | `gmail://messages/recent` | Recent Gmail messages |
 | `tools://list/all` | All available tools |"""
 
+_SHEETS_POWER_SECTION = """\
+## Sheets Power Tools
+
+Beyond simple reads/writes, three tools cover advanced spreadsheet work:
+
+- **`batch_update_sheet`** — raw `spreadsheets.batchUpdate` passthrough (up to 100 requests,
+  atomic: one bad request rolls back the whole batch). This is the route to everything the
+  dedicated tools don't cover: **charts** (`addChart` — all 9 chart families: basic
+  BAR/LINE/AREA/COLUMN/SCATTER/COMBO/STEPPED_AREA, pie, bubble, candlestick, histogram, org,
+  scorecard, treemap, waterfall), **data-validation dropdowns** (`setDataValidation` with
+  `ONE_OF_LIST` + `showCustomUi`), protected/banded/named ranges, `unmergeCells`,
+  delete/duplicate/rename sheets, `sortRange`, `findReplace`, `autoResizeDimensions`,
+  row/column grouping, filter views, and slicers. Request objects follow the Sheets API
+  batchUpdate reference verbatim; replies return created IDs (e.g. chart IDs).
+  Gotcha: BAR chart series must target `BOTTOM_AXIS`; other basic charts use `LEFT_AXIS`.
+- **`batch_modify_sheet_values`** — write many ranges and/or clear ranges in single API calls;
+  prefer it over looping `modify_sheet_values` whenever touching more than ~2 ranges.
+- **`get_spreadsheet_info` with `fields`** — read back formatting, conditional-format rules,
+  charts, merges, and validation via a Google API field mask (raw response in `raw`), e.g.
+  `sheets(properties,charts(chartId,spec(title)))`. Scope grid-data masks tightly.
+
+Cell values are real scalars: numbers/booleans round-trip properly (`RAW` input writes real
+numbers; `UNFORMATTED_VALUE` reads them back typed). `modify_sheet_values` also supports
+`append=True` to add rows after existing data."""
+
 _SKILL_RESOURCES_SECTION = """\
 ## Skill Resources
 
@@ -642,6 +667,10 @@ def generate_server_skill(
         "---",
         "",
         _SERVICES_SECTION,
+        "",
+        "---",
+        "",
+        _SHEETS_POWER_SECTION,
         "",
         "---",
         "",
