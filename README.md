@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="documentation/branding/logo-512.png" alt="GoogleUnlimited — river waves under an MCP connector node" width="140"/>
+  <img src="https://raw.githubusercontent.com/dipseth/google_workspace_fastmcp2/main/documentation/branding/logo-512.png" alt="GoogleUnlimited — river waves under an MCP connector node" width="140"/>
 </p>
 
 # 🚀 GoogleUnlimited Google Workspace Platform
@@ -41,8 +41,8 @@
 GoogleUnlimited provides AI assistants with access to Google Workspace services through the Model Context Protocol (MCP). It supports **92+ tools** across **9 Google services**, enabling seamless integration between AI workflows and Google Workspace applications with revolutionary performance improvements.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="documentation/branding/architecture-dark.svg">
-  <img alt="Architecture: an AI assistant speaks MCP to the GoogleUnlimited server (sandboxed execute, OAuth 2.1 + PKCE, unified middleware, template DSL, semantic memory), which fans out to nine Google Workspace services" src="documentation/branding/architecture-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/dipseth/google_workspace_fastmcp2/main/documentation/branding/architecture-dark.svg">
+  <img alt="Architecture: an AI assistant speaks MCP to the GoogleUnlimited server (sandboxed execute, OAuth 2.1 + PKCE, unified middleware, template DSL, semantic memory), which fans out to nine Google Workspace services" src="https://raw.githubusercontent.com/dipseth/google_workspace_fastmcp2/main/documentation/branding/architecture-light.svg">
 </picture>
 
 ### 🛠️ Installation Methods
