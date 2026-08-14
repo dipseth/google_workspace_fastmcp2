@@ -26,6 +26,12 @@ services:
       # Override specific environment variables if needed
       - PYTHONUNBUFFERED=1
       - SERVER_HOST=0.0.0.0
+      # Persist FastMCP's OAuth-proxy state (DCR client registrations + issued
+      # refresh-token mappings) inside the mounted credentials volume. Without
+      # this it lives in the container's ephemeral home dir, so every container
+      # recreate invalidates all connected OAuth clients (e.g. claude.ai
+      # connectors) and forces them to re-authenticate.
+      - FASTMCP_HOME=/app/credentials/fastmcp-state
     # Memory limits prevent runaway consumption from embedding models or cache growth
     deploy:
       resources:
