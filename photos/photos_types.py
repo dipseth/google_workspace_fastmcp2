@@ -173,6 +173,14 @@ class PhotoUploadResponse(BaseModel):
         None, description="Human-readable summary of the upload operation"
     )
     error: Optional[str] = Field(None, description="Error message if operation failed")
+    pending_uploads: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description=(
+            "Client-filesystem mode only: per-file signed PUT URLs. PUT each "
+            "file's bytes to its uploadUrl, then re-call upload_photos with "
+            "the same file_paths to finalize."
+        ),
+    )
 
 
 # =============================================================================

@@ -357,7 +357,7 @@ class OptimizedPhotosClient:
             logger.debug(f"Cleared {len(keys_to_remove)} album cache entries")
 
     async def upload_photo(
-        self, file_path: str, description: str = ""
+        self, file_path: str, description: str = "", album_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Upload a single photo to Google Photos."""
         logger.info(f"Uploading photo: {file_path}")
@@ -373,9 +373,12 @@ class OptimizedPhotosClient:
         # Step 1: Upload the media content
         upload_token = await self._upload_media_content(file_path)
 
-        # Step 2: Create the media item
+        # Step 2: Create the media item (attached to album_id when given —
+        # the API only allows this for albums created by this app)
         filename = os.path.basename(file_path)
-        media_item = await self._create_media_item(upload_token, filename, description)
+        media_item = await self._create_media_item(
+            upload_token, filename, description, album_id=album_id
+        )
 
         logger.info(f"Successfully uploaded photo: {media_item.get('id')}")
         return media_item
@@ -493,7 +496,11 @@ class OptimizedPhotosClient:
         return upload_token
 
     async def _create_media_item(
-        self, upload_token: str, filename: str, description: str = ""
+        self,
+        upload_token: str,
+        filename: str,
+        description: str = "",
+        album_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create media item from upload token."""
         new_media_item = {
@@ -502,6 +509,8 @@ class OptimizedPhotosClient:
         }
 
         batch_create_body = {"newMediaItems": [new_media_item]}
+        if album_id:
+            batch_create_body["albumId"] = album_id
 
         request = self.photos_service.mediaItems().batchCreate(body=batch_create_body)
         response = await self._make_request(request.execute)
@@ -511,7 +520,9 @@ class OptimizedPhotosClient:
             raise Exception("No media item results returned")
 
         result = results[0]
-        if "status" in result and result["status"].get("code") != 0:
+        # google.rpc.Status omits `code` entirely when it is 0 (OK) — a
+        # successful result is `{"message": "Success"}` with no code field.
+        if "status" in result and result["status"].get("code", 0) != 0:
             raise Exception(f"Media item creation failed: {result['status']}")
 
         return result.get("mediaItem", {})
@@ -596,7 +607,8 @@ class OptimizedPhotosClient:
             for i, result in enumerate(media_results):
                 file_path = file_paths[i] if i < len(file_paths) else "unknown"
 
-                if "status" in result and result["status"].get("code") != 0:
+                # `code` is omitted when 0 (OK): {"message": "Success"} means success.
+                if "status" in result and result["status"].get("code", 0) != 0:
                     results["failed"].append(
                         {
                             "file": file_path,

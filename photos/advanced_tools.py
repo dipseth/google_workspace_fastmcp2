@@ -121,6 +121,154 @@ async def _get_optimized_photos_client(user_google_email: str) -> OptimizedPhoto
     return client
 
 
+class _ClientFsStaging:
+    """Result of staging client-filesystem photo uploads (see _stage_client_fs_photos)."""
+
+    def __init__(self) -> None:
+        self.pending_response: Optional[PhotoUploadResponse] = None
+        self.local_paths: List[str] = []
+        self.path_map: Dict[str, str] = {}  # temp path -> original client path
+        self.upload_ids: List[str] = []
+        self.temp_dir: Optional[str] = None
+
+    def remap(self, results: Dict) -> None:
+        """Rewrite temp paths in upload results back to the client's paths."""
+        for bucket in ("successful", "failed"):
+            for entry in results.get(bucket, []):
+                entry["file"] = self.path_map.get(entry.get("file"), entry.get("file"))
+
+    def cleanup(self) -> None:
+        import shutil
+
+        from drive.upload_staging import consume_allocation
+
+        for uid in self.upload_ids:
+            try:
+                consume_allocation(uid)
+            except Exception:
+                pass
+        if self.temp_dir:
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+            self.temp_dir = None
+
+
+async def _stage_client_fs_photos(
+    file_list: List[str], user_email: Optional[str]
+) -> _ClientFsStaging:
+    """Two-phase client→server transport for photo uploads.
+
+    Mirrors upload_to_drive's client-filesystem mode and reuses the same
+    staging store and ``PUT /drive-upload`` endpoint (the transport is not
+    Drive-specific: bytes are staged keyed by (session, client path)).
+
+    Phase 1: any path without staged bytes gets an HMAC-signed one-time PUT
+    URL; ``pending_response`` is set and the tool returns it.
+    Phase 2: all paths staged — bytes are materialized into a temp dir under
+    their original basenames and the normal upload flow runs on those local
+    paths. Call ``cleanup()`` when done.
+    """
+    import tempfile
+
+    from auth.context import get_session_context
+    from config.settings import settings
+    from drive.upload_staging import (
+        allocate_upload,
+        find_allocation_by_path,
+        generate_upload_url,
+        read_staged_bytes,
+    )
+
+    ctx = _ClientFsStaging()
+    session_id = await get_session_context()
+    if not session_id:
+        ctx.pending_response = PhotoUploadResponse(
+            success=False,
+            total_count=len(file_list),
+            failed_count=len(file_list),
+            failed=[{"file": p, "error": "no MCP session"} for p in file_list],
+            user_email=user_email,
+            text_summary=(
+                "Client-filesystem upload mode requires an MCP session (none "
+                "found). Set DRIVE_UPLOAD_CLIENT_FS=false for stdio / "
+                "server-local uploads."
+            ),
+            error="Client-filesystem upload mode requires an MCP session.",
+        )
+        return ctx
+
+    staged = []
+    pending = []
+    for path in file_list:
+        alloc = find_allocation_by_path(session_id, path)
+        if alloc and alloc.received:
+            staged.append((path, alloc))
+            continue
+        new_alloc = allocate_upload(
+            session_id=session_id,
+            client_path=path,
+            user_email=user_email or "",
+            folder_id="",
+            custom_filename=None,
+        )
+        ttl = settings.drive_upload_ttl_seconds
+        url, exp_ts = generate_upload_url(settings.base_url, new_alloc.upload_id, ttl)
+        safe_path = path.replace('"', '\\"')
+        pending.append(
+            {
+                "file": path,
+                "uploadId": new_alloc.upload_id,
+                "uploadUrl": url,
+                "method": "PUT",
+                "expiresAt": exp_ts,
+                "expiresInSeconds": ttl,
+                "curlExample": f'curl -X PUT --data-binary @"{safe_path}" "{url}"',
+            }
+        )
+
+    if pending:
+        ctx.pending_response = PhotoUploadResponse(
+            success=False,
+            total_count=len(file_list),
+            pending_uploads=pending,
+            user_email=user_email,
+            text_summary=(
+                "Upload pending: client filesystem mode is active. PUT each "
+                "file's bytes to its uploadUrl (one-time use, expires), then "
+                "re-call upload_photos with the same file_paths to finalize."
+            ),
+        )
+        return ctx
+
+    # Phase 2 — materialize staged bytes under their original basenames so
+    # Google Photos records the real filename.
+    ctx.temp_dir = tempfile.mkdtemp(prefix="photos-clientfs-")
+    for path, alloc in staged:
+        data = read_staged_bytes(alloc.upload_id)
+        if data is None:
+            ctx.cleanup()
+            ctx.pending_response = PhotoUploadResponse(
+                success=False,
+                total_count=len(file_list),
+                failed_count=len(file_list),
+                failed=[{"file": path, "error": "staged bytes unreadable"}],
+                user_email=user_email,
+                text_summary=(
+                    f"Staged upload for '{path}' could not be read from disk. "
+                    "Re-call upload_photos to restart the transfer."
+                ),
+                error="Staged upload could not be read from disk.",
+            )
+            return ctx
+        local = os.path.join(ctx.temp_dir, os.path.basename(path))
+        with open(local, "wb") as fh:
+            fh.write(data)
+        ctx.local_paths.append(local)
+        ctx.path_map[local] = path
+        ctx.upload_ids.append(alloc.upload_id)
+
+    return ctx
+
+
 def setup_advanced_photos_tools(mcp: FastMCP) -> None:
     """
     Setup advanced Google Photos tools with optimization features.
@@ -807,6 +955,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             "Upload one local photo (string path) or a batch (list of paths) to Google Photos, optionally adding them to an existing album (album_id) or a newly created one (create_album).\n"
             "Use when: uploading specific files. To upload a whole directory, use upload_folder_photos instead.\n"
             "Behavior: writes to the user's library; batch items are independent — some can succeed while others fail, and partial success is NOT reported as an error. If create_album fails, uploads continue without an album.\n"
+            "Client-filesystem deployments (DRIVE_UPLOAD_CLIENT_FS=true): paths are read from the CLIENT's machine via a two-phase handshake — the first call returns pending_uploads with signed PUT URLs; PUT each file's bytes, then re-call with the same file_paths to finalize.\n"
             "Returns: successful[] and failed[] lists with per-file detail plus totals. Errors: per-file entries in failed[] (missing path, unsupported format, quota); auth failures fail the whole call."
         ),
         tags={"photos", "upload", "batch", "single", "google"},
@@ -855,6 +1004,17 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             f"[upload_photos] User: {user_google_email}, Files: {len(file_list)}, Single: {is_single_upload}"
         )
 
+        # Client-filesystem mode: paths live on the MCP client, not this
+        # server. Stage bytes via the shared PUT /drive-upload endpoint.
+        staging: Optional[_ClientFsStaging] = None
+        from config.settings import settings as _settings
+
+        if _settings.drive_upload_client_fs:
+            staging = await _stage_client_fs_photos(file_list, user_google_email)
+            if staging.pending_response is not None:
+                return staging.pending_response
+            file_list = staging.local_paths
+
         try:
             client = await _get_optimized_photos_client(user_google_email)
 
@@ -874,7 +1034,9 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             if is_single_upload:
                 # For single photo, use the individual upload method
                 try:
-                    media_item = await client.upload_photo(file_list[0], description)
+                    media_item = await client.upload_photo(
+                        file_list[0], description, album_id=target_album_id
+                    )
                     results = {
                         "successful": [
                             {
@@ -895,6 +1057,9 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             else:
                 # For multiple photos, use batch processing
                 results = await client.upload_photos_batch(file_list, target_album_id)
+
+            if staging is not None:
+                staging.remap(results)
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
             cache_stats = await client.get_cache_stats()
@@ -1047,6 +1212,9 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
                 text_summary=f"❌ **Upload Failed:** {error_msg}",
                 error=error_msg,
             )
+        finally:
+            if staging is not None:
+                staging.cleanup()
 
     @mcp.tool(
         name="upload_folder_photos",
