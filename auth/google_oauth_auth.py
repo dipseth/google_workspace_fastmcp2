@@ -80,17 +80,16 @@ def _get_oauth_metadata_scopes() -> list[str]:
         return shim.get_legacy_oauth_endpoint_scopes()
     except Exception as e:
         logger.warning(f"Failed to get OAuth scopes from compatibility shim: {e}")
-        # Fallback to hardcoded scopes
+        # Fallback to hardcoded scopes (least-privilege: full scopes only,
+        # no redundant readonly variants)
         return [
             "openid",
             "email",
             "profile",
-            "https://www.googleapis.com/auth/drive.readonly",
-            "https://www.googleapis.com/auth/drive.file",
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/gmail.modify",
             "https://www.googleapis.com/auth/calendar",
-            "https://www.googleapis.com/auth/chat.messages.readonly",
+            "https://www.googleapis.com/auth/chat.messages",
         ]
 
 

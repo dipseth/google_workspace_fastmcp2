@@ -169,14 +169,12 @@ async def _get_sheets_service_with_fallback(user_google_email: str):
         shim = CompatibilityShim()
         sheets_scopes = [
             shim.get_legacy_scope_groups()["sheets_write"],
-            shim.get_legacy_scope_groups()["sheets_read"],
         ]
     except Exception as e:
         logger.warning(f"Failed to get sheets scopes from compatibility shim: {e}")
         # Fallback to hardcoded scopes
         sheets_scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/spreadsheets.readonly",
         ]
 
     return await get_google_service(

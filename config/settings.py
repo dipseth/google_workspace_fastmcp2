@@ -751,56 +751,48 @@ class Settings(BaseSettings):
 
     # Legacy OAuth scopes - maintained for backward compatibility
     # These are now managed through the centralized scope registry
+    # Least-privilege set, kept in sync with the registry's
+    # oauth_comprehensive group: full scopes only — no redundant readonly/
+    # send/compose/labels variants (the full scope covers them at the API
+    # level, and Google's OAuth verification flags redundant pairs).
     _fallback_drive_scopes: list[str] = [
         # Base OAuth scopes for user identification
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
         "openid",
-        # Google Drive scopes
+        # Google Drive
         "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/drive.readonly",
-        "https://www.googleapis.com/auth/drive.file",
-        # Google Docs scopes
-        "https://www.googleapis.com/auth/documents.readonly",
+        # Google Docs
         "https://www.googleapis.com/auth/documents",
-        # Gmail API scopes
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/gmail.send",
-        "https://www.googleapis.com/auth/gmail.compose",
+        # Gmail (modify covers read/send/compose/labels)
         "https://www.googleapis.com/auth/gmail.modify",
-        "https://www.googleapis.com/auth/gmail.labels",
         # Gmail Settings scopes (CRITICAL for filters/forwarding)
         "https://www.googleapis.com/auth/gmail.settings.basic",
         "https://www.googleapis.com/auth/gmail.settings.sharing",
-        # Google Chat API scopes
-        "https://www.googleapis.com/auth/chat.messages.readonly",
+        # Google Chat
         "https://www.googleapis.com/auth/chat.messages",
         "https://www.googleapis.com/auth/chat.spaces",
-        # Google Sheets API scopes
-        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/chat.memberships",
+        # Google Sheets
         "https://www.googleapis.com/auth/spreadsheets",
-        # Google Forms API scopes
+        # Google Forms (no full scope covers responses — responses.readonly stays)
         "https://www.googleapis.com/auth/forms.body",
-        "https://www.googleapis.com/auth/forms.body.readonly",
         "https://www.googleapis.com/auth/forms.responses.readonly",
-        # Google Slides API scopes
+        # Google Slides
         "https://www.googleapis.com/auth/presentations",
-        "https://www.googleapis.com/auth/presentations.readonly",
-        # Calendar scopes
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
+        # Calendar
         "https://www.googleapis.com/auth/calendar",
+        # Google Tasks
+        "https://www.googleapis.com/auth/tasks",
+        # People/Contacts (no full scope covers directory — directory.readonly stays)
+        "https://www.googleapis.com/auth/contacts",
+        "https://www.googleapis.com/auth/directory.readonly",
         # Google Photos Library API scopes intentionally excluded:
         # Google rejects authorization requests that combine photoslibrary
         # scopes with Drive scopes (400 invalid_request), and the broad
         # photoslibrary / photoslibrary.readonly / photoslibrary.sharing
         # scopes were retired after March 31, 2025. Photos must be
         # authorized via its own OAuth flow (selected_services=["photos"]).
-        # Cloud Platform scopes (for broader Google services)
-        "https://www.googleapis.com/auth/cloud-platform",
-        "https://www.googleapis.com/auth/cloudfunctions",
-        "https://www.googleapis.com/auth/pubsub",
-        "https://www.googleapis.com/auth/iam",
     ]
 
     @property
