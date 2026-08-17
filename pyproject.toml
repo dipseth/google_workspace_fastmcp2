@@ -156,13 +156,12 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=tests/content_mapping"
 asyncio_mode = "auto"
-# pytest-asyncio 1.x removed the custom event_loop fixture pattern; without
-# these, session/module-scoped async fixtures (e.g. the live MCP clients in
-# tests/client) are created on one event loop while each test runs on its own
-# function-scoped loop — the second call on a shared client then awaits a
-# connection owned by a foreign loop and hangs forever.
-asyncio_default_fixture_loop_scope = "session"
-asyncio_default_test_loop_scope = "session"
+# NOTE: do NOT set asyncio_default_*_loop_scope = "session" here. The unit
+# suite has tests that close or replace the running event loop; under a
+# shared session loop that kills every async test after them (CI: "There is
+# no current event loop"). The client suite, which DOES need session-scoped
+# loops for its shared live-server clients, gets them from
+# tests/client/pytest.ini — the active config when running `pytest tests/client/`.
 
 markers = [
     "auth_required: mark test as requiring authentication",
