@@ -580,6 +580,11 @@
     "space_id",
     "user_google_email"
   ],
+  "search_people": [
+    "page_size",
+    "query",
+    "user_google_email"
+  ],
   "search_photos": [
     "album_id",
     "content_categories",

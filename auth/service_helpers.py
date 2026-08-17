@@ -410,18 +410,6 @@ async def request_photos_service(scopes: Union[str, List[str]] = None) -> str:
     return await request_service("photos", scopes)
 
 
-async def get_tasks_service(
-    user_email: Optional[str] = None, scopes: Union[str, List[str]] = None
-) -> Any:
-    """Get Tasks service - supports both explicit and GoogleProvider auth."""
-    return await get_service("tasks", user_email, scopes)
-
-
-async def request_tasks_service(scopes: Union[str, List[str]] = None) -> str:
-    """Request Tasks service through middleware - convenience alias."""
-    return await request_service("tasks", scopes)
-
-
 # ============================================
 # Google API Resilience Helpers
 # ============================================

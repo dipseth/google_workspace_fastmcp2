@@ -79,6 +79,62 @@ class GetPeopleContactGroupMembersResponse(BaseModel):
 
 
 # =============================================================================
+# People Search Types
+# =============================================================================
+
+
+class PersonSearchResult(BaseModel):
+    """A single person matched by search_people."""
+
+    display_name: Optional[str] = Field(None, description="The person's display name")
+    emails: List[str] = Field(
+        default_factory=list, description="Email addresses for this person"
+    )
+    source: str = Field(
+        ...,
+        description="Where the match came from: 'contacts' (saved contacts) or 'directory' (Workspace org directory)",
+    )
+    resourceName: Optional[str] = Field(
+        None, description="People API resource name (e.g., 'people/c123')"
+    )
+    organizations: List[str] = Field(
+        default_factory=list,
+        description="Organization/title strings, when available (directory results)",
+    )
+    phones: List[str] = Field(
+        default_factory=list, description="Phone numbers, when available"
+    )
+
+
+class SearchPeopleResponse(BaseModel):
+    """Response structure for search_people tool."""
+
+    success: bool = Field(
+        True, description="Whether the operation completed successfully"
+    )
+    query: str = Field("", description="The search query that was executed")
+    results: List[PersonSearchResult] = Field(
+        default_factory=list, description="People matching the query, all sources"
+    )
+    total_count: int = Field(0, description="Total number of people returned")
+    contacts_searched: bool = Field(
+        True, description="Whether saved contacts were searched"
+    )
+    directory_searched: bool = Field(
+        False,
+        description="Whether the Workspace directory was searched successfully",
+    )
+    directory_note: Optional[str] = Field(
+        None,
+        description="Explanation when the directory source is unavailable (e.g., consumer Gmail accounts have no Workspace directory)",
+    )
+    user_email: str = Field(
+        "", description="Email address of the user who performed the search"
+    )
+    error: Optional[str] = Field(None, description="Error message if operation failed")
+
+
+# =============================================================================
 # Manage Contact Labels Types
 # =============================================================================
 

@@ -316,18 +316,10 @@ class ScopeRegistry:
             documentation_url="https://developers.google.com/photos/library/reference",
             service_config={"service": "photoslibrary", "version": "v1"},
         ),
-        "tasks": ServiceMetadata(
-            name="Google Tasks",
-            description="Task management service",
-            icon="✅",
-            version="v1",
-            scopes=GOOGLE_API_SCOPES["tasks"],
-            default_scope_group="tasks_basic",
-            features=["task_lists", "due_dates", "notes", "completion_tracking"],
-            api_endpoint="https://tasks.googleapis.com/tasks/v1",
-            documentation_url="https://developers.google.com/tasks/reference",
-            service_config={"service": "tasks", "version": "v1"},
-        ),
+        # Google Tasks intentionally absent: no Tasks tools are implemented,
+        # and Google's OAuth verification requires every requested scope to
+        # map to a demonstrable feature. Re-add metadata + scope groups +
+        # oauth_comprehensive entry together with the first Tasks tool.
         "people": ServiceMetadata(
             name="Google People API",
             description="User profile and contact information service",
@@ -446,12 +438,6 @@ class ScopeRegistry:
             "photos.readonly_appcreated",
             "photos.edit_appcreated",
         ],
-        "tasks_basic": [
-            "base.userinfo_email",
-            "base.openid",
-            "tasks.full",
-        ],
-        "tasks_full": ["base.userinfo_email", "base.openid", "tasks.full"],
         "people_basic": [
             "base.userinfo_email",
             "base.userinfo_profile",
@@ -522,7 +508,6 @@ class ScopeRegistry:
             # (400 invalid_request). Photos requires its own OAuth flow —
             # see SEPARATE_AUTH_SERVICES and the photos_basic group.
             "calendar.full",
-            "tasks.full",
             "people.contacts",
             "people.directory_readonly",
         ],

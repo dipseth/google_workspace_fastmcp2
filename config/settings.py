@@ -782,8 +782,6 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/presentations",
         # Calendar
         "https://www.googleapis.com/auth/calendar",
-        # Google Tasks
-        "https://www.googleapis.com/auth/tasks",
         # People/Contacts (no full scope covers directory — directory.readonly stays)
         "https://www.googleapis.com/auth/contacts",
         "https://www.googleapis.com/auth/directory.readonly",
