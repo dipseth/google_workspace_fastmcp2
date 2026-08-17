@@ -399,7 +399,8 @@
   "manage_credentials": [
     "action",
     "email",
-    "new_storage_mode"
+    "new_storage_mode",
+    "user_google_email"
   ],
   "manage_drive_files": [
     "file_ids",

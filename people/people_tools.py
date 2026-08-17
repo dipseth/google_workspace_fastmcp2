@@ -50,7 +50,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Union
 
-from auth.context import get_auth_middleware
+from auth.service_helpers import get_injected_service, request_service
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
@@ -68,45 +68,40 @@ logger = setup_logger()
 
 async def _get_people_service(user_email: UserGoogleEmail):
     """
-    Build a Google People API service instance.
+    Get a People API service via middleware injection, falling back to
+    direct service creation (same pattern as the other service modules).
+
+    The previous implementation loaded credentials through
+    AuthMiddleware.load_credentials() without a decryption key, which
+    silently returns None under encrypted credential storage.
 
     Returns:
         A People API service client or None if credentials are unavailable.
     """
     if not user_email:
-        logger.warning("No user email provided for People API (contact labels listing)")
+        logger.warning("No user email provided for People API")
         return None
 
     try:
-        auth_middleware = get_auth_middleware()
-    except Exception as exc:
-        logger.warning(
-            f"AuthMiddleware lookup failed for People API (contact labels listing): {exc}"
-        )
-        return None
+        service_key = await request_service("people")
+        service = await get_injected_service(service_key)
+        if service:
+            logger.debug("Using middleware-injected People service")
+            return service
+    except Exception as e:
+        logger.warning(f"Middleware People service injection failed: {e}")
 
-    if not auth_middleware:
-        logger.warning(
-            "No AuthMiddleware available for People API (contact labels listing)"
-        )
-        return None
-
+    logger.info("Falling back to direct People service creation")
     try:
-        credentials = auth_middleware.load_credentials(user_email)
-    except Exception as exc:
-        logger.warning(
-            f"Error loading credentials for People API (contact labels listing) for user {user_email}: {exc}"
-        )
-        return None
+        from auth.scope_registry import ScopeRegistry
+        from auth.service_manager import get_google_service
 
-    if not credentials:
-        logger.warning(
-            f"No credentials found for People API (contact labels listing) for user {user_email}"
+        return await get_google_service(
+            user_email=user_email,
+            service_type="people",
+            version="v1",
+            scopes=ScopeRegistry.resolve_scope_group("people_basic"),
         )
-        return None
-
-    try:
-        return await asyncio.to_thread(build, "people", "v1", credentials=credentials)
     except Exception as exc:
         logger.error(f"Failed to build People API service: {exc}")
         return None
