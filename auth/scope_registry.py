@@ -316,18 +316,10 @@ class ScopeRegistry:
             documentation_url="https://developers.google.com/photos/library/reference",
             service_config={"service": "photoslibrary", "version": "v1"},
         ),
-        "tasks": ServiceMetadata(
-            name="Google Tasks",
-            description="Task management service",
-            icon="✅",
-            version="v1",
-            scopes=GOOGLE_API_SCOPES["tasks"],
-            default_scope_group="tasks_basic",
-            features=["task_lists", "due_dates", "notes", "completion_tracking"],
-            api_endpoint="https://tasks.googleapis.com/tasks/v1",
-            documentation_url="https://developers.google.com/tasks/reference",
-            service_config={"service": "tasks", "version": "v1"},
-        ),
+        # Google Tasks intentionally absent: no Tasks tools are implemented,
+        # and Google's OAuth verification requires every requested scope to
+        # map to a demonstrable feature. Re-add metadata + scope groups +
+        # oauth_comprehensive entry together with the first Tasks tool.
         "people": ServiceMetadata(
             name="Google People API",
             description="User profile and contact information service",
@@ -346,23 +338,23 @@ class ScopeRegistry:
     SERVICE_SCOPE_GROUPS = {
         # Base OAuth scopes for user authentication
         "base": ["base.userinfo_email", "base.userinfo_profile", "base.openid"],
-        # Basic service combinations
+        # Basic service combinations.
+        # These are what tools request by default, so each must stay a
+        # subset of what the OAuth flows actually grant (oauth_comprehensive
+        # for Workspace services, photos_basic for Photos) — full scopes
+        # cover the readonly variants at the API level, and requesting
+        # narrower strings the token doesn't carry just produces
+        # "missing scopes" warnings.
         "drive_basic": [
             "base.userinfo_email",
             "base.openid",
             "drive.full",  # Full Drive access for MCP - required to access shared/organizational files
-            "drive.readonly",
-            "drive.file",
         ],
         "drive_full": ["base.userinfo_email", "base.openid", "drive.full"],
         "gmail_basic": [
             "base.userinfo_email",
             "base.openid",
-            "gmail.readonly",
-            "gmail.send",
-            "gmail.compose",
             "gmail.modify",
-            "gmail.labels",
             "gmail.settings_basic",
             "gmail.settings_sharing",
         ],
@@ -370,33 +362,27 @@ class ScopeRegistry:
         "calendar_basic": [
             "base.userinfo_email",
             "base.openid",
-            "calendar.readonly",
-            "calendar.events",
             "calendar.full",
         ],
         "calendar_full": ["base.userinfo_email", "base.openid", "calendar.full"],
         "docs_basic": [
             "base.userinfo_email",
             "base.openid",
-            "docs.readonly",
             "docs.full",
         ],
         "sheets_basic": [
             "base.userinfo_email",
             "base.openid",
-            "sheets.readonly",
             "sheets.full",
         ],
         "chat_basic": [
             "base.userinfo_email",
             "base.userinfo_profile",
             "base.openid",
-            "chat.messages_readonly",
             "chat.messages",
             "chat.spaces",
-            "chat.memberships_readonly",
             "chat.memberships",
-            "people.readonly",
+            "people.contacts",
         ],
         # Bot identity scope (SA acts as Chat app — can send cards)
         "chat_bot": [
@@ -425,14 +411,13 @@ class ScopeRegistry:
             "base.userinfo_email",
             "base.openid",
             "forms.body",
-            "forms.body_readonly",
+            # No full scope covers form responses — this must stay.
             "forms.responses_readonly",
         ],
         "slides_basic": [
             "base.userinfo_email",
             "base.openid",
             "slides.full",
-            "slides.readonly",
         ],
         # Photos scopes CANNOT be combined with Drive (or other Workspace)
         # scopes in a single authorization request — Google's auth server
@@ -453,19 +438,12 @@ class ScopeRegistry:
             "photos.readonly_appcreated",
             "photos.edit_appcreated",
         ],
-        "tasks_basic": [
-            "base.userinfo_email",
-            "base.openid",
-            "tasks.readonly",
-            "tasks.full",
-        ],
-        "tasks_full": ["base.userinfo_email", "base.openid", "tasks.full"],
         "people_basic": [
             "base.userinfo_email",
             "base.userinfo_profile",
             "base.openid",
-            "people.readonly",
-            "people.contacts",  # Write access needed for contact group management
+            "people.contacts",  # Full contacts covers readonly; write needed for contact groups
+            # No full scope covers directory data — this must stay.
             "people.directory_readonly",
         ],
         "people_full": [
@@ -479,7 +457,7 @@ class ScopeRegistry:
         "office_suite": [
             "base.userinfo_email",
             "base.openid",
-            "drive.file",
+            "drive.full",
             "docs.full",
             "sheets.full",
             "slides.full",
@@ -489,7 +467,7 @@ class ScopeRegistry:
             "base.openid",
             "gmail.modify",
             "chat.messages",
-            "calendar.events",
+            "calendar.full",
         ],
         "admin_suite": [
             "base.userinfo_email",
@@ -498,45 +476,38 @@ class ScopeRegistry:
             "admin.groups",
             "admin.roles",
         ],
-        # Comprehensive access for OAuth flows (validated scopes only)
+        # Comprehensive access for OAuth flows (validated scopes only).
+        #
+        # Least-privilege invariant (Google OAuth verification requires it):
+        # never request a narrower scope alongside the full scope that
+        # already covers it. Full scopes cover their readonly variants at
+        # the API level (drive ⊇ drive.readonly/drive.file, gmail.modify ⊇
+        # gmail.readonly/send/compose/labels, contacts ⊇ contacts.readonly,
+        # etc.), so the narrow strings here were redundant and Google's
+        # review flags such pairs. forms.responses_readonly and
+        # people.directory_readonly stay: no requested full scope covers
+        # form responses or directory data.
         "oauth_comprehensive": [
             "base.userinfo_email",
             "base.userinfo_profile",
             "base.openid",
             "drive.full",
-            "drive.readonly",
-            "drive.file",
-            "docs.readonly",
             "docs.full",
-            "gmail.readonly",
-            "gmail.send",
-            "gmail.compose",
             "gmail.modify",
-            "gmail.labels",
             "gmail.settings_basic",
             "gmail.settings_sharing",
-            "chat.messages_readonly",
             "chat.messages",
             "chat.spaces",
-            "chat.memberships_readonly",
             "chat.memberships",
-            "sheets.readonly",
             "sheets.full",
             "forms.body",
-            "forms.body_readonly",
             "forms.responses_readonly",
             "slides.full",
-            "slides.readonly",
             # photos.* intentionally excluded: Google rejects authorization
             # requests that combine photoslibrary scopes with Drive scopes
             # (400 invalid_request). Photos requires its own OAuth flow —
             # see SEPARATE_AUTH_SERVICES and the photos_basic group.
-            "calendar.readonly",
-            "calendar.events",
             "calendar.full",
-            "tasks.readonly",
-            "tasks.full",
-            "people.readonly",
             "people.contacts",
             "people.directory_readonly",
         ],
@@ -683,19 +654,15 @@ class ScopeRegistry:
                 # If no full scope, add all available scopes
                 result_scopes.extend(service_scopes.values())
         else:
-            # Basic access - add commonly needed scopes
+            # Basic access — request the full scope where one exists (it
+            # covers readonly at the API level and keeps requests aligned
+            # with what the OAuth flows grant).
             if service == "drive":
-                result_scopes.extend(
-                    [service_scopes["file"], service_scopes["readonly"]]
-                )
+                result_scopes.append(service_scopes["full"])
             elif service == "gmail":
-                result_scopes.extend(
-                    [service_scopes["readonly"], service_scopes["send"]]
-                )
+                result_scopes.append(service_scopes["modify"])
             elif service == "calendar":
-                result_scopes.extend(
-                    [service_scopes["readonly"], service_scopes["events"]]
-                )
+                result_scopes.append(service_scopes["full"])
             elif service == "photos":
                 result_scopes.extend(
                     [
@@ -704,11 +671,11 @@ class ScopeRegistry:
                     ]
                 )
             else:
-                # Default to readonly and full if available
-                if "readonly" in service_scopes:
-                    result_scopes.append(service_scopes["readonly"])
+                # Default to the full scope, falling back to readonly
                 if "full" in service_scopes:
                     result_scopes.append(service_scopes["full"])
+                elif "readonly" in service_scopes:
+                    result_scopes.append(service_scopes["readonly"])
 
         return result_scopes
 

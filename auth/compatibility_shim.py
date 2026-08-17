@@ -338,21 +338,18 @@ class CompatibilityShim:
         """
         logger.info("COMPATIBILITY: Generating legacy DCR scope defaults")
 
-        # Ensure DCR default scopes include Gmail Settings scopes so clients can request filters/forwarding
+        # Least-privilege defaults: full scopes cover their readonly/send/
+        # compose/labels variants, and Google's OAuth verification flags
+        # redundant narrow+full pairs.
         default_scopes = [
             # Base
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["openid"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_email"],
             ScopeRegistry.GOOGLE_API_SCOPES["base"]["userinfo_profile"],
-            # Drive basics
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["file"],
-            # Gmail basics
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["readonly"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["send"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["compose"],
+            # Drive
+            ScopeRegistry.GOOGLE_API_SCOPES["drive"]["full"],
+            # Gmail (modify covers read/send/compose/labels)
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["modify"],
-            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["labels"],
             # Gmail settings needed for filters/forwarding
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"],

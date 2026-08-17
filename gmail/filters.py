@@ -576,20 +576,28 @@ async def create_gmail_filter(
         f"[create_gmail_filter] Parsed remove_label_ids: {parsed_remove_label_ids}"
     )
 
-    if parsed_add_label_ids:
-        action["addLabelIds"] = parsed_add_label_ids
-    if parsed_remove_label_ids:
-        action["removeLabelIds"] = parsed_remove_label_ids
+    # The Gmail API filter action only supports addLabelIds, removeLabelIds,
+    # and forward. The convenience booleans translate to system-label
+    # operations (the fields markAsImportant/markAsSpam/etc. do not exist in
+    # the API and were silently ignored, yielding "Filter doesn't have any
+    # actions" errors).
+    add_labels = list(parsed_add_label_ids or [])
+    remove_labels = list(parsed_remove_label_ids or [])
+    if mark_as_important:
+        add_labels.append("IMPORTANT")
+    if never_mark_as_important:
+        remove_labels.append("IMPORTANT")
+    if mark_as_spam:
+        add_labels.append("SPAM")
+    if never_mark_as_spam:
+        remove_labels.append("SPAM")
+
+    if add_labels:
+        action["addLabelIds"] = add_labels
+    if remove_labels:
+        action["removeLabelIds"] = remove_labels
     if forward_to:
         action["forward"] = forward_to
-    if mark_as_spam is not None:
-        action["markAsSpam"] = mark_as_spam
-    if mark_as_important is not None:
-        action["markAsImportant"] = mark_as_important
-    if never_mark_as_spam is not None:
-        action["neverMarkAsSpam"] = never_mark_as_spam
-    if never_mark_as_important is not None:
-        action["neverMarkAsImportant"] = never_mark_as_important
 
     # Validate that we have at least one criteria and one action
     if not criteria:
@@ -718,10 +726,24 @@ async def create_gmail_filter(
         logger.error(f"Gmail API error in create_gmail_filter: {e}")
         error_msg = ""
         if e.resp.status in [401, 403]:
-            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            if forward_to:
+                error_msg = (
+                    f"Permission error creating a forwarding filter: forwarding requires the "
+                    f"gmail.settings.sharing scope. Re-authenticate with start_google_auth for "
+                    f"'{user_google_email}' to grant it, then retry."
+                )
+            else:
+                error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
             error_details = str(e)
-            if "already exists" in error_details.lower():
+            if "unrecognized forwarding address" in error_details.lower():
+                error_msg = (
+                    f"Forwarding address not verified: '{forward_to}' is not set up as a "
+                    f"forwarding address for {user_google_email}. In Gmail, go to Settings → "
+                    f"'Forwarding and POP/IMAP' → 'Add a forwarding address', then click the "
+                    f"link in Google's confirmation email sent to that address. Retry once verified."
+                )
+            elif "already exists" in error_details.lower():
                 error_msg = "Filter already exists: A filter with similar criteria already exists in your Gmail account."
             elif "label" in error_details.lower() and (
                 "not found" in error_details.lower()

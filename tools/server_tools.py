@@ -639,13 +639,24 @@ def setup_server_tools(mcp: FastMCP) -> None:
         },
     )
     async def manage_credentials_tool(
-        email: Annotated[str, Field(description="User's Google email address")],
         action: Annotated[
             Literal["status", "migrate", "summary", "delete"],
             Field(
                 description="Action to perform: 'status' (check status), 'migrate' (migrate storage mode), 'summary' (get summary), 'delete' (delete credentials)"
             ),
         ],
+        email: Annotated[
+            Optional[str],
+            Field(
+                description="Target user's Google email address. Takes precedence over user_google_email when both are set."
+            ),
+        ] = None,
+        user_google_email: Annotated[
+            Optional[str],
+            Field(
+                description="Session user's Google email (auto-injected by middleware). Used as the target when 'email' is not given."
+            ),
+        ] = None,
         new_storage_mode: Annotated[
             Optional[str],
             Field(
@@ -656,15 +667,30 @@ def setup_server_tools(mcp: FastMCP) -> None:
         """
         Manage credential storage and security settings.
 
+        The target account is `email` when provided, otherwise the
+        session's auto-injected `user_google_email` — so the tool works
+        both with an explicit target and through code-mode execute,
+        whose middleware injects user_google_email into every call.
+
         Args:
-            email: User's Google email address
             action: Action to perform - 'status', 'migrate', 'summary', or 'delete'
+            email: Explicit target email (wins over user_google_email)
+            user_google_email: Session email fallback (auto-injected)
             new_storage_mode: Target storage mode for migration (required when action='migrate')
 
         Returns:
             ManageCredentialsResponse: Structured result of the credential management operation
         """
-        return await manage_credentials(email, action, new_storage_mode)
+        target_email = email or user_google_email
+        if not target_email:
+            return ManageCredentialsResponse(
+                success=False,
+                action=action,
+                email="",
+                message="No target account: provide 'email' (or authenticate so user_google_email is injected).",
+                error="Missing email",
+            )
+        return await manage_credentials(target_email, action, new_storage_mode)
 
     @mcp.tool(
         name="manage_tools",

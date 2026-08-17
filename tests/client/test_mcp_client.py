@@ -22,9 +22,10 @@ class TestMCPServer:
     async def test_list_tools(self, client):
         """Test listing available tools.
 
-        NOTE: When CodeMode is enabled, list_tools returns 4 meta-tools
-        (tags, search, get_schema, execute) instead of individual tools.
-        Underlying tools are accessed via the `execute` meta-tool.
+        NOTE: When CodeMode is enabled, list_tools returns only meta-tools
+        (tags, search, get_schema, execute, plus optional extras like
+        semantic_search, fetch_document, tool_activity) instead of
+        individual tools. Underlying tools are accessed via `execute`.
         """
         tools = await client.list_tools()
 
@@ -33,13 +34,17 @@ class TestMCPServer:
 
         tool_names = [tool.name for tool in tools]
 
-        # Detect CodeMode (4 meta-tools) vs normal mode
+        # Detect CodeMode (meta-tools only) vs normal mode
         code_mode_tools = {"tags", "search", "get_schema", "execute"}
         if code_mode_tools.issubset(set(tool_names)):
-            # CodeMode is active — verify the 4 meta-tools
-            assert len(tool_names) == 4, (
-                f"CodeMode should expose exactly 4 meta-tools, got {len(tool_names)}: {tool_names}"
+            # CodeMode is active — only meta-tools are exposed, and the
+            # exact set can grow (semantic_search, fetch_document, ...).
+            # The real signal is that individual service tools are hidden.
+            assert len(tool_names) <= 10, (
+                f"CodeMode should expose only meta-tools, got {len(tool_names)}: {tool_names}"
             )
+            assert "send_gmail_message" not in tool_names
+            assert "search_drive_files" not in tool_names
         else:
             # Normal mode — check for expected tools
             assert "health_check" in tool_names

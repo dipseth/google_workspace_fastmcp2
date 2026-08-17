@@ -399,7 +399,8 @@
   "manage_credentials": [
     "action",
     "email",
-    "new_storage_mode"
+    "new_storage_mode",
+    "user_google_email"
   ],
   "manage_drive_files": [
     "file_ids",
@@ -578,6 +579,11 @@
     "page_size",
     "query",
     "space_id",
+    "user_google_email"
+  ],
+  "search_people": [
+    "page_size",
+    "query",
     "user_google_email"
   ],
   "search_photos": [

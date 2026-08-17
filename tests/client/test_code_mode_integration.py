@@ -118,7 +118,8 @@ class TestJsonIntegration:
             exec_client,
             "d = {'a': 1, 'b': [1, 2, 3]}\nreturn from_json(to_json(d)) == d",
         )
-        assert "True" in out
+        # execute JSON-serialises return values, so a bool renders as "true"
+        assert out.strip().lower() in ("true", '"true"') or "True" in out
 
     async def test_from_json_passthrough(self, exec_client):
         out = await run(
@@ -316,51 +317,35 @@ class TestHashIntegration:
 
 @pytest.mark.asyncio
 class TestSandboxBehaviours:
-    async def test_starred_list_returns_sandbox_error(self, exec_client):
-        """[*a, *b] fails at Monty PARSE TIME — not catchable inside the code.
+    async def test_starred_list_unpacking_works(self, exec_client):
+        """[*a, *b] parses and evaluates.
 
-        WRONG approach (what we originally tested):
-            try:
-                r = [*a, *b]       # ← inside the code passed to Monty
-            except Exception as e:
-                return str(e)      # ← this never runs; parser rejects the whole file
-
-        CORRECT expectation after fix: execute returns "SandboxError: ..." as text,
-        the tool call does NOT raise an MCP-level exception.
+        Historically pydantic-monty rejected starred expressions at parse
+        time (the whole block failed with SandboxError before any line ran).
+        Current Monty supports them — keep this pinned so a regression to
+        the old parse-time failure is caught.
         """
-        out = await run(exec_client, "a = [1, 2]\nb = [3, 4]\nreturn [*a, *b]")
-        assert "SandboxError" in out, (
-            f"Expected SandboxError in output, got: {out!r}\n"
-            "If this test raises instead of returning, run() is not catching parse errors."
-        )
-        assert "starred" in out.lower() or "a + b" in out
+        out = await run(exec_client, "a = [1, 2]\nb = [3, 4]\nreturn to_json([*a, *b])")
+        assert json.loads(out) == [1, 2, 3, 4]
 
-    async def test_starred_dict_returns_sandbox_error(self, exec_client):
-        """{**d1, **d2} also fails at parse time."""
+    async def test_starred_dict_unpacking_works(self, exec_client):
+        """{**d1, **d2} parses and evaluates (see starred-list note above)."""
         out = await run(
-            exec_client, "d1 = {'a': 1}\nd2 = {'b': 2}\nreturn {**d1, **d2}"
+            exec_client, "d1 = {'a': 1}\nd2 = {'b': 2}\nreturn to_json({**d1, **d2})"
         )
-        assert "SandboxError" in out
+        assert json.loads(out) == {"a": 1, "b": 2}
 
-    async def test_starred_in_try_except_is_still_parse_error(self, exec_client):
-        """Wrapping [*a, *b] in try/except inside the code does NOT help.
-
-        The parser sees [*a, *b] and rejects the whole file before any
-        try/except can execute.  After the fix, run() catches it externally
-        and the output is SandboxError — NOT 'caught: ...'.
-        """
+    async def test_starred_inside_try_except_works(self, exec_client):
+        """Starred expressions inside try/except evaluate normally now."""
         code = (
             "a = [1]\nb = [2]\n"
             "try:\n"
-            "  r = [*a, *b]\n"
+            "  return to_json([*a, *b])\n"
             "except Exception as e:\n"
             "  return 'caught: ' + str(e)"
         )
         out = await run(exec_client, code)
-        assert "caught:" not in out, (
-            "try/except inside Monty code cannot catch parse-time failures"
-        )
-        assert "SandboxError" in out
+        assert json.loads(out) == [1, 2]
 
     async def test_sorted_lambda_key_returns_error(self, exec_client):
         """sorted_(items, key=lambda x: x['n']) causes TypeError at runtime.
@@ -415,9 +400,11 @@ class TestSandboxBehaviours:
         assert "subprocess" in out.lower() or "module" in out.lower()
 
     async def test_return_required_for_output(self, exec_client):
-        """Without return, execute produces no meaningful output."""
-        out = await run(exec_client, "x = 42")
-        assert out.strip() in ("", "None", "null")
+        """Without return, execute produces no output content at all."""
+        result = await exec_client.call_tool("execute", {"code": "x = 42"})
+        assert not result.is_error
+        text = result.content[0].text if result.content else ""
+        assert text.strip() in ("", "None", "null")
 
     async def test_multiline_computation(self, exec_client):
         """Complex multi-step logic works end-to-end."""

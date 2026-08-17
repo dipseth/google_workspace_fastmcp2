@@ -323,17 +323,10 @@ def pytest_configure(config):
     )
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create a session-scoped event loop for async fixtures.
-
-    This is required for session-scoped async fixtures to work properly
-    with pytest-asyncio. Without this, session-scoped async fixtures
-    will hang because they try to use a function-scoped event loop.
-    """
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# NOTE: no custom `event_loop` fixture here — pytest-asyncio 1.x removed
+# support for overriding it. Loop sharing is configured instead via
+# asyncio_default_fixture_loop_scope / asyncio_default_test_loop_scope
+# (see pyproject.toml [tool.pytest.ini_options] and tests/client/pytest.ini).
 
 
 @pytest.fixture(scope="session", autouse=True)

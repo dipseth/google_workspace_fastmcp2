@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "google-workspace-unlimited"
-version = "2.7.0"
-description = "Comprehensive MCP server for Google Workspace integration - 90+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos with Code Mode tool discovery and OAuth 2.1 + PKCE authentication"
+version = "2.8.0"
+description = "Comprehensive MCP server for Google Workspace integration - 90+ tools across Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos, and Contacts with Code Mode tool discovery and OAuth 2.1 + PKCE authentication"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11,<3.13"
@@ -156,6 +156,12 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short --ignore=tests/content_mapping"
 asyncio_mode = "auto"
+# NOTE: do NOT set asyncio_default_*_loop_scope = "session" here. The unit
+# suite has tests that close or replace the running event loop; under a
+# shared session loop that kills every async test after them (CI: "There is
+# no current event loop"). The client suite, which DOES need session-scoped
+# loops for its shared live-server clients, gets them from
+# tests/client/pytest.ini — the active config when running `pytest tests/client/`.
 
 markers = [
     "auth_required: mark test as requiring authentication",

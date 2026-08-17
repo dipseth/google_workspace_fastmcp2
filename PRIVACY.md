@@ -2,7 +2,7 @@
 
 **Effective date:** August 14, 2026
 
-RiversUnlimited Google Workspace MCP ("the App") is an open-source, **self-hosted** [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI assistants you authorize (such as Claude) work with your Google Workspace data — Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Tasks, Photos, and Contacts — on your behalf.
+RiversUnlimited Google Workspace MCP ("the App") is an open-source, **self-hosted** [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI assistants you authorize (such as Claude) work with your Google Workspace data — Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos, and Contacts — on your behalf.
 
 Because the App is self-hosted, **your data is processed on infrastructure operated by whoever runs the server instance** (typically you). There is no central service operated by the App's authors, and the App's authors never receive your data.
 

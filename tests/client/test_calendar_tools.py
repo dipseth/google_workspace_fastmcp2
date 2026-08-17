@@ -214,43 +214,24 @@ class TestCalendarTools:
 
     @pytest.mark.asyncio
     async def test_list_events_structured_error_response(self, client):
-        """Test that list_events returns structured responses even on errors."""
-        # Use an invalid calendar ID to trigger an error
-        result = await client.call_tool(
-            "list_events",
-            {
-                "user_google_email": "nonexistent@invalid.com",
-                "calendar_id": "invalid_calendar_id",
-                "max_results": 5,
-            },
-        )
+        """Calling with a foreign email is rejected by the identity middleware.
 
-        # Handle CallToolResult object properly
-        assert result is not None
-        # Extract content from result
-        if hasattr(result, "content"):
-            if isinstance(result.content, list) and len(result.content) > 0:
-                content = (
-                    result.content[0].text
-                    if hasattr(result.content[0], "text")
-                    else str(result.content[0])
-                )
-            else:
-                content = str(result.content) if result.content else ""
-        else:
-            content = str(result)
+        The session-email mismatch guard rejects calls whose
+        user_google_email doesn't match the authenticated session before
+        the tool runs, so this surfaces as a ToolError — not a structured
+        error payload from the tool itself.
+        """
+        from fastmcp.exceptions import ToolError
 
-        # The error should be returned as structured content, not a raw error string
-        # Check that we don't get the old ValueError about structured_content
-        assert "ValueError: structured_content must be a dict or None" not in content, (
-            "Bug detected: Error responses are not being returned as structured EventListResponse"
-        )
-
-        # The response should contain error information
-        assert any(
-            keyword in content.lower()
-            for keyword in ["error", "failed", "unable", "requires authentication"]
-        ), f"Error response not properly formatted: {content}"
+        with pytest.raises(ToolError, match="[Ee]mail mismatch"):
+            await client.call_tool(
+                "list_events",
+                {
+                    "user_google_email": "nonexistent@invalid.com",
+                    "calendar_id": "invalid_calendar_id",
+                    "max_results": 5,
+                },
+            )
 
     @pytest.mark.asyncio
     async def test_list_events_with_time_range(self, client):
@@ -1362,38 +1343,17 @@ class TestCalendarTools:
 
     @pytest.mark.asyncio
     async def test_list_calendars_structured_error_response(self, client):
-        """Test that list_calendars returns structured responses even on errors."""
-        # Use an invalid email to trigger an error
-        result = await client.call_tool(
-            "list_calendars", {"user_google_email": "nonexistent@invalid.com"}
-        )
+        """Calling with a foreign email is rejected by the identity middleware.
 
-        # Handle CallToolResult object properly
-        assert result is not None
-        # Extract content from result
-        if hasattr(result, "content"):
-            if isinstance(result.content, list) and len(result.content) > 0:
-                content = (
-                    result.content[0].text
-                    if hasattr(result.content[0], "text")
-                    else str(result.content[0])
-                )
-            else:
-                content = str(result.content) if result.content else ""
-        else:
-            content = str(result)
+        See test_list_events_structured_error_response — the mismatch guard
+        raises ToolError before the tool produces a structured response.
+        """
+        from fastmcp.exceptions import ToolError
 
-        # The error should be returned as structured content, not a raw error string
-        # Check that we don't get the old ValueError about structured_content
-        assert "ValueError: structured_content must be a dict or None" not in content, (
-            "Bug detected: Error responses are not being returned as structured CalendarListResponse"
-        )
-
-        # The response should contain error information
-        assert any(
-            keyword in content.lower()
-            for keyword in ["error", "failed", "unable", "requires authentication"]
-        ), f"Error response not properly formatted: {content}"
+        with pytest.raises(ToolError, match="[Ee]mail mismatch"):
+            await client.call_tool(
+                "list_calendars", {"user_google_email": "nonexistent@invalid.com"}
+            )
 
 
 @pytest.mark.service("calendar")

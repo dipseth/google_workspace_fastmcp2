@@ -47,9 +47,10 @@ import asyncio
 
 from fastmcp import FastMCP
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from typing_extensions import Any, Dict, List, Optional, Union
 
-from auth.context import get_auth_middleware
+from auth.service_helpers import get_injected_service, request_service
 from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmail
 
@@ -58,6 +59,8 @@ from .people_types import (
     GetPeopleContactGroupMembersResponse,
     ListPeopleContactLabelsResponse,
     ManagePeopleContactLabelsResponse,
+    PersonSearchResult,
+    SearchPeopleResponse,
 )
 
 logger = setup_logger()
@@ -65,45 +68,40 @@ logger = setup_logger()
 
 async def _get_people_service(user_email: UserGoogleEmail):
     """
-    Build a Google People API service instance.
+    Get a People API service via middleware injection, falling back to
+    direct service creation (same pattern as the other service modules).
+
+    The previous implementation loaded credentials through
+    AuthMiddleware.load_credentials() without a decryption key, which
+    silently returns None under encrypted credential storage.
 
     Returns:
         A People API service client or None if credentials are unavailable.
     """
     if not user_email:
-        logger.warning("No user email provided for People API (contact labels listing)")
+        logger.warning("No user email provided for People API")
         return None
 
     try:
-        auth_middleware = get_auth_middleware()
-    except Exception as exc:
-        logger.warning(
-            f"AuthMiddleware lookup failed for People API (contact labels listing): {exc}"
-        )
-        return None
+        service_key = await request_service("people")
+        service = await get_injected_service(service_key)
+        if service:
+            logger.debug("Using middleware-injected People service")
+            return service
+    except Exception as e:
+        logger.warning(f"Middleware People service injection failed: {e}")
 
-    if not auth_middleware:
-        logger.warning(
-            "No AuthMiddleware available for People API (contact labels listing)"
-        )
-        return None
-
+    logger.info("Falling back to direct People service creation")
     try:
-        credentials = auth_middleware.load_credentials(user_email)
-    except Exception as exc:
-        logger.warning(
-            f"Error loading credentials for People API (contact labels listing) for user {user_email}: {exc}"
-        )
-        return None
+        from auth.scope_registry import ScopeRegistry
+        from auth.service_manager import get_google_service
 
-    if not credentials:
-        logger.warning(
-            f"No credentials found for People API (contact labels listing) for user {user_email}"
+        return await get_google_service(
+            user_email=user_email,
+            service_type="people",
+            version="v1",
+            scopes=ScopeRegistry.resolve_scope_group("people_basic"),
         )
-        return None
-
-    try:
-        return await asyncio.to_thread(build, "people", "v1", credentials=credentials)
     except Exception as exc:
         logger.error(f"Failed to build People API service: {exc}")
         return None
@@ -694,8 +692,139 @@ async def list_people_contact_labels(
     )
 
 
+_PERSON_READ_MASK = "names,emailAddresses,phoneNumbers,organizations"
+
+
+def _person_to_result(person: Dict, source: str) -> PersonSearchResult:
+    """Convert a People API person object to a PersonSearchResult."""
+    names = person.get("names", [])
+    orgs = []
+    for org in person.get("organizations", []):
+        label = " @ ".join(p for p in [org.get("title"), org.get("name")] if p)
+        if label:
+            orgs.append(label)
+    return PersonSearchResult(
+        display_name=names[0].get("displayName") if names else None,
+        emails=[e["value"] for e in person.get("emailAddresses", []) if e.get("value")],
+        source=source,
+        resourceName=person.get("resourceName"),
+        organizations=orgs,
+        phones=[p["value"] for p in person.get("phoneNumbers", []) if p.get("value")],
+    )
+
+
+async def search_people(
+    query: str,
+    user_google_email: UserGoogleEmail = None,
+    page_size: int = 10,
+) -> SearchPeopleResponse:
+    """
+    Resolve a name (or partial name/email) to people, searching the user's
+    saved contacts (people.searchContacts, contacts scope) and — on Workspace
+    accounts — the organization directory (people.searchDirectoryPeople,
+    directory.readonly scope). Consumer Gmail accounts have no Workspace
+    directory; that source is skipped gracefully with an explanatory note.
+    """
+    service = await _get_people_service(user_google_email)
+    if service is None:
+        return SearchPeopleResponse(
+            success=False,
+            query=query,
+            user_email=user_google_email or "",
+            error="People API service unavailable - check credentials (run start_google_auth)",
+        )
+
+    results: List[PersonSearchResult] = []
+    directory_searched = False
+    directory_note: Optional[str] = None
+
+    # --- Source 1: saved contacts -------------------------------------------
+    try:
+        # Google recommends a warmup request (empty query) before the first
+        # searchContacts call so the search cache is populated.
+        await asyncio.to_thread(
+            service.people()
+            .searchContacts(query="", readMask=_PERSON_READ_MASK, pageSize=1)
+            .execute
+        )
+        contacts_resp = await asyncio.to_thread(
+            service.people()
+            .searchContacts(query=query, readMask=_PERSON_READ_MASK, pageSize=page_size)
+            .execute
+        )
+        for match in contacts_resp.get("results", []):
+            person = match.get("person")
+            if person:
+                results.append(_person_to_result(person, "contacts"))
+    except HttpError as e:
+        logger.error(f"search_people: contacts search failed: {e}")
+        return SearchPeopleResponse(
+            success=False,
+            query=query,
+            user_email=user_google_email or "",
+            error=f"Contacts search failed: {e}",
+        )
+
+    # --- Source 2: Workspace directory (org accounts only) ------------------
+    try:
+        directory_resp = await asyncio.to_thread(
+            service.people()
+            .searchDirectoryPeople(
+                query=query,
+                readMask=_PERSON_READ_MASK,
+                pageSize=page_size,
+                sources=[
+                    "DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE",
+                    "DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT",
+                ],
+            )
+            .execute
+        )
+        directory_searched = True
+        for person in directory_resp.get("people", []):
+            results.append(_person_to_result(person, "directory"))
+    except HttpError as e:
+        # Expected on consumer accounts: no Workspace directory exists.
+        status = e.resp.status if hasattr(e, "resp") else None
+        directory_note = (
+            "Workspace directory not available for this account "
+            "(consumer Gmail accounts have no org directory)."
+            if status in (400, 403)
+            else f"Directory search failed with HTTP {status}."
+        )
+        logger.info(f"search_people: directory source skipped: {directory_note}")
+
+    return SearchPeopleResponse(
+        success=True,
+        query=query,
+        results=results,
+        total_count=len(results),
+        contacts_searched=True,
+        directory_searched=directory_searched,
+        directory_note=directory_note,
+        user_email=user_google_email or "",
+    )
+
+
 def setup_people_tools(mcp: FastMCP) -> None:
     """Register People API tools with the FastMCP server."""
+
+    @mcp.tool(
+        name="search_people",
+        description=(
+            "Resolve a name to a person and their email address: search the user's "
+            "saved contacts and, on Workspace accounts, the organization directory. "
+            "Type 'Dan' and get matching people with their emails - useful before "
+            "sending mail, sharing files, or adding Chat members."
+        ),
+        tags={"people", "contacts", "directory", "search", "resolve", "service"},
+    )
+    async def search_people_tool(
+        query: str,
+        user_google_email: UserGoogleEmail = None,
+        page_size: int = 10,
+    ) -> SearchPeopleResponse:
+        return await search_people(query, user_google_email, page_size)
 
     @mcp.tool(
         name="list_people_contact_labels",

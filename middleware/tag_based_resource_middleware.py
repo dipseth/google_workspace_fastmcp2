@@ -238,16 +238,6 @@ class TagBasedResourceMiddleware(Middleware):
                         "id_field": "label",  # Changed from resourceName to match the tool parameter
                     }
                 }
-            elif service_name == "tasks":
-                service_config["list_types"] = {
-                    "task_lists": {
-                        "display_name": "Task Lists",
-                        "description": "Task lists and todo items",
-                        "list_tool": "list_task_lists",
-                        "get_tool": "get_task_list",
-                        "id_field": "task_list_id",
-                    }
-                }
 
             # Filter based on available tools if provided
             if available_tools:
