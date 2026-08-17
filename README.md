@@ -12,7 +12,7 @@
 
 [![google_workspace_fastmcp2 MCP server](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2/badges/card.svg)](https://glama.ai/mcp/servers/dipseth/google_workspace_fastmcp2)
 
-**GoogleUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, and Photos services using a unified, secure API.
+**GoogleUnlimited** is a comprehensive MCP framework that provides seamless Google Workspace integration through an advanced middleware architecture. It enables AI assistants and MCP clients to interact with Gmail, Google Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos, and Contacts (People API) services using a unified, secure API.
 
 **What sets it apart:**
 
@@ -330,7 +330,7 @@ ENABLE_CODE_MODE=false   # expose the full 90+ tool catalog instead
 
 ## 🎯 Service Capabilities
 
-GoogleUnlimited supports **9 Google Workspace services** with **90+ specialized tools**:
+GoogleUnlimited supports **10 Google Workspace services** with **90+ specialized tools**:
 
 | Service | Icon | Tools | Key Features | Documentation |
 |---------|------|-------|--------------|---------------|
@@ -343,9 +343,10 @@ GoogleUnlimited supports **9 Google Workspace services** with **90+ specialized 
 | **Forms** | 📝 | 8 | Creation, responses, validation, publishing | [`api-reference/forms/`](documentation/api-reference/forms/) |
 | **Chat** | 💬 | 24 | Messaging, cards, spaces, webhooks, unified cards | [`api-reference/chat/`](documentation/api-reference/chat/) |
 | **Photos** | 📷 | 12 | Albums, upload, search, metadata, smart search | [`api-reference/photos/`](documentation/api-reference/photos/) |
+| **People** | 👤 | 4 | Name→email search (contacts + org directory), contact labels | [`people/`](people/) |
 
 > 📚 **API Documentation Resources:**
-> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 92+ tools across 9 services
+> - 🔗 **[Complete API Reference](documentation/api-reference/)** - Comprehensive documentation for all 92+ tools across 10 services
 > - 📧 **[Gmail API Guide](documentation/api-reference/gmail/)** - Email management, labels, filters, and search operations
 > - 📁 **[Drive API Guide](documentation/api-reference/drive/)** - File operations, sharing, and Office document handling
 > - 📊 **[Sheets API Guide](documentation/api-reference/sheets/)** - Spreadsheet data manipulation and formatting
