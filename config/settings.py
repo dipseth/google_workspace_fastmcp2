@@ -766,9 +766,9 @@ class Settings(BaseSettings):
         "https://www.googleapis.com/auth/documents",
         # Gmail (modify covers read/send/compose/labels)
         "https://www.googleapis.com/auth/gmail.modify",
-        # Gmail Settings (filters/labels; settings.sharing intentionally
-        # absent — only filter forward-to actions need it)
+        # Gmail Settings scopes (CRITICAL for filters/forwarding)
         "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.settings.sharing",
         # Google Chat
         "https://www.googleapis.com/auth/chat.messages",
         "https://www.googleapis.com/auth/chat.spaces",
@@ -846,9 +846,16 @@ class Settings(BaseSettings):
             gmail_settings_basic = (
                 "https://www.googleapis.com/auth/gmail.settings.basic"
             )
+            gmail_settings_sharing = (
+                "https://www.googleapis.com/auth/gmail.settings.sharing"
+            )
             has_settings_basic = gmail_settings_basic in scopes
+            has_settings_sharing = gmail_settings_sharing in scopes
             logging.debug(
                 f"SCOPE_DEBUG: Gmail settings.basic included: {has_settings_basic}"
+            )
+            logging.debug(
+                f"SCOPE_DEBUG: Gmail settings.sharing included: {has_settings_sharing}"
             )
 
             return scopes

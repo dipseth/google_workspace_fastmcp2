@@ -42,6 +42,7 @@ _FALLBACK_OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     # Ensure fallback advertises Gmail Settings so inspectors/clients know they’re supported
     "https://www.googleapis.com/auth/gmail.settings.basic",
+    "https://www.googleapis.com/auth/gmail.settings.sharing",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 

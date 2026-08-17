@@ -219,6 +219,7 @@ class CompatibilityShim:
                     "gmail_modify",
                     "gmail_labels",
                     "gmail_settings_basic",
+                    "gmail_settings_sharing",
                 ],
                 "version": "v1",
                 "description": "Gmail service",
@@ -349,9 +350,9 @@ class CompatibilityShim:
             ScopeRegistry.GOOGLE_API_SCOPES["drive"]["full"],
             # Gmail (modify covers read/send/compose/labels)
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["modify"],
-            # Gmail settings needed for filters (settings.sharing
-            # intentionally absent — only filter forward-to needs it)
+            # Gmail settings needed for filters/forwarding
             ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_basic"],
+            ScopeRegistry.GOOGLE_API_SCOPES["gmail"]["settings_sharing"],
         ]
 
         return " ".join(default_scopes)
