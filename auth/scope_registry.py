@@ -356,7 +356,10 @@ class ScopeRegistry:
             "base.openid",
             "gmail.modify",
             "gmail.settings_basic",
-            "gmail.settings_sharing",
+            # gmail.settings_sharing intentionally absent: only filter
+            # forward-to actions need it, and forwarding requires a
+            # pre-verified forwarding address anyway. Not requesting it
+            # keeps the restricted-scope surface minimal for verification.
         ],
         "gmail_full": ["base.userinfo_email", "base.openid", "gmail.full"],
         "calendar_basic": [
@@ -495,7 +498,7 @@ class ScopeRegistry:
             "docs.full",
             "gmail.modify",
             "gmail.settings_basic",
-            "gmail.settings_sharing",
+            # gmail.settings_sharing intentionally absent (see gmail_basic).
             "chat.messages",
             "chat.spaces",
             "chat.memberships",
