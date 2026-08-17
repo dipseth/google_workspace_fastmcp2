@@ -726,10 +726,24 @@ async def create_gmail_filter(
         logger.error(f"Gmail API error in create_gmail_filter: {e}")
         error_msg = ""
         if e.resp.status in [401, 403]:
-            error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
+            if forward_to:
+                error_msg = (
+                    f"Permission error creating a forwarding filter: forwarding requires the "
+                    f"gmail.settings.sharing scope. Re-authenticate with start_google_auth for "
+                    f"'{user_google_email}' to grant it, then retry."
+                )
+            else:
+                error_msg = "Authentication error: Please check your Gmail permissions and re-authenticate if necessary."
         elif e.resp.status == 400:
             error_details = str(e)
-            if "already exists" in error_details.lower():
+            if "unrecognized forwarding address" in error_details.lower():
+                error_msg = (
+                    f"Forwarding address not verified: '{forward_to}' is not set up as a "
+                    f"forwarding address for {user_google_email}. In Gmail, go to Settings → "
+                    f"'Forwarding and POP/IMAP' → 'Add a forwarding address', then click the "
+                    f"link in Google's confirmation email sent to that address. Retry once verified."
+                )
+            elif "already exists" in error_details.lower():
                 error_msg = "Filter already exists: A filter with similar criteria already exists in your Gmail account."
             elif "label" in error_details.lower() and (
                 "not found" in error_details.lower()
