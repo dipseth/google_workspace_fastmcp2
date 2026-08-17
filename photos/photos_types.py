@@ -395,11 +395,13 @@ class PhotoDetailsResponse(BaseModel):
 
 
 class CreateAlbumResponse(BaseModel):
-    """Response structure for create_photos_album tool."""
+    """Response structure for create_photos_album tool (create or rename)."""
 
-    success: bool = Field(True, description="Whether the album creation succeeded")
-    album_id: Optional[str] = Field(None, description="ID of the newly created album")
-    album_title: str = Field("", description="Title of the created album")
+    success: bool = Field(True, description="Whether the album create/rename succeeded")
+    album_id: Optional[str] = Field(
+        None, description="ID of the created or renamed album"
+    )
+    album_title: str = Field("", description="Title of the album")
     product_url: Optional[str] = Field(
         None, description="URL to view the album in Google Photos"
     )

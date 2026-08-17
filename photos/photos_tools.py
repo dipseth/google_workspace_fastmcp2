@@ -615,10 +615,13 @@ def setup_photos_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="create_photos_album",
-        description="Create a new album in Google Photos",
-        tags={"photos", "album", "create", "google"},
+        description=(
+            "Create a new album in Google Photos, or rename an existing "
+            "app-created album by passing its album_id"
+        ),
+        tags={"photos", "album", "create", "rename", "google"},
         annotations={
-            "title": "Create Photos Album",
+            "title": "Create or Rename Photos Album",
             "readOnlyHint": False,
             "destructiveHint": False,
             "idempotentHint": False,
@@ -626,37 +629,53 @@ def setup_photos_tools(mcp: FastMCP) -> None:
         },
     )
     async def create_photos_album(
-        user_google_email: str, title: str
+        user_google_email: str, title: str, album_id: Optional[str] = None
     ) -> CreateAlbumResponse:
         """
-        Create a new album in Google Photos.
+        Create a new album in Google Photos, or rename an existing one.
+
+        Renaming uses albums.patch, which requires the
+        photoslibrary.edit.appcreateddata scope and only works on albums
+        created by this app.
 
         Args:
             user_google_email (str): The user's Google email address. Required.
-            title (str): The title of the new album. Required.
+            title (str): The album title. Required.
+            album_id (Optional[str]): If provided, rename this app-created
+                album to `title` instead of creating a new album.
 
         Returns:
             CreateAlbumResponse: Structured response with album details.
         """
+        action = "rename" if album_id else "create"
         logger.info(
-            f"[create_photos_album] Invoked. Email: '{user_google_email}', Title: {title}"
+            f"[create_photos_album] Invoked. Email: '{user_google_email}', "
+            f"Title: {title}, Action: {action}"
         )
 
         try:
             photos_service = await _get_photos_service_with_fallback(user_google_email)
 
-            album_body = {"album": {"title": title}}
+            if album_id:
+                patch_request = photos_service.albums().patch(
+                    id=album_id, updateMask="title", body={"title": title}
+                )
+                album = await asyncio.to_thread(patch_request.execute)
+                message = (
+                    f"Successfully renamed album {album_id} to '{title}' "
+                    f"for {user_google_email}."
+                )
+            else:
+                album_body = {"album": {"title": title}}
+                create_request = photos_service.albums().create(body=album_body)
+                album = await asyncio.to_thread(create_request.execute)
+                album_id = album.get("id")
+                message = f"Successfully created album '{title}' for {user_google_email}. ID: {album_id}"
 
-            create_request = photos_service.albums().create(body=album_body)
-            album = await asyncio.to_thread(create_request.execute)
-
-            album_id = album.get("id")
             album_url = album.get("productUrl")
 
-            message = f"Successfully created album '{title}' for {user_google_email}. ID: {album_id}"
-
             logger.info(
-                f"Successfully created album for {user_google_email}. ID: {album_id}"
+                f"Successfully {action}d album for {user_google_email}. ID: {album_id}"
             )
 
             return CreateAlbumResponse(
@@ -669,23 +688,25 @@ def setup_photos_tools(mcp: FastMCP) -> None:
             )
 
         except HttpError as e:
-            error_msg = f"Failed to create album: {e}"
+            error_msg = f"Failed to {action} album: {e}"
             logger.error(error_msg)
             return CreateAlbumResponse(
                 success=False,
+                album_id=album_id,
                 album_title=title,
                 user_email=user_google_email,
-                message=f"Failed to create album: {e}",
+                message=error_msg,
                 error=error_msg,
             )
         except Exception as e:
-            error_msg = f"Unexpected error creating album: {str(e)}"
+            error_msg = f"Unexpected error during album {action}: {str(e)}"
             logger.error(error_msg)
             return CreateAlbumResponse(
                 success=False,
+                album_id=album_id,
                 album_title=title,
                 user_email=user_google_email,
-                message=f"Unexpected error creating album: {str(e)}",
+                message=error_msg,
                 error=error_msg,
             )
 

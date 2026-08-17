@@ -113,6 +113,7 @@
     "user_google_email"
   ],
   "create_photos_album": [
+    "album_id",
     "title",
     "user_google_email"
   ],
