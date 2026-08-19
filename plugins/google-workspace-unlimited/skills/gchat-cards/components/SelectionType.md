@@ -1,0 +1,8 @@
+# SelectionType
+
+**Symbol:** `◘`
+
+## Description
+
+SelectionType
+    

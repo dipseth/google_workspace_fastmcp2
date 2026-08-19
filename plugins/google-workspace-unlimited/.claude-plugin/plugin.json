@@ -1,0 +1,46 @@
+{
+  "name": "google-workspace-unlimited",
+  "displayName": "Google Workspace Unlimited",
+  "version": "0.1.0",
+  "description": "Google Workspace MCP server (Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos, Contacts) bundled with skills for the card/email DSL, code mode, and Qdrant search over past tool responses.",
+  "author": {
+    "name": "RiversUnlimited",
+    "url": "https://github.com/dipseth"
+  },
+  "homepage": "https://github.com/dipseth/google_workspace_fastmcp2",
+  "repository": "https://github.com/dipseth/google_workspace_fastmcp2",
+  "license": "Apache-2.0",
+  "keywords": [
+    "google-workspace",
+    "gmail",
+    "drive",
+    "sheets",
+    "calendar",
+    "google-chat",
+    "mcp"
+  ],
+  "userConfig": {
+    "google_client_id": {
+      "type": "string",
+      "title": "Google OAuth client ID",
+      "description": "OAuth 2.0 client ID from Google Cloud Console. Only needed before your first authentication flow; leave blank if you use a client secrets file instead.",
+      "required": false,
+      "default": ""
+    },
+    "google_client_secret": {
+      "type": "string",
+      "title": "Google OAuth client secret",
+      "description": "OAuth 2.0 client secret paired with the client ID above. Only needed before your first authentication flow.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "google_client_secrets_file": {
+      "type": "string",
+      "title": "Google client secrets file (alternative)",
+      "description": "Path to the OAuth client JSON downloaded from Google Cloud Console. Alternative to entering the client ID and secret directly.",
+      "required": false,
+      "default": ""
+    }
+  }
+}

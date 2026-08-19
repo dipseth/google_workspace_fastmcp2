@@ -1,0 +1,68 @@
+{
+  "name": "mjml-email",
+  "description": "Skills for gmail.mjml_types",
+  "skills": [
+    {
+      "name": "SKILL",
+      "title": "MJML Email Composer",
+      "description": "MJML Email Composer \u2014 email block symbols, DSL syntax, and per-component docs for composing rich HTML emails with the Google Workspace MCP server",
+      "filename": "SKILL.md",
+      "tags": [
+        "gmail.mjml_types",
+        "mjml-email"
+      ]
+    },
+    {
+      "name": "symbols",
+      "title": "Symbol Reference for gmail.mjml_types",
+      "description": "Component symbol reference table",
+      "filename": "symbols.md",
+      "tags": [
+        "gmail.mjml_types",
+        "reference",
+        "symbols"
+      ]
+    },
+    {
+      "name": "containment-rules",
+      "title": "Containment Rules for gmail.mjml_types",
+      "description": "What components can contain what",
+      "filename": "containment-rules.md",
+      "tags": [
+        "containment",
+        "hierarchy",
+        "rules"
+      ]
+    },
+    {
+      "name": "email-dsl-syntax",
+      "title": "Email Dsl Syntax",
+      "description": "Custom guide: email-dsl-syntax",
+      "filename": "email-dsl-syntax.md",
+      "tags": [
+        "email-dsl-syntax"
+      ]
+    },
+    {
+      "name": "email-params",
+      "title": "Email Params",
+      "description": "Custom guide: email-params",
+      "filename": "email-params.md",
+      "tags": [
+        "email-params"
+      ]
+    },
+    {
+      "name": "jinja-filters",
+      "title": "Jinja Filters",
+      "description": "Custom guide: jinja-filters",
+      "filename": "jinja-filters.md",
+      "tags": [
+        "jinja-filters"
+      ]
+    }
+  ],
+  "generated_at": null,
+  "source_module": "gmail.mjml_types",
+  "version": "1.0.0"
+}

@@ -11,6 +11,17 @@ Usage:
     from gchat.wrapper_setup import get_card_framework_wrapper
 
     wrapper = get_card_framework_wrapper()
+
+::
+
+    The templates registered here become
+    the skills the plugin ships downstream;
+    a silent NameError struck one dumb —
+    now tests and CI guard the seam.
+    When cards or filters change their face,
+    regenerate before you send:
+    the deploy train holds every place
+    for skills rebuilt from end to end.
 """
 
 import threading
@@ -939,7 +950,8 @@ def _generate_gchat_jinja_template(wrapper) -> str:
         Markdown content for Jinja filters guide
     """
     # Format examples
-    examples = GCHAT_SKILL_EXAMPLES.get("jinja-filters", [])
+    symbols = getattr(wrapper, "symbol_mapping", {})
+    examples = _get_gchat_skill_examples(symbols).get("jinja-filters", [])
     examples_text = "\n".join(f"- `{e}`" for e in examples)
 
     return GCHAT_JINJA_GUIDE.format(

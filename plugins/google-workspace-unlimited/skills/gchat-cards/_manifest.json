@@ -1,0 +1,68 @@
+{
+  "name": "gchat-cards",
+  "description": "Skills for card_framework",
+  "skills": [
+    {
+      "name": "SKILL",
+      "title": "Google Chat Card Builder",
+      "description": "Google Chat Card Builder \u2014 DSL symbols, component reference, containment rules, and Jinja filters for composing Chat cards with the Google Workspace MCP server",
+      "filename": "SKILL.md",
+      "tags": [
+        "card_framework",
+        "gchat-cards"
+      ]
+    },
+    {
+      "name": "symbols",
+      "title": "Symbol Reference for card_framework",
+      "description": "Component symbol reference table",
+      "filename": "symbols.md",
+      "tags": [
+        "card_framework",
+        "reference",
+        "symbols"
+      ]
+    },
+    {
+      "name": "containment-rules",
+      "title": "Containment Rules for card_framework",
+      "description": "What components can contain what",
+      "filename": "containment-rules.md",
+      "tags": [
+        "containment",
+        "hierarchy",
+        "rules"
+      ]
+    },
+    {
+      "name": "dsl-syntax",
+      "title": "Dsl Syntax",
+      "description": "Custom guide: dsl-syntax",
+      "filename": "dsl-syntax.md",
+      "tags": [
+        "dsl-syntax"
+      ]
+    },
+    {
+      "name": "card-params",
+      "title": "Card Params",
+      "description": "Custom guide: card-params",
+      "filename": "card-params.md",
+      "tags": [
+        "card-params"
+      ]
+    },
+    {
+      "name": "jinja-filters",
+      "title": "Jinja Filters",
+      "description": "Custom guide: jinja-filters",
+      "filename": "jinja-filters.md",
+      "tags": [
+        "jinja-filters"
+      ]
+    }
+  ],
+  "generated_at": null,
+  "source_module": "card_framework",
+  "version": "1.0.0"
+}

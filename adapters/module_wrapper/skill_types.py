@@ -5,6 +5,17 @@ Defines dataclasses for skill documents and manifests that are generated
 by the SkillsMixin and consumed by FastMCP's SkillsDirectoryProvider.
 
 These types are 100% generic - no module-specific code.
+
+::
+
+    A manifest is a promise kept
+    the same on every run:
+    its tags in sorted order stepped,
+    its timestamp nulled to none.
+    For skills that ride the deploy train
+    are diffed before they board —
+    regenerate, commit again,
+    and CI stays green, restored.
 """
 
 from dataclasses import dataclass, field
@@ -39,7 +50,7 @@ class SkillDocument:
             "description": self.description,
             "content": self.content,
             "supporting_files": self.supporting_files,
-            "tags": list(self.tags),
+            "tags": sorted(self.tags),
             "version": self.version,
         }
 
@@ -114,6 +125,7 @@ class SkillGeneratorConfig:
     # Metadata
     skill_name: str = ""  # e.g., "gchat-cards"
     skill_title: str = ""  # e.g., "Google Chat Card Builder"
+    skill_description: str = ""  # SKILL.md frontmatter description
     version: str = "1.0.0"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -127,6 +139,7 @@ class SkillGeneratorConfig:
             "max_example_count": self.max_example_count,
             "skill_name": self.skill_name,
             "skill_title": self.skill_title,
+            "skill_description": self.skill_description,
             "version": self.version,
         }
 

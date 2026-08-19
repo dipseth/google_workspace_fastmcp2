@@ -1,0 +1,59 @@
+{
+  "name": "qdrant-search",
+  "description": "Skills for qdrant_client.models",
+  "skills": [
+    {
+      "name": "SKILL",
+      "title": "Qdrant Vector Search",
+      "description": "Qdrant Vector Search \u2014 semantic search, filter DSL, recommendation, and query DSL over past Google Workspace MCP tool responses",
+      "filename": "SKILL.md",
+      "tags": [
+        "qdrant-search",
+        "qdrant_client.models"
+      ]
+    },
+    {
+      "name": "symbols",
+      "title": "Symbol Reference for qdrant_client.models",
+      "description": "Component symbol reference table",
+      "filename": "symbols.md",
+      "tags": [
+        "qdrant_client.models",
+        "reference",
+        "symbols"
+      ]
+    },
+    {
+      "name": "containment-rules",
+      "title": "Containment Rules for qdrant_client.models",
+      "description": "What components can contain what",
+      "filename": "containment-rules.md",
+      "tags": [
+        "containment",
+        "hierarchy",
+        "rules"
+      ]
+    },
+    {
+      "name": "qdrant-dsl-syntax",
+      "title": "Qdrant Dsl Syntax",
+      "description": "Custom guide: qdrant-dsl-syntax",
+      "filename": "qdrant-dsl-syntax.md",
+      "tags": [
+        "qdrant-dsl-syntax"
+      ]
+    },
+    {
+      "name": "qdrant-dsl-params",
+      "title": "Qdrant Dsl Params",
+      "description": "Custom guide: qdrant-dsl-params",
+      "filename": "qdrant-dsl-params.md",
+      "tags": [
+        "qdrant-dsl-params"
+      ]
+    }
+  ],
+  "generated_at": null,
+  "source_module": "qdrant_client.models",
+  "version": "1.0.0"
+}

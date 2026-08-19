@@ -66,6 +66,17 @@ The fastest way to get started - install directly from PyPI:
 
 > ⚡ **That's it!** The server runs in stdio mode by default, perfect for MCP clients like Claude Desktop, Cursor, Roo, etc. [Code Mode](#-code-mode-default) is on out of the box, so your client sees 7 lean meta-tools instead of 90+ schemas.
 
+#### Method 1b: Claude Code Plugin (server + skills)
+
+Claude Code users can install the server **and** the skills that teach Claude its card/email DSL, code mode, and Qdrant search in two commands:
+
+```
+/plugin marketplace add dipseth/google_workspace_fastmcp2
+/plugin install google-workspace-unlimited@riversunlimited
+```
+
+See [plugins/google-workspace-unlimited](plugins/google-workspace-unlimited/README.md) for details.
+
 #### Method 2: Clone and Development Setup
 
 For development or customization:

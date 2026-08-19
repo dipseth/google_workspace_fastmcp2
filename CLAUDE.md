@@ -23,4 +23,5 @@
 ## Pre-push checks
 
 - Run **both** `ruff check .` and `ruff format --check .` — CI gates them separately.
+- **Plugin skills are generated, never hand-edited.** `plugins/google-workspace-unlimited/skills/` is produced by `uv run python scripts/generate_plugin_skills.py` from the same ModuleWrapper introspection the server uses at startup; CI fails if the committed copies drift (`--check`). After changing card/email/qdrant models, skill generators, or `skills/skills_provider.py`, regenerate and commit.
 - Production code must never import from `research/`; TRM inference definitions live in `adapters/`.
