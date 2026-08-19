@@ -1,0 +1,16 @@
+{
+  "name": "riversunlimited",
+  "description": "RiversUnlimited plugins — the Google Workspace Unlimited MCP server and its DSL/search skills for Claude Code.",
+  "owner": {
+    "name": "RiversUnlimited",
+    "url": "https://github.com/dipseth"
+  },
+  "plugins": [
+    {
+      "name": "google-workspace-unlimited",
+      "displayName": "Google Workspace Unlimited",
+      "description": "Google Workspace MCP server (Gmail, Drive, Docs, Sheets, Slides, Calendar, Forms, Chat, Photos, Contacts) plus skills for the card/email DSL, code mode, and Qdrant search over past tool responses.",
+      "source": "./plugins/google-workspace-unlimited"
+    }
+  ]
+}

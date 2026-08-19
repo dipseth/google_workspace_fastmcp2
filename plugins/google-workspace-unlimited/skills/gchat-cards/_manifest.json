@@ -1,0 +1,59 @@
+{
+  "name": "gchat-cards",
+  "description": "Skills for card_framework",
+  "skills": [
+    {
+      "name": "SKILL",
+      "title": "Google Chat Card Builder",
+      "description": "Skills for card_framework",
+      "filename": "SKILL.md",
+      "tags": [
+        "card_framework",
+        "gchat-cards"
+      ]
+    },
+    {
+      "name": "symbols",
+      "title": "Symbol Reference for card_framework",
+      "description": "Component symbol reference table",
+      "filename": "symbols.md",
+      "tags": [
+        "symbols",
+        "reference",
+        "card_framework"
+      ]
+    },
+    {
+      "name": "containment-rules",
+      "title": "Containment Rules for card_framework",
+      "description": "What components can contain what",
+      "filename": "containment-rules.md",
+      "tags": [
+        "containment",
+        "hierarchy",
+        "rules"
+      ]
+    },
+    {
+      "name": "dsl-syntax",
+      "title": "Dsl Syntax",
+      "description": "Custom guide: dsl-syntax",
+      "filename": "dsl-syntax.md",
+      "tags": [
+        "dsl-syntax"
+      ]
+    },
+    {
+      "name": "card-params",
+      "title": "Card Params",
+      "description": "Custom guide: card-params",
+      "filename": "card-params.md",
+      "tags": [
+        "card-params"
+      ]
+    }
+  ],
+  "generated_at": "2026-08-17T22:01:38.300504",
+  "source_module": "card_framework",
+  "version": "1.0.0"
+}

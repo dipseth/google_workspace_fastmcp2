@@ -1,0 +1,3 @@
+# InitVar
+
+**Symbol:** `ı`
