@@ -1,6 +1,6 @@
 # ImageComponent
 
-**Symbol:** `▫`
+**Symbol:** `□`
 
 ## Description
 

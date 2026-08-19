@@ -1,6 +1,6 @@
 # SuggestionItem
 
-**Symbol:** `S_3`
+**Symbol:** `S_1`
 
 ## Description
 

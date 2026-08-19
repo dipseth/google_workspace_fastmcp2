@@ -15,4 +15,4 @@ https://developers.google.com/chat/api/guides/message-formats/cards#decoratedtex
 - `ᵬ` Button
 - `ɨ` Icon
 - `ø` OnClick
-- `◄` SwitchControl
+- `►` SwitchControl

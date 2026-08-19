@@ -9,5 +9,5 @@ Annotation(type: 'AnnotationType' = None, startIndex: 'int' = None, length: 'int
 ## Valid Children
 
 - `A_0` AnnotationType
-- `S_5` SlashCommandMetadata
+- `S_3` SlashCommandMetadata
 - `ʉ` UserMentionMetadata

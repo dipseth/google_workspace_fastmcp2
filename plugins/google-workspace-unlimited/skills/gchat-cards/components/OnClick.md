@@ -14,4 +14,4 @@ https://developers.google.com/chat/how-tos/cards-onclick
 
 - `ă` Action
 - `ɵ` OpenLink
-- `►` OverflowMenu
+- `♦` OverflowMenu

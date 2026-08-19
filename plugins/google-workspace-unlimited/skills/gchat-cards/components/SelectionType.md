@@ -1,6 +1,6 @@
 # SelectionType
 
-**Symbol:** `S_1`
+**Symbol:** `◘`
 
 ## Description
 

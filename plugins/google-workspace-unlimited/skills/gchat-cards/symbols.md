@@ -4,13 +4,13 @@ This document maps component symbols to their names.
 
 ## Symbol Table
 
-**A:** `A_1` = AccessoryWidget, `ă` = Action, `A_2` = ActionParameter, `▪` = ActionResponse, `♦` = ActionStatus, `ą` = Annotation, `A_0` = AnnotationType, `☆` = AttachedGif, `Å` = Attachment, `A_3` = AttachmentDataRef, `α` = AutoNumber, `ǎ` = auto
+**A:** `A_1` = AccessoryWidget, `ă` = Action, `A_2` = ActionParameter, `■` = ActionResponse, `♥` = ActionStatus, `ą` = Annotation, `A_0` = AnnotationType, `★` = AttachedGif, `Å` = Attachment, `A_3` = AttachmentDataRef, `α` = AutoNumber, `ǎ` = auto
 
 **B:** `β` = BorderStyle, `ℬ` = BorderType, `ᵬ` = Button, `Ƀ` = ButtonList
 
-**C:** `©` = Card, `◆` = CardAction, `C_1` = CardFixedFooter, `◇` = CardHeader, `•` = CardWithId, `◦` = Carousel, `▼` = CarouselCard, `C_4` = ChatClientDataSourceMarkup, `ℂ` = Chip, `ȼ` = ChipList, `†` = Code, `C_0` = CollapseControl, `‡` = Color, `ç` = Column, `¢` = Columns, `C_2` = CommonDataSource, `♠` = ControlType, `★` = CustomEmoji, `C_3` = CustomEmojiPayload
+**C:** `©` = Card, `◦` = CardAction, `C_1` = CardFixedFooter, `◆` = CardHeader, `•` = CardWithId, `C_5` = Carousel, `C_6` = CarouselCard, `C_4` = ChatClientDataSourceMarkup, `ℂ` = Chip, `ȼ` = ChipList, `†` = Code, `C_0` = CollapseControl, `‡` = Color, `ç` = Column, `¢` = Columns, `C_2` = CommonDataSource, `☆` = ControlType, `◇` = CustomEmoji, `C_3` = CustomEmojiPayload
 
-**D:** `◙` = DateTimePicker, `δ` = DecoratedText, `D_0` = DeletionMetadata, `ɖ` = DeletionType, `đ` = Dialog, `ð` = DialogAction, `●` = DisplayStyle, `Đ` = Divider, `○` = DividerStyle, `■` = DriveDataRef
+**D:** `▪` = DateTimePicker, `δ` = DecoratedText, `D_0` = DeletionMetadata, `ɖ` = DeletionType, `đ` = Dialog, `ð` = DialogAction, `▲` = DisplayStyle, `Đ` = Divider, `▼` = DividerStyle, `●` = DriveDataRef
 
 **E:** `ε` = Emoji, `ė` = EmojiReactionSummary
 
@@ -20,7 +20,7 @@ This document maps component symbols to their names.
 
 **H:** `Ħ` = HorizontalAlignment, `ħ` = HorizontalSizeStyle, `ℏ` = HostAppDataSourceMarkup
 
-**I:** `ɨ` = Icon, `ǐ` = Image, `▫` = ImageComponent, `I_0` = ImageCropStyle, `◘` = ImageCropType, `ι` = ImageType, `ı` = InitVar, `ɪ` = InputType, `♣` = Interaction
+**I:** `ɨ` = Icon, `ǐ` = Image, `□` = ImageComponent, `I_0` = ImageCropStyle, `▫` = ImageCropType, `ι` = ImageType, `ı` = InitVar, `ɪ` = InputType, `♠` = Interaction
 
 **K:** `ĸ` = KnownIcon
 
@@ -30,7 +30,7 @@ This document maps component symbols to their names.
 
 **N:** `ŋ` = NestedWidget
 
-**O:** `ø` = OnClick, `ω` = OnClose, `Ω` = OpenAs, `ɵ` = OpenLink, `►` = OverflowMenu, `O_0` = OverflowMenuItem
+**O:** `ø` = OnClick, `ω` = OnClose, `Ω` = OpenAs, `ɵ` = OpenLink, `♦` = OverflowMenu, `O_0` = OverflowMenuItem
 
 **P:** `¶` = PlatformDataSource
 
@@ -38,7 +38,7 @@ This document maps component symbols to their names.
 
 **R:** `ɽ` = Renderable, `ř` = ResponseType
 
-**S:** `§` = Section, `▲` = SelectionInput, `S_0` = SelectionItem, `S_2` = SelectionItems, `S_1` = SelectionType, `□` = SlashCommand, `S_5` = SlashCommandMetadata, `S_6` = SlashCommandMetadataType, `ş` = Source, `ʂ` = Space, `S_4` = SpaceDataSource, `♥` = SpaceDetail, `ș` = SpaceType, `S_3` = SuggestionItem, `σ` = Suggestions, `◄` = SwitchControl
+**S:** `§` = Section, `◄` = SelectionInput, `◙` = SelectionItem, `S_0` = SelectionItems, `◘` = SelectionType, `○` = SlashCommand, `S_3` = SlashCommandMetadata, `S_4` = SlashCommandMetadataType, `ş` = Source, `ʂ` = Space, `S_2` = SpaceDataSource, `♣` = SpaceDetail, `ș` = SpaceType, `S_1` = SuggestionItem, `σ` = Suggestions, `►` = SwitchControl
 
 **T:** `τ` = TextInput, `ʈ` = TextParagraph, `Ʈ` = Thread, `ŧ` = Type, `ƭ` = TypeVar
 
@@ -56,11 +56,11 @@ This document maps component symbols to their names.
 | `A_1` | AccessoryWidget |
 | `ă` | Action |
 | `A_2` | ActionParameter |
-| `▪` | ActionResponse |
-| `♦` | ActionStatus |
+| `■` | ActionResponse |
+| `♥` | ActionStatus |
 | `ą` | Annotation |
 | `A_0` | AnnotationType |
-| `☆` | AttachedGif |
+| `★` | AttachedGif |
 | `Å` | Attachment |
 | `A_3` | AttachmentDataRef |
 | `α` | AutoNumber |
@@ -69,12 +69,12 @@ This document maps component symbols to their names.
 | `ᵬ` | Button |
 | `Ƀ` | ButtonList |
 | `©` | Card |
-| `◆` | CardAction |
+| `◦` | CardAction |
 | `C_1` | CardFixedFooter |
-| `◇` | CardHeader |
+| `◆` | CardHeader |
 | `•` | CardWithId |
-| `◦` | Carousel |
-| `▼` | CarouselCard |
+| `C_5` | Carousel |
+| `C_6` | CarouselCard |
 | `C_4` | ChatClientDataSourceMarkup |
 | `ℂ` | Chip |
 | `ȼ` | ChipList |
@@ -84,19 +84,19 @@ This document maps component symbols to their names.
 | `ç` | Column |
 | `¢` | Columns |
 | `C_2` | CommonDataSource |
-| `♠` | ControlType |
-| `★` | CustomEmoji |
+| `☆` | ControlType |
+| `◇` | CustomEmoji |
 | `C_3` | CustomEmojiPayload |
-| `◙` | DateTimePicker |
+| `▪` | DateTimePicker |
 | `δ` | DecoratedText |
 | `D_0` | DeletionMetadata |
 | `ɖ` | DeletionType |
 | `đ` | Dialog |
 | `ð` | DialogAction |
-| `●` | DisplayStyle |
+| `▲` | DisplayStyle |
 | `Đ` | Divider |
-| `○` | DividerStyle |
-| `■` | DriveDataRef |
+| `▼` | DividerStyle |
+| `●` | DriveDataRef |
 | `ε` | Emoji |
 | `ė` | EmojiReactionSummary |
 | `ƒ` | Field |
@@ -110,13 +110,13 @@ This document maps component symbols to their names.
 | `ℏ` | HostAppDataSourceMarkup |
 | `ɨ` | Icon |
 | `ǐ` | Image |
-| `▫` | ImageComponent |
+| `□` | ImageComponent |
 | `I_0` | ImageCropStyle |
-| `◘` | ImageCropType |
+| `▫` | ImageCropType |
 | `ι` | ImageType |
 | `ı` | InitVar |
 | `ɪ` | InputType |
-| `♣` | Interaction |
+| `♠` | Interaction |
 | `ĸ` | KnownIcon |
 | `ŀ` | Layout |
 | `ℓ` | LetterCase |
@@ -129,28 +129,28 @@ This document maps component symbols to their names.
 | `ω` | OnClose |
 | `Ω` | OpenAs |
 | `ɵ` | OpenLink |
-| `►` | OverflowMenu |
+| `♦` | OverflowMenu |
 | `O_0` | OverflowMenuItem |
 | `¶` | PlatformDataSource |
 | `ʠ` | QuotedMessageMetadata |
 | `ɽ` | Renderable |
 | `ř` | ResponseType |
 | `§` | Section |
-| `▲` | SelectionInput |
-| `S_0` | SelectionItem |
-| `S_2` | SelectionItems |
-| `S_1` | SelectionType |
-| `□` | SlashCommand |
-| `S_5` | SlashCommandMetadata |
-| `S_6` | SlashCommandMetadataType |
+| `◄` | SelectionInput |
+| `◙` | SelectionItem |
+| `S_0` | SelectionItems |
+| `◘` | SelectionType |
+| `○` | SlashCommand |
+| `S_3` | SlashCommandMetadata |
+| `S_4` | SlashCommandMetadataType |
 | `ş` | Source |
 | `ʂ` | Space |
-| `S_4` | SpaceDataSource |
-| `♥` | SpaceDetail |
+| `S_2` | SpaceDataSource |
+| `♣` | SpaceDetail |
 | `ș` | SpaceType |
-| `S_3` | SuggestionItem |
+| `S_1` | SuggestionItem |
 | `σ` | Suggestions |
-| `◄` | SwitchControl |
+| `►` | SwitchControl |
 | `τ` | TextInput |
 | `ʈ` | TextParagraph |
 | `Ʈ` | Thread |

@@ -10,4 +10,4 @@ GridItem(id: 'str' = None, image: 'ImageComponent' = None, title: 'str' = None, 
 
 - `γ` GridItemLayout
 - `Ħ` HorizontalAlignment
-- `▫` ImageComponent
+- `□` ImageComponent

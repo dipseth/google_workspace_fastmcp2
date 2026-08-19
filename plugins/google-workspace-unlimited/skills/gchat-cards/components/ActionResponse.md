@@ -1,6 +1,6 @@
 # ActionResponse
 
-**Symbol:** `▪`
+**Symbol:** `■`
 
 ## Description
 

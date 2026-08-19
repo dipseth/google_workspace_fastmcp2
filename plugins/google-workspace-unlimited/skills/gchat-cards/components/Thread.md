@@ -4,4 +4,4 @@
 
 ## Description
 
-Thread object for reply threading. Use threadKey to create or reply to a specific thread. Symbol: Ʈ
+Thread(name: 'str' = None)

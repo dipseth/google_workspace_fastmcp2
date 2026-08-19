@@ -19,10 +19,10 @@ Use DSL symbols as keys in `card_params` for direct correspondence with the DSL 
 | `ʈ` | TextParagraph | `items` | List of text paragraph widgets |
 | `ᵬ` | Button | `buttons` | List of button widgets |
 | `ǵ` | GridItem | `grid_items` | List of grid cells |
-| `▼` | CarouselCard | `cards` | List of carousel card widgets |
+| `C_6` | CarouselCard | `cards` | List of carousel card widgets |
 | `ℂ` | Chip | `chips` | List of chip widgets |
 
-Container symbols (`§`, `Ƀ`, `ℊ`, `◦`, `¢`, `ȼ`) have no param key — use their children's symbols.
+Container symbols (`§`, `Ƀ`, `ℊ`, `C_5`, `¢`, `ȼ`) have no param key — use their children's symbols.
 
 ## Three Formats
 
@@ -68,7 +68,7 @@ Each `_items` entry is merged with `_shared` (item fields override shared).
 - `subtitle` — Optional subtitle
 - `image_url` — Optional image URL
 
-### CarouselCard (`▼`)
+### CarouselCard (`C_6`)
 - `title` (**required**) — Card title
 - `subtitle` — Optional subtitle
 - `text` — Optional card body

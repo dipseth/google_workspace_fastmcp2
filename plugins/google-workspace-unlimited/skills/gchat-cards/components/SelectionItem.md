@@ -1,6 +1,6 @@
 # SelectionItem
 
-**Symbol:** `S_0`
+**Symbol:** `◙`
 
 ## Description
 

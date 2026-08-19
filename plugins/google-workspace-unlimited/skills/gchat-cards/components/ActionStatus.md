@@ -1,6 +1,6 @@
 # ActionStatus
 
-**Symbol:** `♦`
+**Symbol:** `♥`
 
 ## Description
 

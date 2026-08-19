@@ -1,6 +1,6 @@
 # SpaceDataSource
 
-**Symbol:** `S_4`
+**Symbol:** `S_2`
 
 ## Description
 

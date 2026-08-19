@@ -1,6 +1,6 @@
 # SpaceDetail
 
-**Symbol:** `♥`
+**Symbol:** `♣`
 
 ## Description
 

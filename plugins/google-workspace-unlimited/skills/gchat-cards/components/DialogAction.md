@@ -8,5 +8,5 @@ DialogAction(action_status: 'ActionStatus' = None, dialog: 'Dialog' = None)
 
 ## Valid Children
 
-- `♦` ActionStatus
+- `♥` ActionStatus
 - `đ` Dialog

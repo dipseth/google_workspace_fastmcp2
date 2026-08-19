@@ -1,6 +1,6 @@
 # CardHeader
 
-**Symbol:** `◇`
+**Symbol:** `◆`
 
 ## Description
 

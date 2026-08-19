@@ -1,6 +1,6 @@
 # DateTimePicker
 
-**Symbol:** `◙`
+**Symbol:** `▪`
 
 ## Description
 

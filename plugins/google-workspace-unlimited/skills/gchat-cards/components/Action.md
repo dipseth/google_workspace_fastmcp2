@@ -9,5 +9,5 @@ Action(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, function: 's
 ## Valid Children
 
 - `A_2` ActionParameter
-- `♣` Interaction
+- `♠` Interaction
 - `λ` LoadIndicator

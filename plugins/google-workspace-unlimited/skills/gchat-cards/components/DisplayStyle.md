@@ -1,6 +1,6 @@
 # DisplayStyle
 
-**Symbol:** `●`
+**Symbol:** `▲`
 
 ## Description
 

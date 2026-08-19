@@ -1,6 +1,6 @@
 # SlashCommandMetadataType
 
-**Symbol:** `S_6`
+**Symbol:** `S_4`
 
 ## Description
 

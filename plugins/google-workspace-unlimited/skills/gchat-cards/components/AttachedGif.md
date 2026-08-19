@@ -1,6 +1,6 @@
 # AttachedGif
 
-**Symbol:** `☆`
+**Symbol:** `★`
 
 ## Description
 

@@ -8,4 +8,4 @@ UpdatedWidget(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, widge
 
 ## Valid Children
 
-- `S_2` SelectionItems
+- `S_0` SelectionItems

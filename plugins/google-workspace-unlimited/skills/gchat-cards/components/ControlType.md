@@ -1,6 +1,6 @@
 # ControlType
 
-**Symbol:** `♠`
+**Symbol:** `☆`
 
 ## Description
 

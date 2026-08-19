@@ -1,6 +1,6 @@
 # CustomEmoji
 
-**Symbol:** `★`
+**Symbol:** `◇`
 
 ## Description
 

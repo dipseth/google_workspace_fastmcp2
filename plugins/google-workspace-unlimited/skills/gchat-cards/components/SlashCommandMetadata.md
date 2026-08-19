@@ -1,6 +1,6 @@
 # SlashCommandMetadata
 
-**Symbol:** `S_5`
+**Symbol:** `S_3`
 
 ## Description
 
@@ -8,5 +8,5 @@ SlashCommandMetadata(bot: 'User' = None, type: 'SlashCommandMetadataType' = None
 
 ## Valid Children
 
-- `S_6` SlashCommandMetadataType
+- `S_4` SlashCommandMetadataType
 - `ʊ` User

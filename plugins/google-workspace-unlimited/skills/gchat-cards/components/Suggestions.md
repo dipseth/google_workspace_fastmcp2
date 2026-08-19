@@ -8,4 +8,4 @@ Suggestions(items: List[card_framework.v2.widgets.suggestions.SuggestionItem] = 
 
 ## Valid Children
 
-- `S_3` SuggestionItem
+- `S_1` SuggestionItem

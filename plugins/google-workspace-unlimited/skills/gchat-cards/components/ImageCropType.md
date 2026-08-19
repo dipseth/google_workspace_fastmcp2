@@ -1,6 +1,6 @@
 # ImageCropType
 
-**Symbol:** `◘`
+**Symbol:** `▫`
 
 ## Description
 

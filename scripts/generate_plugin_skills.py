@@ -39,8 +39,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Offline, deterministic generation — no Qdrant container, no HF downloads.
-os.environ.setdefault("QDRANT_AUTO_LAUNCH", "false")
+# Hermetic generation: canonical skills are what a FRESH install produces.
+# A live dev Qdrant carries legacy symbol state that changes symbol
+# assignment and component discovery, so force it unreachable — don't just
+# skip auto-launch. Same for HF downloads.
+os.environ["QDRANT_URL"] = "http://127.0.0.1:1"
+os.environ["QDRANT_AUTO_LAUNCH"] = "false"
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

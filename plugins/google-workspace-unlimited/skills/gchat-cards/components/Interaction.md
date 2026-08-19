@@ -1,6 +1,6 @@
 # Interaction
 
-**Symbol:** `♣`
+**Symbol:** `♠`
 
 ## Description
 

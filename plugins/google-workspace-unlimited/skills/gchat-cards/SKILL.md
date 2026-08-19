@@ -16,4 +16,4 @@ This skill provides documentation for the card_framework module.
 - `dsl-syntax.md` - Custom guide: dsl-syntax
 - `card-params.md` - Custom guide: card-params
 - `jinja-filters.md` - Custom guide: jinja-filters
-- `components/` - Per-component documentation (403 components)
+- `components/` - Per-component documentation (402 components)

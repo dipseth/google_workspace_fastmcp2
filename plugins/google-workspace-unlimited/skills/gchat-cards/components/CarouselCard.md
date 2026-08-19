@@ -1,6 +1,6 @@
 # CarouselCard
 
-**Symbol:** `▼`
+**Symbol:** `C_6`
 
 ## Description
 

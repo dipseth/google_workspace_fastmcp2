@@ -189,17 +189,17 @@ Sends a card to Google Chat using DSL notation for structure control.
 | `Ƀ` | ButtonList |
 | `ℊ` | Grid |
 | `ǵ` | GridItem |
-| `◦` | Carousel |
-| `▼` | CarouselCard |
+| `C_5` | Carousel |
+| `C_6` | CarouselCard |
 | `ȼ` | ChipList |
 | `ℂ` | Chip |
 | `ʈ` | TextParagraph |
 | `τ` | TextInput |
 | `ǐ` | Image |
 | `ɨ` | Icon |
-| `▲` | SelectionInput |
-| `◙` | DateTimePicker |
-| `◇` | CardHeader |
+| `◄` | SelectionInput |
+| `▪` | DateTimePicker |
+| `◆` | CardHeader |
 | `¢` | Columns |
 | `ç` | Column |
 

@@ -1,6 +1,6 @@
 # CardAction
 
-**Symbol:** `◆`
+**Symbol:** `◦`
 
 ## Description
 

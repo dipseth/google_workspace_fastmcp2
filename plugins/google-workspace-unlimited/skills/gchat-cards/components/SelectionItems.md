@@ -1,6 +1,6 @@
 # SelectionItems
 
-**Symbol:** `S_2`
+**Symbol:** `S_0`
 
 ## Description
 
@@ -8,4 +8,4 @@ SelectionItems(items: List[card_framework.v2.widgets.selection_item.SelectionIte
 
 ## Valid Children
 
-- `S_0` SelectionItem
+- `◙` SelectionItem

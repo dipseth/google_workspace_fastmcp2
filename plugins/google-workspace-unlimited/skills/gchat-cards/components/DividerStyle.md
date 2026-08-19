@@ -1,6 +1,6 @@
 # DividerStyle
 
-**Symbol:** `○`
+**Symbol:** `▼`
 
 ## Description
 

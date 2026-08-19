@@ -1,6 +1,6 @@
 # OverflowMenu
 
-**Symbol:** `►`
+**Symbol:** `♦`
 
 ## Description
 
