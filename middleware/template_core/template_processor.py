@@ -46,7 +46,11 @@ class TemplateProcessor:
     JINJA2_DETECTION_PATTERNS = [
         re.compile(r"\{%\s*\w+"),  # {% if, {% for, etc.
         re.compile(r"\{\{[^}]*\|[^}]*\}\}"),  # {{ var | filter }} - complete pattern
-        re.compile(r"\{\{[^}]*\([^}]*\}\}"),  # {{ function() }} - function calls
+        # {{ function( — anchor on the call opening only, never on the closing
+        # }}. Matching through to }} with [^}]* breaks on nested braces, so a
+        # macro call like {{ m(items=[{'k': 'v'}]) }} would go undetected and
+        # reach the tool unrendered.
+        re.compile(r"\{\{\s*[a-zA-Z_][\w.]*\s*\("),  # {{ function() }} - function calls
         re.compile(r"\{#.*?#\}"),  # {# comments #}
         # Also detect resource URIs in Jinja2 contexts
         re.compile(

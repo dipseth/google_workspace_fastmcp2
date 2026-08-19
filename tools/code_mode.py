@@ -7,6 +7,7 @@ so that server.py stays focused on wiring, not implementation details.
 from __future__ import annotations
 
 import json
+import os
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -848,8 +849,15 @@ def setup_code_mode(mcp: FastMCP) -> None:
     correct — discovery tools (``search``, ``tags``) should see the full
     catalog regardless of session-level filtering.
     """
+    # Sandbox limits: MontySandboxProvider's baseline is 30s / 100MB, which is
+    # too tight for execute blocks that chain several real tool calls (e.g. a
+    # macro create + full MJML compose). Passing a limits dict replaces the
+    # baseline entirely, so max_memory must be restated alongside the duration.
+    max_duration = float(os.getenv("CODE_MODE_MAX_DURATION_SECS", "90"))
     code_mode = CodeMode(
-        sandbox_provider=EnhancedSandboxProvider(),
+        sandbox_provider=EnhancedSandboxProvider(
+            limits={"max_duration_secs": max_duration, "max_memory": 100 * 1024 * 1024}
+        ),
         discovery_tools=get_discovery_tool_factories(),
         execute_description=EXECUTE_DESCRIPTION,
     )

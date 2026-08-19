@@ -45,8 +45,10 @@
     "action",
     "bcc",
     "cc",
+    "draft_id",
     "email_description",
     "email_params",
+    "reply_to_message_id",
     "to",
     "user_google_email"
   ],
@@ -171,6 +173,7 @@
     "body",
     "cc",
     "content_type",
+    "draft_id",
     "email_spec",
     "html_body",
     "subject",
@@ -182,6 +185,8 @@
     "body",
     "cc",
     "content_type",
+    "draft_id",
+    "email_spec",
     "html_body",
     "message_id",
     "reply_mode",
@@ -544,6 +549,10 @@
     "spreadsheet_id",
     "user_google_email",
     "value_render_option"
+  ],
+  "remove_template_macro": [
+    "macro_name",
+    "user_google_email"
   ],
   "reply_to_gmail_message": [
     "bcc",

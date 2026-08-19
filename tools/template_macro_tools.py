@@ -5,7 +5,7 @@ This module provides a tool for creating Jinja2 template macros dynamically thro
 FastMCP server, leveraging the existing Enhanced Template Middleware architecture.
 
 The macro discovery and listing functionality is handled by the template://macros resources
-defined in resources/template_resources.py. This tool focuses solely on creation.
+defined in resources/template_resources.py. This module provides creation and removal.
 
 Key Features:
 - Dynamic macro creation with validation
@@ -239,14 +239,88 @@ async def create_template_macro(
         return {"success": False, "macro_name": macro_name, "errors": [error_msg]}
 
 
+class MacroRemovalResponse(BaseModel):
+    """Response for macro removal operations."""
+
+    success: bool = Field(description="Whether the macro was removed successfully")
+    macro_name: str = Field(description="Name of the macro targeted for removal")
+    errors: list[str] = Field(
+        description="List of error messages if removal failed", default_factory=list
+    )
+
+
+async def remove_template_macro(
+    ctx: Context,
+    macro_name: Annotated[
+        str,
+        Field(
+            description="Name of the dynamic macro to remove",
+            pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+            min_length=1,
+            max_length=100,
+        ),
+    ],
+) -> MacroRemovalResponse:
+    """
+    Remove a dynamically created Jinja2 template macro.
+
+    Unregisters the macro from the Jinja2 environment and the macro registry,
+    and deletes its persisted templates/dynamic/<name>.j2 file if one exists.
+    Only macros created via create_template_macro can be removed — file-based
+    macros shipped with the server are protected.
+
+    Args:
+        ctx: FastMCP Context for accessing middleware
+        macro_name: Name of the dynamic macro to remove
+
+    Returns:
+        MacroRemovalResponse with removal status and any errors
+    """
+    try:
+        await ctx.info(f"Removing template macro '{macro_name}'...")
+
+        template_middleware = get_template_middleware_from_registry()
+        if not template_middleware:
+            error_msg = "Template middleware not available - cannot remove macros"
+            await ctx.error(error_msg)
+            return MacroRemovalResponse(
+                success=False, macro_name=macro_name, errors=[error_msg]
+            )
+
+        removed = template_middleware.macro_manager.remove_dynamic_macro(macro_name)
+        if removed:
+            await ctx.info(f"🗑️ Macro '{macro_name}' removed")
+            return MacroRemovalResponse(success=True, macro_name=macro_name)
+
+        error_msg = (
+            f"Macro '{macro_name}' was not removed: it does not exist or is a "
+            "file-based macro (only dynamic macros created via "
+            "create_template_macro can be removed)"
+        )
+        await ctx.warning(error_msg)
+        return MacroRemovalResponse(
+            success=False, macro_name=macro_name, errors=[error_msg]
+        )
+
+    except Exception as e:
+        error_msg = f"Unexpected error removing macro '{macro_name}': {str(e)}"
+        await ctx.error(error_msg)
+        logger.error(f"❌ Template macro removal error: {e}", exc_info=True)
+        return MacroRemovalResponse(
+            success=False, macro_name=macro_name, errors=[error_msg]
+        )
+
+
 def setup_template_macro_tools(mcp: FastMCP) -> None:
     """
     Register template macro management tools with the FastMCP server.
 
     This function registers the template macro tools:
     1. create_template_macro: Create new Jinja2 macros dynamically
-    2. list_template_macros: List all available macros with metadata
-    3. remove_template_macro: Remove dynamically created macros
+    2. remove_template_macro: Remove dynamically created macros
+
+    Macro listing is intentionally resource-based rather than a tool — see
+    template://macros and template://macros/{name} in resources/template_resources.py.
 
     Args:
         mcp: FastMCP server instance to register tools with
@@ -345,4 +419,52 @@ def setup_template_macro_tools(mcp: FastMCP) -> None:
             ctx, macro_name, macro_content, description, usage_example, persist_to_file
         )
 
-    logger.info("✅ Template macro creation tool registered: create_template_macro")
+    @mcp.tool(
+        name="remove_template_macro",
+        description=(
+            "Remove a dynamically created Jinja2 template macro (unregisters it and "
+            "deletes its persisted templates/dynamic file). Only macros created via "
+            "create_template_macro can be removed; file-based macros are protected"
+        ),
+        tags={"template", "macro", "jinja2", "removal", "dynamic"},
+        annotations={
+            "title": "Remove Template Macro",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )
+    async def remove_template_macro_tool(
+        ctx: Context,
+        macro_name: Annotated[
+            str,
+            Field(
+                description="Name of the dynamic macro to remove",
+                pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+                min_length=1,
+                max_length=100,
+                examples=["team_update", "render_task_list"],
+            ),
+        ],
+        user_google_email: UserGoogleEmail = None,
+    ) -> MacroRemovalResponse:
+        """
+        Remove a dynamically created Jinja2 template macro.
+
+        Unregisters the macro and deletes its persisted file if one exists.
+        Only dynamic macros (created via create_template_macro) can be removed.
+
+        Args:
+            ctx: FastMCP Context (automatically injected)
+            macro_name: Name of the dynamic macro to remove
+            user_google_email: The user's Google email address (auto-injected by middleware)
+
+        Returns:
+            MacroRemovalResponse with removal status and any errors
+        """
+        return await remove_template_macro(ctx, macro_name)
+
+    logger.info(
+        "✅ Template macro tools registered: create_template_macro, remove_template_macro"
+    )

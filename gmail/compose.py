@@ -1615,6 +1615,7 @@ async def draft_gmail_message(
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
     email_spec: Optional[Union[dict, EmailSpec]] = None,
+    draft_id: Optional[str] = None,
 ) -> DraftGmailMessageResponse:
     """
     Creates a draft email in the user's Gmail account with support for HTML formatting and multiple recipients.
@@ -1652,6 +1653,16 @@ async def draft_gmail_message(
 
         # Auto-injected user (middleware handles user_google_email)
         draft_gmail_message("Subject", "Body content")
+
+        # Edit an existing draft in place (same draft ID, content replaced)
+        draft_gmail_message("Updated subject", "Updated body", draft_id="r-123...")
+
+    Note on draft_id:
+        When draft_id is provided the draft is updated via drafts().update
+        instead of created — full content replacement, no duplicate draft. The
+        existing draft's threadId is preserved so reply drafts stay threaded.
+        Draft IDs come from this tool's response, or from search_gmail_messages
+        / get_gmail_message_content on draft messages.
     """
     # EmailSpec rendering — overrides content_type/body/html_body
     if email_spec is not None:
@@ -1768,10 +1779,29 @@ async def draft_gmail_message(
         # Create a draft instead of sending
         draft_body = {"message": {"raw": raw_message}}
 
-        # Create the draft
-        created_draft = await asyncio.to_thread(
-            gmail_service.users().drafts().create(userId="me", body=draft_body).execute
-        )
+        if draft_id:
+            # Update an existing draft in place (full content replacement).
+            # Preserve the draft's threadId so editing a reply draft keeps it
+            # threaded — drafts().update replaces the message entirely.
+            existing_draft = await asyncio.to_thread(
+                gmail_service.users().drafts().get(userId="me", id=draft_id).execute
+            )
+            existing_thread_id = existing_draft.get("message", {}).get("threadId")
+            if existing_thread_id:
+                draft_body["message"]["threadId"] = existing_thread_id
+            created_draft = await asyncio.to_thread(
+                gmail_service.users()
+                .drafts()
+                .update(userId="me", id=draft_id, body=draft_body)
+                .execute
+            )
+        else:
+            created_draft = await asyncio.to_thread(
+                gmail_service.users()
+                .drafts()
+                .create(userId="me", body=draft_body)
+                .execute
+            )
         draft_id = created_draft.get("id")
 
         # Count total recipients for confirmation using shared utility function
@@ -2053,6 +2083,8 @@ async def draft_gmail_reply(
     bcc: GmailRecipientsOptional = None,
     content_type: Literal["plain", "html", "mixed"] = "mixed",
     html_body: Optional[str] = None,
+    email_spec: Optional[Union[dict, EmailSpec]] = None,
+    draft_id: Optional[str] = None,
 ) -> DraftGmailReplyResponse:
     """
     Creates a draft reply to a specific Gmail message with support for HTML formatting and flexible recipient options.
@@ -2094,7 +2126,44 @@ async def draft_gmail_reply(
         # HTML draft reply with reply all
         draft_gmail_reply("msg_123", "<p>Thanks <b>everyone</b>!</p>",
                          content_type="html", reply_mode="reply_all")
+
+        # MJML reply draft (email_spec renders to HTML; reply subject from original)
+        draft_gmail_reply("msg_123", "", email_spec={
+            "subject": "(ignored)", "blocks": [{"type": "TextBlock", "text": "Thanks!"}]
+        })
+
+        # Edit an existing reply draft in place (same draft ID, content replaced)
+        draft_gmail_reply("msg_123", "Revised reply", draft_id="r-456...")
+
+    Note on email_spec / draft_id:
+        email_spec renders MJML blocks to HTML and overrides content_type/body/
+        html_body; the reply subject always comes from the original message.
+        When draft_id is provided the draft is updated via drafts().update
+        instead of created — threading is rebuilt from message_id as usual.
     """
+    # EmailSpec rendering — overrides content_type/body/html_body. The reply
+    # subject always comes from the original message, so the spec subject is
+    # ignored here.
+    if email_spec is not None:
+        try:
+            _, rendered_html = _render_email_spec(email_spec)
+            body = rendered_html
+            content_type = "html"
+            html_body = None
+            logger.info(
+                f"[draft_gmail_reply] EmailSpec rendered: html_size={len(rendered_html)} bytes"
+            )
+        except (ValueError, Exception) as e:
+            logger.error(f"[draft_gmail_reply] EmailSpec render failed: {e}")
+            return DraftGmailReplyResponse(
+                success=False,
+                original_message_id=message_id,
+                content_type="html",
+                reply_mode=reply_mode,
+                userEmail=user_google_email or "",
+                error=f"EmailSpec render error: {e}",
+            )
+
     logger.info(
         f"[draft_gmail_reply] Email: '{user_google_email}', Drafting reply to Message ID: '{message_id}', reply_mode: {reply_mode}, content_type: {content_type}"
     )
@@ -2213,10 +2282,22 @@ async def draft_gmail_reply(
             }
         }
 
-        # Create the draft reply
-        created_draft = await asyncio.to_thread(
-            gmail_service.users().drafts().create(userId="me", body=draft_body).execute
-        )
+        if draft_id:
+            # Update an existing draft reply in place (full content replacement);
+            # threading headers and threadId are rebuilt from the original message.
+            created_draft = await asyncio.to_thread(
+                gmail_service.users()
+                .drafts()
+                .update(userId="me", id=draft_id, body=draft_body)
+                .execute
+            )
+        else:
+            created_draft = await asyncio.to_thread(
+                gmail_service.users()
+                .drafts()
+                .create(userId="me", body=draft_body)
+                .execute
+            )
         draft_id = created_draft.get("id")
         message_id_from_draft = created_draft.get("message", {}).get("id")
         thread_id = created_draft.get("message", {}).get("threadId")
@@ -3312,6 +3393,14 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 "and overrides body/content_type/html_body. Subject comes from spec unless explicitly set."
             ),
         ] = None,
+        draft_id: Annotated[
+            Optional[str],
+            Field(
+                description="Existing draft ID to update in place instead of creating a new draft. "
+                "The draft's content is fully replaced with the provided subject/body/recipients; "
+                "its thread association is preserved."
+            ),
+        ] = None,
     ) -> DraftGmailMessageResponse:
         """
         Create Gmail draft with structured output.
@@ -3351,6 +3440,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             cc,
             bcc,
             email_spec=email_spec,
+            draft_id=draft_id,
         )
 
     @mcp.tool(
@@ -3498,6 +3588,21 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 description="HTML content when content_type='mixed'. The original message will be automatically quoted in HTML format. Ignored for 'plain' and 'html' types"
             ),
         ] = None,
+        email_spec: Annotated[
+            Optional[dict],
+            Field(
+                description="MJML-based responsive email spec. When provided, renders blocks to HTML "
+                "and overrides body/content_type/html_body. The reply subject always comes from the "
+                "original message, so the spec subject is ignored."
+            ),
+        ] = None,
+        draft_id: Annotated[
+            Optional[str],
+            Field(
+                description="Existing draft ID to update in place instead of creating a new draft. "
+                "The draft's content is fully replaced; threading is rebuilt from message_id."
+            ),
+        ] = None,
     ) -> DraftGmailReplyResponse:
         """
         Create Gmail draft reply with structured output and proper threading.
@@ -3538,6 +3643,8 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             bcc,
             content_type,
             html_body,
+            email_spec=email_spec,
+            draft_id=draft_id,
         )
 
     @mcp.tool(
@@ -3763,6 +3870,8 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         f"Canonical example: {spec_sym}[{hero_sym}, {text_sym}] = hero + text block. "
         "The full symbol table and worked examples live in this tool's annotations (dsl_documentation, examples) and the email_description parameter help — don't guess symbols.\n"
         "Behavior: action='draft' (default) only creates a draft; action='send' delivers immediately to to/cc/bcc with no confirmation step. Not idempotent — repeated sends deliver duplicates.\n"
+        "reply_to_message_id threads the email as a reply to that Gmail message (recipients derived from the original; the reply subject overrides the DSL subject). "
+        "draft_id updates an existing draft in place instead of creating a new one (action='draft' only).\n"
         "Returns: message/draft id and delivery status. Errors: missing DSL notation in email_description fails before any send; invalid recipients or Gmail auth failures are reported per attempt."
     )
 
@@ -3819,8 +3928,30 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         ] = "draft",
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
+        reply_to_message_id: Annotated[
+            Optional[str],
+            Field(
+                description="Gmail message ID to thread this email as a reply to. "
+                "Recipients are derived from the original message (reply_mode passthrough: "
+                "sender only) and the reply subject overrides the DSL subject. "
+                "Combine with draft_id to re-render an existing reply draft."
+            ),
+        ] = None,
+        draft_id: Annotated[
+            Optional[str],
+            Field(
+                description="Existing draft ID to update in place with the freshly rendered "
+                "email instead of creating a new draft. Only valid with action='draft'."
+            ),
+        ] = None,
     ):
-        """Compose responsive HTML email via DSL notation, then send or draft."""
+        """Compose responsive HTML email via DSL notation, then send or draft.
+
+        Supports iterative composition: draft_id re-renders into an existing
+        draft in place (no duplicate drafts), and reply_to_message_id threads
+        the composed email as a reply — draft via draft_gmail_reply, send via
+        reply_to_gmail_message.
+        """
         import json as _json
 
         from gmail.email_wrapper_api import (
@@ -3888,7 +4019,24 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 error=str(e),
             )
 
-        # 4. Deliver via existing send/draft paths
+        # 4. Deliver via existing send/draft/reply paths
+        if reply_to_message_id:
+            if action == "send":
+                # Render here — reply_to_gmail_message takes HTML in body.
+                _, rendered_html = _render_email_spec(email_spec)
+                return await reply_to_gmail_message(
+                    message_id=reply_to_message_id,
+                    body=rendered_html,
+                    user_google_email=user_google_email,
+                    content_type="html",
+                )
+            return await draft_gmail_reply(
+                message_id=reply_to_message_id,
+                body="",
+                user_google_email=user_google_email,
+                email_spec=email_spec,
+                draft_id=draft_id,
+            )
         if action == "send":
             return await send_gmail_message(
                 ctx,
@@ -3909,4 +4057,5 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 cc=cc,
                 bcc=bcc,
                 email_spec=email_spec,
+                draft_id=draft_id,
             )
