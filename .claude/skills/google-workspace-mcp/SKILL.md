@@ -265,6 +265,9 @@ The `execute` tool runs sandboxed Python with `call_tool()` available for chaini
 - Use `return` to produce output
 - `import` is **NOT available** — use built-in helpers instead
 - Prefer returning the final answer from a single block
+- Execution is time-limited (default 90s, `CODE_MODE_MAX_DURATION_SECS` env var) —
+  split long chains of heavy tool calls (e.g. several full email renders) into
+  separate execute blocks rather than one mega-block
 
 **Built-in Helpers:**
 
