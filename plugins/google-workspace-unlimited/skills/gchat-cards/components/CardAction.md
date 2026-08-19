@@ -9,11 +9,3 @@ CardAction(action_label: Optional[str] = None, on_click: Optional[card_framework
 ## Valid Children
 
 - `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick
-- `ø` OnClick

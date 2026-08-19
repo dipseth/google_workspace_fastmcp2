@@ -10,6 +10,3 @@ ActionStatus
 ## Valid Children
 
 - `†` Code
-- `†` Code
-- `†` Code
-- `†` Code

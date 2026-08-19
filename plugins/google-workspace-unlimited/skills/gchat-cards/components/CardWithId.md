@@ -8,14 +8,9 @@ CardWithId(header: 'Optional[CardHeader]' = None, name: 'Optional[str]' = None, 
 
 ## Valid Children
 
-- `◇` CardHeader
-- `§` Section
 - `◆` CardAction
-- `○` DividerStyle
 - `C_1` CardFixedFooter
+- `◇` CardHeader
 - `●` DisplayStyle
-- `◇` CardHeader
-- `◇` CardHeader
+- `○` DividerStyle
 - `§` Section
-- `◆` CardAction
-- ... and 4 more

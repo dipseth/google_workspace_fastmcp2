@@ -10,7 +10,3 @@ DialogAction(action_status: 'ActionStatus' = None, dialog: 'Dialog' = None)
 
 - `♦` ActionStatus
 - `đ` Dialog
-- `♦` ActionStatus
-- `đ` Dialog
-- `♦` ActionStatus
-- `đ` Dialog

@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `▫` ScrollResult
+- `ʊ` Usage
 
 ## Fields
 

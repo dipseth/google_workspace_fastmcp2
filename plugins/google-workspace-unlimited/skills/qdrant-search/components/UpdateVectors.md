@@ -37,10 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `P_4` PointVectors
 - `ƒ` Filter
 - `P_4` PointVectors
-- `ƒ` Filter
 
 ## Fields
 

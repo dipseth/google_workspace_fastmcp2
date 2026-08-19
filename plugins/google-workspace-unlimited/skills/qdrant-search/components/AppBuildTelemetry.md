@@ -41,13 +41,6 @@ Attributes:
 - `F_0` FeatureFlags
 - `ɦ` HnswGlobalConfig
 - `R_13` RunningEnvironmentTelemetry
-- `A_2` AppFeaturesTelemetry
-- `F_0` FeatureFlags
-- `ɦ` HnswGlobalConfig
-- `R_13` RunningEnvironmentTelemetry
-- `A_2` AppFeaturesTelemetry
-- `F_0` FeatureFlags
-- ... and 2 more
 
 ## Fields
 

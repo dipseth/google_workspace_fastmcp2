@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `S_33` SearchMatrixPairsResponse
+- `ʊ` Usage
 
 ## Fields
 

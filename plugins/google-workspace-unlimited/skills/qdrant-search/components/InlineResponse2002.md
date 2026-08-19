@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `ŧ` TelemetryData
+- `ʊ` Usage
 
 ## Fields
 

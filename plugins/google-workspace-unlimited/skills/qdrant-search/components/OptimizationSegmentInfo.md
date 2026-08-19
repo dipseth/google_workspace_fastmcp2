@@ -38,16 +38,6 @@ Attributes:
 ## Valid Children
 
 - `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- ... and 1 more
 
 ## Fields
 

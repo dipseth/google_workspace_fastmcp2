@@ -10,8 +10,6 @@ Search request. Holds all conditions and parameters for the search of most simil
 
 - `ƒ` Filter
 - `♦` SearchParams
-- `ƒ` Filter
-- `♦` SearchParams
 
 ## Fields
 

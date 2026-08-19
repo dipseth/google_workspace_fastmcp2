@@ -9,10 +9,6 @@ Ordered sequence of GeoPoints representing the line
 ## Valid Children
 
 - `ℊ` GeoPoint
-- `ℊ` GeoPoint
-- `ℊ` GeoPoint
-- `ℊ` GeoPoint
-- `ℊ` GeoPoint
 
 ## Fields
 

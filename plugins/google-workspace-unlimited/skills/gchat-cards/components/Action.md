@@ -9,13 +9,5 @@ Action(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, function: 's
 ## Valid Children
 
 - `A_2` ActionParameter
-- `λ` LoadIndicator
 - `♣` Interaction
-- `A_2` ActionParameter
 - `λ` LoadIndicator
-- `♣` Interaction
-- `A_2` ActionParameter
-- `λ` LoadIndicator
-- `♣` Interaction
-- `A_2` ActionParameter
-- ... and 242 more

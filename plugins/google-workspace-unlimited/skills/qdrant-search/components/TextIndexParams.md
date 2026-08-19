@@ -37,9 +37,9 @@ Attributes:
 
 ## Valid Children
 
+- `S_3` SnowballParams
 - `τ` TextIndexType
 - `ƭ` TokenizerType
-- `S_3` SnowballParams
 
 ## Fields
 

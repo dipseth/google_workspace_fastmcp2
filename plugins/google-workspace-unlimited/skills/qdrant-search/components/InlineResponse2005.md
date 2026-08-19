@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `C_15` CollectionsResponse
+- `ʊ` Usage
 
 ## Fields
 

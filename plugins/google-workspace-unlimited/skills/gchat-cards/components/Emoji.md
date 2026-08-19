@@ -9,5 +9,3 @@ Emoji(unicode: str = None, custom_emoji: card_framework.v2.emoji.CustomEmoji = N
 ## Valid Children
 
 - `★` CustomEmoji
-- `★` CustomEmoji
-- `★` CustomEmoji

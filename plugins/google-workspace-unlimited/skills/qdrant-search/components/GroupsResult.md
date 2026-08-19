@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `þ` PointGroup
-- `þ` PointGroup
 
 ## Fields
 

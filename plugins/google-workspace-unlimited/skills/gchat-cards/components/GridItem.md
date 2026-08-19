@@ -8,9 +8,6 @@ GridItem(id: 'str' = None, image: 'ImageComponent' = None, title: 'str' = None, 
 
 ## Valid Children
 
-- `▫` ImageComponent
-- `Ħ` HorizontalAlignment
 - `γ` GridItemLayout
-- `▫` ImageComponent
 - `Ħ` HorizontalAlignment
-- `γ` GridItemLayout
+- `▫` ImageComponent

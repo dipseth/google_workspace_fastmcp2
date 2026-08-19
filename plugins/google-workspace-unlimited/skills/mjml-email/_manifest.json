@@ -5,7 +5,7 @@
     {
       "name": "SKILL",
       "title": "MJML Email Composer",
-      "description": "Skills for gmail.mjml_types",
+      "description": "MJML Email Composer \u2014 email block symbols, DSL syntax, and per-component docs for composing rich HTML emails with the Google Workspace MCP server",
       "filename": "SKILL.md",
       "tags": [
         "gmail.mjml_types",
@@ -18,9 +18,9 @@
       "description": "Component symbol reference table",
       "filename": "symbols.md",
       "tags": [
-        "symbols",
+        "gmail.mjml_types",
         "reference",
-        "gmail.mjml_types"
+        "symbols"
       ]
     },
     {
@@ -62,7 +62,7 @@
       ]
     }
   ],
-  "generated_at": "2026-08-17T22:01:38.304918",
+  "generated_at": null,
   "source_module": "gmail.mjml_types",
   "version": "1.0.0"
 }

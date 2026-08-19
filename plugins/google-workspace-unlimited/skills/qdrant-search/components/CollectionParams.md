@@ -38,12 +38,6 @@ Attributes:
 ## Valid Children
 
 - `S_7` ShardingMethod
-- `S_7` ShardingMethod
-- `S_7` ShardingMethod
-- `S_7` ShardingMethod
-- `S_7` ShardingMethod
-- `S_7` ShardingMethod
-- `S_7` ShardingMethod
 
 ## Fields
 

@@ -8,9 +8,5 @@ ImageComponent(image_uri: 'str' = None, alt_text: 'str' = None, crop_style: 'Ima
 
 ## Valid Children
 
-- `I_0` ImageCropStyle
 - `β` BorderStyle
 - `I_0` ImageCropStyle
-- `β` BorderStyle
-- `I_0` ImageCropStyle
-- `β` BorderStyle

@@ -8,8 +8,8 @@ Params of single sparse vector data storage
 
 ## Valid Children
 
-- `S_19` SparseIndexParams
 - `ɯ` Modifier
+- `S_19` SparseIndexParams
 
 ## Fields
 

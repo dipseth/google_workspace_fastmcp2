@@ -38,11 +38,8 @@ Attributes:
 ## Valid Children
 
 - `L_0` LocalShardTelemetry
-- `R_17` RemoteShardTelemetry
 - `P_12` PartialSnapshotTelemetry
-- `L_0` LocalShardTelemetry
 - `R_17` RemoteShardTelemetry
-- `P_12` PartialSnapshotTelemetry
 
 ## Fields
 

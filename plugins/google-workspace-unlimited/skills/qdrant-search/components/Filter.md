@@ -38,16 +38,6 @@ Attributes:
 ## Valid Children
 
 - `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- `◆` MinShould
-- ... and 23 more
 
 ## Fields
 

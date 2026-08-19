@@ -38,8 +38,6 @@ Attributes:
 ## Valid Children
 
 - `O_3` OptimizationSegmentInfo
-- `O_3` OptimizationSegmentInfo
-- `O_3` OptimizationSegmentInfo
 
 ## Fields
 

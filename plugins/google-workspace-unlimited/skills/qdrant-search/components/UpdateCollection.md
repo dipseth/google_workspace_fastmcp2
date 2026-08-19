@@ -8,9 +8,9 @@ Operation for updating parameters of the existing collection
 
 ## Valid Children
 
-- `O_7` OptimizersConfigDiff
 - `C_28` CollectionParamsDiff
 - `η` HnswConfigDiff
+- `O_7` OptimizersConfigDiff
 - `S_14` StrictModeConfig
 
 ## Fields

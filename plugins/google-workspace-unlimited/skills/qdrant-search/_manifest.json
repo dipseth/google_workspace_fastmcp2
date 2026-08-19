@@ -5,11 +5,11 @@
     {
       "name": "SKILL",
       "title": "Qdrant Vector Search",
-      "description": "Skills for qdrant_client.models",
+      "description": "Qdrant Vector Search \u2014 semantic search, filter DSL, recommendation, and query DSL over past Google Workspace MCP tool responses",
       "filename": "SKILL.md",
       "tags": [
-        "qdrant_client.models",
-        "qdrant-search"
+        "qdrant-search",
+        "qdrant_client.models"
       ]
     },
     {
@@ -18,9 +18,9 @@
       "description": "Component symbol reference table",
       "filename": "symbols.md",
       "tags": [
-        "symbols",
+        "qdrant_client.models",
         "reference",
-        "qdrant_client.models"
+        "symbols"
       ]
     },
     {
@@ -53,7 +53,7 @@
       ]
     }
   ],
-  "generated_at": "2026-08-17T22:01:38.359135",
+  "generated_at": null,
   "source_module": "qdrant_client.models",
   "version": "1.0.0"
 }

@@ -8,5 +8,5 @@ CollapseControl(horizontal_alignment: card_framework.v2.enums.HorizontalAlignmen
 
 ## Valid Children
 
-- `Ħ` HorizontalAlignment
 - `ᵬ` Button
+- `Ħ` HorizontalAlignment

@@ -8,17 +8,8 @@ Additional parameters of the search
 
 ## Valid Children
 
-- `ʔ` QuantizationSearchParams
 - `Å` AcornSearchParams
 - `ʔ` QuantizationSearchParams
-- `Å` AcornSearchParams
-- `ʔ` QuantizationSearchParams
-- `Å` AcornSearchParams
-- `ʔ` QuantizationSearchParams
-- `Å` AcornSearchParams
-- `ʔ` QuantizationSearchParams
-- `Å` AcornSearchParams
-- ... and 16 more
 
 ## Fields
 

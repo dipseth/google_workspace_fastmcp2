@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `D_26` DistributedClusterTelemetry
-- `D_26` DistributedClusterTelemetry
 
 ## Fields
 

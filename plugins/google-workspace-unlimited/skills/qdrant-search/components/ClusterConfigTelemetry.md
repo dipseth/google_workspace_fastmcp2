@@ -37,14 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `P_8` P2pConfigTelemetry
 - `C_30` ConsensusConfigTelemetry
 - `P_8` P2pConfigTelemetry
-- `C_30` ConsensusConfigTelemetry
-- `P_8` P2pConfigTelemetry
-- `C_30` ConsensusConfigTelemetry
-- `P_8` P2pConfigTelemetry
-- `C_30` ConsensusConfigTelemetry
 
 ## Fields
 

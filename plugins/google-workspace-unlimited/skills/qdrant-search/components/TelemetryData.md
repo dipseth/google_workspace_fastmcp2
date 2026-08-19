@@ -38,16 +38,11 @@ Attributes:
 ## Valid Children
 
 - `ă` AppBuildTelemetry
-- `C_20` CollectionsTelemetry
 - `C_3` ClusterTelemetry
-- `R_9` RequestsTelemetry
-- `M_2` MemoryTelemetry
+- `C_20` CollectionsTelemetry
 - `H_0` HardwareTelemetry
-- `ă` AppBuildTelemetry
-- `C_20` CollectionsTelemetry
-- `C_3` ClusterTelemetry
+- `M_2` MemoryTelemetry
 - `R_9` RequestsTelemetry
-- ... and 2 more
 
 ## Fields
 

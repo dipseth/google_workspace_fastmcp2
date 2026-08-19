@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `S_30` SnapshotDescription
+- `ʊ` Usage
 
 ## Fields
 

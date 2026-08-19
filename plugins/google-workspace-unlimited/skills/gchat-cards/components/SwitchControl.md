@@ -11,5 +11,3 @@ SwitchControl
 
 - `ă` Action
 - `♠` ControlType
-- `ă` Action
-- `♠` ControlType

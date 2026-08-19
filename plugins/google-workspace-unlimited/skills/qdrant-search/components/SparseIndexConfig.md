@@ -9,7 +9,6 @@ Configuration for sparse inverted index.
 ## Valid Children
 
 - `V_2` VectorStorageDatatype
-- `V_2` VectorStorageDatatype
 
 ## Fields
 

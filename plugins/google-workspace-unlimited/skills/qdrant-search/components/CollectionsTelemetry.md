@@ -38,8 +38,6 @@ Attributes:
 ## Valid Children
 
 - `C_29` CollectionSnapshotTelemetry
-- `C_29` CollectionSnapshotTelemetry
-- `C_29` CollectionSnapshotTelemetry
 
 ## Fields
 

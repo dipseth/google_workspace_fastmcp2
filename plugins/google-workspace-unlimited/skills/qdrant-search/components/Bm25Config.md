@@ -8,8 +8,8 @@ Configuration of the local bm25 models.
 
 ## Valid Children
 
-- `ƭ` TokenizerType
 - `S_3` SnowballParams
+- `ƭ` TokenizerType
 
 ## Fields
 

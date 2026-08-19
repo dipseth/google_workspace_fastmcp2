@@ -9,7 +9,6 @@ Summary information about the current raft state
 ## Valid Children
 
 - `ş` StateRole
-- `ş` StateRole
 
 ## Fields
 

@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `◘` CollectionInfo
+- `ʊ` Usage
 
 ## Fields
 

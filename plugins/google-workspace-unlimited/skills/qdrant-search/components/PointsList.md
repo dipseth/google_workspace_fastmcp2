@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `▼` PointStruct
 - `ƒ` Filter
+- `▼` PointStruct
 - `υ` UpdateMode
 
 ## Fields

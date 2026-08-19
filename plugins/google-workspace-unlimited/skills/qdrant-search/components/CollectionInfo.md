@@ -8,13 +8,9 @@ Current statistics and configuration of the collection
 
 ## Valid Children
 
+- `C_1` CollectionConfig
 - `C_5` CollectionStatus
 - `C_11` CollectionWarning
-- `C_1` CollectionConfig
-- `U_4` UpdateQueueInfo
-- `C_5` CollectionStatus
-- `C_11` CollectionWarning
-- `C_1` CollectionConfig
 - `U_4` UpdateQueueInfo
 
 ## Fields

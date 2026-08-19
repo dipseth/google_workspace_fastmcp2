@@ -37,17 +37,9 @@ Attributes:
 
 ## Valid Children
 
-- `ü` UUID
 - `O_3` OptimizationSegmentInfo
 - `▪` ProgressTree
 - `ü` UUID
-- `O_3` OptimizationSegmentInfo
-- `▪` ProgressTree
-- `ü` UUID
-- `O_3` OptimizationSegmentInfo
-- `▪` ProgressTree
-- `ü` UUID
-- ... and 5 more
 
 ## Fields
 

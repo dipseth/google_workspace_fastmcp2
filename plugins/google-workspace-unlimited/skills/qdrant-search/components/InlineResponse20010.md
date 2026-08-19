@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `O_2` OptimizationsResponse
+- `ʊ` Usage
 
 ## Fields
 

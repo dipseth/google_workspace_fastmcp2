@@ -8,11 +8,7 @@ Column(horizontal_size_style: 'Optional[Column.HorizontalSizeStyle]' = None, hor
 
 ## Valid Children
 
-- `ħ` HorizontalSizeStyle
 - `Ħ` HorizontalAlignment
-- `ν` VerticalAlignment
-- `ʍ` Widget
 - `ħ` HorizontalSizeStyle
-- `Ħ` HorizontalAlignment
 - `ν` VerticalAlignment
 - `ʍ` Widget

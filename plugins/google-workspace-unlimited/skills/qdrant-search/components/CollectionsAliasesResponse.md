@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `ą` AliasDescription
-- `ą` AliasDescription
 
 ## Fields
 

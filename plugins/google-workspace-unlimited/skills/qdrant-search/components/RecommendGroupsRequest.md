@@ -37,10 +37,10 @@ Attributes:
 
 ## Valid Children
 
-- `R_10` RecommendStrategy
 - `ƒ` Filter
-- `♦` SearchParams
 - `ɭ` LookupLocation
+- `R_10` RecommendStrategy
+- `♦` SearchParams
 
 ## Fields
 

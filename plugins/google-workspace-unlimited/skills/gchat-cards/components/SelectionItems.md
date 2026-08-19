@@ -9,6 +9,3 @@ SelectionItems(items: List[card_framework.v2.widgets.selection_item.SelectionIte
 ## Valid Children
 
 - `S_0` SelectionItem
-- `S_0` SelectionItem
-- `S_0` SelectionItem
-- `S_0` SelectionItem

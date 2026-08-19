@@ -13,5 +13,3 @@ https://developers.google.com/chat/api/guides/message-formats/cards#buttonlist
 ## Valid Children
 
 - `ᵬ` Button
-- `ᵬ` Button
-- `ᵬ` Button

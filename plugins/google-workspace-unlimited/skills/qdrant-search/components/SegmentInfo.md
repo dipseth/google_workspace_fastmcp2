@@ -8,16 +8,8 @@ Aggregated information about segment
 
 ## Valid Children
 
-- `ü` UUID
 - `■` SegmentType
 - `ü` UUID
-- `■` SegmentType
-- `ü` UUID
-- `■` SegmentType
-- `ü` UUID
-- `■` SegmentType
-- `ü` UUID
-- `■` SegmentType
 
 ## Fields
 

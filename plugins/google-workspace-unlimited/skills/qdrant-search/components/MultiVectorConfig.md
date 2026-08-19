@@ -38,8 +38,6 @@ Attributes:
 ## Valid Children
 
 - `M_7` MultiVectorComparator
-- `M_7` MultiVectorComparator
-- `M_7` MultiVectorComparator
 
 ## Fields
 

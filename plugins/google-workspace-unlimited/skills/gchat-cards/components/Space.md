@@ -8,7 +8,5 @@ Space(name: 'str' = None, type: 'str' = None, spaceType: 'SpaceType' = None, sin
 
 ## Valid Children
 
-- `ș` SpaceType
 - `♥` SpaceDetail
 - `ș` SpaceType
-- `♥` SpaceDetail

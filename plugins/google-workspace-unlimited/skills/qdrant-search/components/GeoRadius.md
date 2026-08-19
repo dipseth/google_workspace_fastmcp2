@@ -9,7 +9,6 @@ Geo filter request  Matches coordinates inside the circle of `radius` and center
 ## Valid Children
 
 - `ℊ` GeoPoint
-- `ℊ` GeoPoint
 
 ## Fields
 

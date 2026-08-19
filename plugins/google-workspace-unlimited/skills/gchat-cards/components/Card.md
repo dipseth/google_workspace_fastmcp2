@@ -14,14 +14,9 @@ full details on what this should look like.
 
 ## Valid Children
 
-- `◇` CardHeader
-- `§` Section
 - `◆` CardAction
-- `○` DividerStyle
 - `C_1` CardFixedFooter
+- `◇` CardHeader
 - `●` DisplayStyle
-- `◇` CardHeader
-- `◇` CardHeader
+- `○` DividerStyle
 - `§` Section
-- `◆` CardAction
-- ... and 32 more

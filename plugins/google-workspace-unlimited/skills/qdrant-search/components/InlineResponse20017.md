@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `ų` UpdateResult
+- `ʊ` Usage
 
 ## Fields
 

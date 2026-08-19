@@ -8,7 +8,7 @@ This document describes which components can contain which.
 |--------|--------|----------|
 | AccordionBlock | `ą` | `A`=AccordionItem |
 | CarouselBlock | `ȼ` | `C`=CarouselImage |
-| Column | `©` | `E`=EmailBlock, `E`=EmailBlock |
+| Column | `©` | `E`=EmailBlock |
 | ColumnsBlock | `¢` | `©`=Column |
 | EmailSpec | `ε` | `E`=EmailTheme |
 | MjmlRenderResult | `-` | `M`=MjmlDiagnostic |

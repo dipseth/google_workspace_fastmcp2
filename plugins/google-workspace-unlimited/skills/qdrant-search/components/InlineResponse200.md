@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `S_17` ShardKeysResponse
+- `ʊ` Usage
 
 ## Fields
 

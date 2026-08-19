@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `ƒ` Filter
-- `ƒ` Filter
 
 ## Fields
 

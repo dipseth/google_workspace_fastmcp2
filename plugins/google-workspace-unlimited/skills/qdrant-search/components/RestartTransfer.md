@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `S_29` ShardTransferMethod
-- `S_29` ShardTransferMethod
 
 ## Fields
 

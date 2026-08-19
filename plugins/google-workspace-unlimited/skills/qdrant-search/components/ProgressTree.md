@@ -38,11 +38,6 @@ Attributes:
 ## Valid Children
 
 - `▪` ProgressTree
-- `▪` ProgressTree
-- `▪` ProgressTree
-- `▪` ProgressTree
-- `▪` ProgressTree
-- `▪` ProgressTree
 
 ## Fields
 

@@ -39,8 +39,6 @@ Attributes:
 
 - `F_1` FeedbackItem
 - `N_2` NaiveFeedbackStrategy
-- `F_1` FeedbackItem
-- `N_2` NaiveFeedbackStrategy
 
 ## Fields
 

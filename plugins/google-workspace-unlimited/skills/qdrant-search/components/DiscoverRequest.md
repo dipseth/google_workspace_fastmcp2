@@ -10,12 +10,8 @@ Use context and a target to find the most similar points, constrained by the con
 
 - `C_14` ContextExamplePair
 - `ƒ` Filter
-- `♦` SearchParams
 - `ɭ` LookupLocation
-- `C_14` ContextExamplePair
-- `ƒ` Filter
 - `♦` SearchParams
-- `ɭ` LookupLocation
 
 ## Fields
 

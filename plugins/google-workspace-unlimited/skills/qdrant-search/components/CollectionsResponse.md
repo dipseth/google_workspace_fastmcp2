@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `C_27` CollectionDescription
-- `C_27` CollectionDescription
 
 ## Fields
 

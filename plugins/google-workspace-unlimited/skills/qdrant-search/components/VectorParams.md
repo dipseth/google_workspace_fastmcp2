@@ -8,9 +8,9 @@ Params of single vector data storage
 
 ## Valid Children
 
+- `Đ` Datatype
 - `δ` Distance
 - `η` HnswConfigDiff
-- `Đ` Datatype
 - `M_3` MultiVectorConfig
 
 ## Fields

@@ -8,16 +8,10 @@ Optimizations progress for the collection
 
 ## Valid Children
 
-- `O_6` OptimizationsSummary
-- `Ω` Optimization
-- `P_9` PendingOptimization
 - `Ω` Optimization
 - `O_3` OptimizationSegmentInfo
 - `O_6` OptimizationsSummary
-- `Ω` Optimization
 - `P_9` PendingOptimization
-- `Ω` Optimization
-- `O_3` OptimizationSegmentInfo
 
 ## Fields
 

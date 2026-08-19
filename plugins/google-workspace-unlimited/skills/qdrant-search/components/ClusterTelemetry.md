@@ -37,12 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `C_19` ClusterStatusTelemetry
 - `C_17` ClusterConfigTelemetry
 - `C_19` ClusterStatusTelemetry
-- `C_17` ClusterConfigTelemetry
-- `C_19` ClusterStatusTelemetry
-- `C_17` ClusterConfigTelemetry
 
 ## Fields
 

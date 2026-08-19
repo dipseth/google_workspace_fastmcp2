@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `R_10` RecommendStrategy
-- `R_10` RecommendStrategy
 
 ## Fields
 

@@ -37,17 +37,10 @@ Attributes:
 
 ## Valid Children
 
-- `σ` SegmentInfo
-- `S_4` SegmentConfig
-- `V_1` VectorIndexSearchesTelemetry
 - `P_13` PayloadIndexTelemetry
-- `σ` SegmentInfo
 - `S_4` SegmentConfig
+- `σ` SegmentInfo
 - `V_1` VectorIndexSearchesTelemetry
-- `P_13` PayloadIndexTelemetry
-- `σ` SegmentInfo
-- `S_4` SegmentConfig
-- ... and 6 more
 
 ## Fields
 

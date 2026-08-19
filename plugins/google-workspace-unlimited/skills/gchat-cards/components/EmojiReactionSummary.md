@@ -9,4 +9,3 @@ EmojiReactionSummary(emoji: card_framework.v2.emoji.Emoji = None, reaction_count
 ## Valid Children
 
 - `ε` Emoji
-- `ε` Emoji

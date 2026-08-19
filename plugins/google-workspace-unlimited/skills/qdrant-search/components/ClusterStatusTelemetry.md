@@ -38,9 +38,6 @@ Attributes:
 ## Valid Children
 
 - `ş` StateRole
-- `ş` StateRole
-- `ş` StateRole
-- `ş` StateRole
 
 ## Fields
 

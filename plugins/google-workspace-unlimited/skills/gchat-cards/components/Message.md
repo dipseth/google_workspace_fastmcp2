@@ -8,14 +8,14 @@ Message(name: 'str' = None, sender: 'User' = None, create_time: 'str' = None, la
 
 ## Valid Children
 
-- `□` SlashCommand
+- `A_1` AccessoryWidget
+- `▪` ActionResponse
 - `ą` Annotation
+- `☆` AttachedGif
+- `Å` Attachment
+- `©` Card
 - `•` CardWithId
 - `D_0` DeletionMetadata
-- `☆` AttachedGif
-- `Ʈ` Thread
-- `▪` ActionResponse
-- `©` Card
-- `ʠ` QuotedMessageMetadata
-- `A_1` AccessoryWidget
+- `ė` EmojiReactionSummary
+- `ɱ` MatchedUrl
 - ... and 5 more

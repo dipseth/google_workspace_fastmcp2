@@ -39,12 +39,6 @@ Attributes:
 
 - `O_5` OperationDurationStatistics
 - `T_0` TrackerTelemetry
-- `O_5` OperationDurationStatistics
-- `T_0` TrackerTelemetry
-- `O_5` OperationDurationStatistics
-- `T_0` TrackerTelemetry
-- `O_5` OperationDurationStatistics
-- `T_0` TrackerTelemetry
 
 ## Fields
 

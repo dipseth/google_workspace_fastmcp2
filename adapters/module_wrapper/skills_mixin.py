@@ -22,6 +22,17 @@ Usage:
     def _register_gchat_skill_templates(wrapper):
         wrapper.register_skill_template("dsl-syntax", _gchat_dsl_template)
         wrapper.register_skill_examples("dsl-syntax", ["example1", "example2"])
+
+::
+
+    No hand shall write what models know —
+    the skills are grown, not sown by hand.
+    Change a class, and let it flow:
+    regenerate, commit, and land.
+    Sort each set before you ship,
+    lest hash-seed chaos wreck the diff —
+    CI stands watch on every trip:
+    `generate_plugin_skills.py --check` — deploy rides only if.
 """
 
 import json
@@ -338,7 +349,10 @@ class SkillsMixin:
 
             name = comp.name
             symbol = symbol_mapping.get(name, "")
-            children = relationships.get(name, [])
+            # Dedupe and sort: the relationships pipeline yields duplicates in
+            # hash-seed-dependent order, which would make regeneration
+            # nondeterministic across processes
+            children = sorted(set(relationships.get(name, [])))
 
             lines = [
                 f"# {name}",
@@ -427,8 +441,11 @@ class SkillsMixin:
             lines.append("| Parent | Symbol | Children |")
             lines.append("|--------|--------|----------|")
 
-            for parent, children in sorted(relationships.items()):
+            for parent, raw_children in sorted(relationships.items()):
                 parent_sym = symbol_mapping.get(parent, "-")
+                # Dedupe and sort for deterministic regeneration (see
+                # generate_component_docs)
+                children = sorted(set(raw_children))
                 if children:
                     child_syms = [
                         f"`{symbol_mapping.get(c, c[0])}`={c}" for c in children[:5]
@@ -469,12 +486,21 @@ class SkillsMixin:
         """
         module_name = getattr(self, "module_name", "module")
 
-        lines = [
-            f"# {skill_title}\n",
-        ]
+        lines = []
 
-        if description:
-            lines.append(f"{description}\n")
+        # YAML frontmatter — required by Claude Code for skill discovery
+        if skill_name and description:
+            lines.extend(
+                [
+                    "---",
+                    f"name: {skill_name}",
+                    f"description: {description}",
+                    "---",
+                    "",
+                ]
+            )
+
+        lines.append(f"# {skill_title}\n")
 
         # Quick start section
         lines.append("## Quick Start\n")
@@ -549,6 +575,7 @@ class SkillsMixin:
         skills["SKILL"] = self.generate_main_skill(
             skill_name=skill_name,
             skill_title=skill_title,
+            description=config.skill_description,
         )
 
         # Generate symbol reference
@@ -651,7 +678,7 @@ class SkillsMixin:
                         title=doc.title,
                         description=doc.description,
                         filename=filename,
-                        tags=list(doc.tags),
+                        tags=sorted(doc.tags),
                     )
                 )
 
@@ -705,7 +732,7 @@ class SkillsMixin:
                         title=doc.title,
                         description=doc.description,
                         filename=f"{skill_name}.md",
-                        tags=list(doc.tags),
+                        tags=sorted(doc.tags),
                     )
                 )
 

@@ -37,12 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ŵ` WebApiTelemetry
 - `G_2` GrpcTelemetry
 - `ŵ` WebApiTelemetry
-- `G_2` GrpcTelemetry
-- `ŵ` WebApiTelemetry
-- `G_2` GrpcTelemetry
 
 ## Fields
 

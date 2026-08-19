@@ -9,8 +9,8 @@ All possible payload filtering conditions
 ## Valid Children
 
 - `G_3` GeoBoundingBox
-- `ǵ` GeoRadius
 - `ǧ` GeoPolygon
+- `ǵ` GeoRadius
 - `ν` ValuesCount
 
 ## Fields

@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `ɠ` GroupsResult
+- `ʊ` Usage
 
 ## Fields
 

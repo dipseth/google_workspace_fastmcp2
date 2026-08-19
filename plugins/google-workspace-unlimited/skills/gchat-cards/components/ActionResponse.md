@@ -8,9 +8,6 @@ ActionResponse(type: 'ResponseType' = None, url: 'str' = None, dialog_action: 'D
 
 ## Valid Children
 
-- `ř` ResponseType
 - `ð` DialogAction
-- `ų` UpdatedWidget
 - `ř` ResponseType
-- `ð` DialogAction
 - `ų` UpdatedWidget

@@ -10,12 +10,3 @@ OverflowMenuItem(start_icon: Optional[card_framework.v2.widgets.icon.Icon] = Non
 
 - `ɨ` Icon
 - `ʍ` Widget
-- `ɨ` Icon
-- `ʍ` Widget
-- `ɨ` Icon
-- `ʍ` Widget
-- `ɨ` Icon
-- `ʍ` Widget
-- `ɨ` Icon
-- `ʍ` Widget
-- ... and 46 more

@@ -38,11 +38,6 @@ Attributes:
 ## Valid Children
 
 - `O_5` OperationDurationStatistics
-- `O_5` OperationDurationStatistics
-- `O_5` OperationDurationStatistics
-- `O_5` OperationDurationStatistics
-- `O_5` OperationDurationStatistics
-- `O_5` OperationDurationStatistics
 
 ## Fields
 

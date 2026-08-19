@@ -38,11 +38,8 @@ Attributes:
 ## Valid Children
 
 - `ƒ` Filter
-- `♦` SearchParams
 - `ɭ` LookupLocation
-- `ƒ` Filter
 - `♦` SearchParams
-- `ɭ` LookupLocation
 
 ## Fields
 

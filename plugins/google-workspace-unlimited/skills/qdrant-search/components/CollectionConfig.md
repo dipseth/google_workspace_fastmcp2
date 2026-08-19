@@ -11,14 +11,8 @@ Information about the collection configuration
 - `C_4` CollectionParams
 - `Ħ` HnswConfig
 - `O_0` OptimizersConfig
-- `ʍ` WalConfig
 - `S_49` StrictModeConfigOutput
-- `C_4` CollectionParams
-- `Ħ` HnswConfig
-- `O_0` OptimizersConfig
 - `ʍ` WalConfig
-- `S_49` StrictModeConfigOutput
-- ... and 5 more
 
 ## Fields
 

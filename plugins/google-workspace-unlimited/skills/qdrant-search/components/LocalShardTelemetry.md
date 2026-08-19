@@ -37,17 +37,10 @@ Attributes:
 
 ## Valid Children
 
-- `□` ShardStatus
-- `S_6` SegmentTelemetry
 - `O_1` OptimizerTelemetry
-- `S_43` ShardUpdateQueueInfo
-- `□` ShardStatus
 - `S_6` SegmentTelemetry
-- `O_1` OptimizerTelemetry
-- `S_43` ShardUpdateQueueInfo
 - `□` ShardStatus
-- `S_6` SegmentTelemetry
-- ... and 2 more
+- `S_43` ShardUpdateQueueInfo
 
 ## Fields
 

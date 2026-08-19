@@ -12,9 +12,7 @@ https://developers.google.com/chat/api/guides/message-formats/cards#decoratedtex
 
 ## Valid Children
 
-- `ɨ` Icon
+- `ᵬ` Button
 - `ɨ` Icon
 - `ø` OnClick
-- `ᵬ` Button
 - `◄` SwitchControl
-- `ɨ` Icon

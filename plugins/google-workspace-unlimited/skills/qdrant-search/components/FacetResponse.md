@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `F_4` FacetValueHit
-- `F_4` FacetValueHit
 
 ## Fields
 

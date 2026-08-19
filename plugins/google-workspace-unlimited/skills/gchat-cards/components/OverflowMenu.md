@@ -9,13 +9,3 @@ OverflowMenu(items: List[card_framework.v2.widgets.overflow_menu.OverflowMenuIte
 ## Valid Children
 
 - `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- `O_0` OverflowMenuItem
-- ... and 29 more

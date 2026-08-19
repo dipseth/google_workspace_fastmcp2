@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `ρ` Record
+- `ʊ` Usage
 
 ## Fields
 

@@ -8,11 +8,11 @@ Operation for creating new collection and (optionally) specify index params
 
 ## Valid Children
 
-- `S_7` ShardingMethod
 - `η` HnswConfigDiff
-- `ẃ` WalConfigDiff
 - `O_7` OptimizersConfigDiff
+- `S_7` ShardingMethod
 - `S_14` StrictModeConfig
+- `ẃ` WalConfigDiff
 
 ## Fields
 

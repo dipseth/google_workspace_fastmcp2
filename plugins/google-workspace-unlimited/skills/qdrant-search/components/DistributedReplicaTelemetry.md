@@ -37,15 +37,9 @@ Attributes:
 
 ## Valid Children
 
-- `R_0` ReplicaState
-- `□` ShardStatus
 - `P_12` PartialSnapshotTelemetry
 - `R_0` ReplicaState
 - `□` ShardStatus
-- `P_12` PartialSnapshotTelemetry
-- `R_0` ReplicaState
-- `□` ShardStatus
-- `P_12` PartialSnapshotTelemetry
 
 ## Fields
 

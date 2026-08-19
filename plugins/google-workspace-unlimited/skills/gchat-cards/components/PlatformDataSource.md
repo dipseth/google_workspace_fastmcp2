@@ -10,5 +10,3 @@ PlatformDataSource(common_data_source: 'CommonDataSource' = None, host_app_data_
 
 - `C_2` CommonDataSource
 - `ℏ` HostAppDataSourceMarkup
-- `C_2` CommonDataSource
-- `ℏ` HostAppDataSourceMarkup

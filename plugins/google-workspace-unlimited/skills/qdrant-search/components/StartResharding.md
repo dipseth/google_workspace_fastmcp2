@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `R_16` ReshardingDirection
-- `R_16` ReshardingDirection
 
 ## Fields
 

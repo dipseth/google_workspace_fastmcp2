@@ -8,6 +8,6 @@ Grid(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, title: 'str' =
 
 ## Valid Children
 
-- `ǵ` GridItem
 - `β` BorderStyle
+- `ǵ` GridItem
 - `ø` OnClick

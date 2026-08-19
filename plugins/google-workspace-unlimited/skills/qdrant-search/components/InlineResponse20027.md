@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `S_38` SearchMatrixOffsetsResponse
+- `ʊ` Usage
 
 ## Fields
 

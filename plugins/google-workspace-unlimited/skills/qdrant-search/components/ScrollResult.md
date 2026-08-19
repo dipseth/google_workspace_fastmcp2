@@ -9,7 +9,6 @@ Result of the points read request
 ## Valid Children
 
 - `ρ` Record
-- `ρ` Record
 
 ## Fields
 

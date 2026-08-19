@@ -38,9 +38,6 @@ Attributes:
 ## Valid Children
 
 - `N_3` NaiveFeedbackStrategyParams
-- `N_3` NaiveFeedbackStrategyParams
-- `N_3` NaiveFeedbackStrategyParams
-- `N_3` NaiveFeedbackStrategyParams
 
 ## Fields
 

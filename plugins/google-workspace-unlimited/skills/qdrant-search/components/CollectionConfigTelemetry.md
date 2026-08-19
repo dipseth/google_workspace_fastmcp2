@@ -40,14 +40,9 @@ Attributes:
 - `C_4` CollectionParams
 - `Ħ` HnswConfig
 - `O_0` OptimizersConfig
-- `ʍ` WalConfig
 - `S_49` StrictModeConfigOutput
 - `ü` UUID
-- `C_4` CollectionParams
-- `Ħ` HnswConfig
-- `O_0` OptimizersConfig
 - `ʍ` WalConfig
-- ... and 2 more
 
 ## Fields
 

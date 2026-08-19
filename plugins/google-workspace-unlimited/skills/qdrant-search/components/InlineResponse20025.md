@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `Ǫ` QueryResponse
+- `ʊ` Usage
 
 ## Fields
 

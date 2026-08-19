@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `F_3` FacetResponse
+- `ʊ` Usage
 
 ## Fields
 

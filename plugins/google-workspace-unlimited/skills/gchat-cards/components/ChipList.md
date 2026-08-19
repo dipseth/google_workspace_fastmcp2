@@ -12,5 +12,5 @@ https://developers.google.com/chat/api/guides/message-formats/cards#chiplist
 
 ## Valid Children
 
-- `ŀ` Layout
 - `ℂ` Chip
+- `ŀ` Layout

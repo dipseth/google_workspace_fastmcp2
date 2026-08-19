@@ -8,5 +8,5 @@ DateTimePicker(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, name
 
 ## Valid Children
 
-- `ŧ` Type
 - `ă` Action
+- `ŧ` Type

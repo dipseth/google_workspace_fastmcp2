@@ -9,9 +9,6 @@ Geo filter request  Matches coordinates inside the rectangle, described by coord
 ## Valid Children
 
 - `ℊ` GeoPoint
-- `ℊ` GeoPoint
-- `ℊ` GeoPoint
-- `ℊ` GeoPoint
 
 ## Fields
 

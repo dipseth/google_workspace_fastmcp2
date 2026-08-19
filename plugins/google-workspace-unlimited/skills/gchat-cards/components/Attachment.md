@@ -8,9 +8,6 @@ Attachment(name: 'str' = None, content_name: 'str' = None, content_type: 'str' =
 
 ## Valid Children
 
-- `ş` Source
 - `A_3` AttachmentDataRef
 - `■` DriveDataRef
 - `ş` Source
-- `A_3` AttachmentDataRef
-- `■` DriveDataRef

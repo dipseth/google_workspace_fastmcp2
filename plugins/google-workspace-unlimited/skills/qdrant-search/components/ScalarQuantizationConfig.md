@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `♣` ScalarType
-- `♣` ScalarType
 
 ## Fields
 

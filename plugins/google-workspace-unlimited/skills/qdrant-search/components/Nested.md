@@ -9,7 +9,6 @@ Select points with payload for a specified nested field
 ## Valid Children
 
 - `ƒ` Filter
-- `ƒ` Filter
 
 ## Fields
 

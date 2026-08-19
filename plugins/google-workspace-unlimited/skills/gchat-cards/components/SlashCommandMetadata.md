@@ -8,9 +8,5 @@ SlashCommandMetadata(bot: 'User' = None, type: 'SlashCommandMetadataType' = None
 
 ## Valid Children
 
-- `ʊ` User
 - `S_6` SlashCommandMetadataType
 - `ʊ` User
-- `S_6` SlashCommandMetadataType
-- `ʊ` User
-- `S_6` SlashCommandMetadataType

@@ -9,6 +9,3 @@ CustomEmoji(name: str = None, uid: str = None, emoji_name: str = None, temporary
 ## Valid Children
 
 - `C_3` CustomEmojiPayload
-- `C_3` CustomEmojiPayload
-- `C_3` CustomEmojiPayload
-- `C_3` CustomEmojiPayload

@@ -39,8 +39,8 @@ Attributes:
 
 - `C_9` CollectionConfigTelemetry
 - `R_11` ReplicaSetTelemetry
-- `S_16` ShardTransferInfo
 - `R_1` ReshardingInfo
+- `S_16` ShardTransferInfo
 
 ## Fields
 

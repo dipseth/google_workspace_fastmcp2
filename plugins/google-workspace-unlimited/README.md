@@ -30,6 +30,10 @@ Then, in a conversation, ask Claude to authenticate:
 
 A browser window opens for consent. Credentials are stored encrypted under the plugin's data directory and survive plugin updates.
 
+## Maintenance
+
+Everything under `skills/` is **generated** — the same ModuleWrapper introspection the server runs at startup produces these files. Never edit them by hand: run `uv run python scripts/generate_plugin_skills.py` from the repo root and commit the result. CI (`--check`) fails any PR where the committed skills drift from the generators.
+
 ## Notes
 
 - Stored credentials live in `~/.claude/plugins/data/<plugin-id>/credentials`. Delete that directory to sign out completely, and revoke access at <https://myaccount.google.com/permissions>.

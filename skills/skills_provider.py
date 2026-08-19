@@ -14,6 +14,17 @@ Usage:
             wrappers=[card_framework_wrapper],
             enabled_modules=["card_framework"],
         )
+
+::
+
+    One source of truth, two places served:
+    the server writes them fresh at start,
+    the plugin ships the same, preserved —
+    scripts/generate keeps them not apart.
+    So touch a model, touch a name,
+    then run the script before you fly;
+    the CI check will call your shame
+    if generated skills run dry.
 """
 
 from pathlib import Path
@@ -46,6 +57,25 @@ SKILL_TITLES = {
     "google_gmail": "Gmail Automation",
 }
 
+# Module name to SKILL.md frontmatter description (required by Claude Code
+# for skill discovery)
+SKILL_DESCRIPTIONS = {
+    "card_framework": (
+        "Google Chat Card Builder — DSL symbols, component reference, "
+        "containment rules, and Jinja filters for composing Chat cards with "
+        "the Google Workspace MCP server"
+    ),
+    "gmail.mjml_types": (
+        "MJML Email Composer — email block symbols, DSL syntax, and "
+        "per-component docs for composing rich HTML emails with the Google "
+        "Workspace MCP server"
+    ),
+    "qdrant_client.models": (
+        "Qdrant Vector Search — semantic search, filter DSL, recommendation, "
+        "and query DSL over past Google Workspace MCP tool responses"
+    ),
+}
+
 
 def _get_skill_name(module_name: str) -> str:
     """
@@ -58,6 +88,11 @@ def _get_skill_name(module_name: str) -> str:
         Skill directory name (e.g., "gchat-cards")
     """
     return SKILL_NAMES.get(module_name, module_name.replace("_", "-"))
+
+
+def _get_skill_description(module_name: str) -> str:
+    """Get the SKILL.md frontmatter description for a module."""
+    return SKILL_DESCRIPTIONS.get(module_name, "")
 
 
 def _get_skill_title(module_name: str) -> str:
@@ -161,6 +196,7 @@ def setup_skills_provider(
                 output_dir=str(skill_dir),
                 skill_name=skill_name,
                 skill_title=skill_title,
+                skill_description=_get_skill_description(module_name),
                 include_examples=True,
                 include_hierarchy=True,
                 include_components=True,
@@ -257,6 +293,7 @@ def regenerate_skills(
             output_dir=str(skill_dir),
             skill_name=skill_name,
             skill_title=skill_title,
+            skill_description=_get_skill_description(module_name),
             include_examples=True,
             include_hierarchy=True,
             include_components=True,

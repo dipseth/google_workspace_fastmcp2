@@ -10,11 +10,3 @@ BorderStyle(type: 'BorderType' = None, stroke_color: 'Color' = None, corner_radi
 
 - `ℬ` BorderType
 - `‡` Color
-- `ℬ` BorderType
-- `‡` Color
-- `ℬ` BorderType
-- `‡` Color
-- `ℬ` BorderType
-- `‡` Color
-- `ℬ` BorderType
-- `‡` Color

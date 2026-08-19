@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `S_11` SearchMatrixPair
-- `S_11` SearchMatrixPair
 
 ## Fields
 

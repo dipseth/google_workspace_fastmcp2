@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `ℊ` GeoPoint
-- `ℊ` GeoPoint
 
 ## Fields
 

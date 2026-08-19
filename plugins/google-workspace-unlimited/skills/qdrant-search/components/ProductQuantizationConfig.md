@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `C_6` CompressionRatio
-- `C_6` CompressionRatio
 
 ## Fields
 

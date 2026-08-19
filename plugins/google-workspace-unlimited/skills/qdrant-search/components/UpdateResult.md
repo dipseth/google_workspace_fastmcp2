@@ -38,8 +38,6 @@ Attributes:
 ## Valid Children
 
 - `U_0` UpdateStatus
-- `U_0` UpdateStatus
-- `U_0` UpdateStatus
 
 ## Fields
 

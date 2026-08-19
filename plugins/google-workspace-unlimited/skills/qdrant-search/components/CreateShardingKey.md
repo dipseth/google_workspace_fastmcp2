@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `R_0` ReplicaState
-- `R_0` ReplicaState
 
 ## Fields
 

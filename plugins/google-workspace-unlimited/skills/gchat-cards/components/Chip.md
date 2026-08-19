@@ -14,5 +14,3 @@ https://developers.google.com/workspace/chat/api/reference/rest/v1/cards#chip
 
 - `ɨ` Icon
 - `ø` OnClick
-- `ɨ` Icon
-- `ø` OnClick

@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `○` ScoredPoint
+- `ʊ` Usage
 
 ## Fields
 

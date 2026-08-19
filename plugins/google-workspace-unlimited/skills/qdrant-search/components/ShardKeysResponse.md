@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `S_28` ShardKeyDescription
-- `S_28` ShardKeyDescription
 
 ## Fields
 

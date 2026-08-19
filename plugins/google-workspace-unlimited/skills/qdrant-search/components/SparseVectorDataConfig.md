@@ -8,8 +8,8 @@ Config of single sparse vector data storage
 
 ## Valid Children
 
-- `S_18` SparseIndexConfig
 - `ɯ` Modifier
+- `S_18` SparseIndexConfig
 
 ## Fields
 

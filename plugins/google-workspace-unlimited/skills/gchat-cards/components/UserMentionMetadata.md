@@ -10,7 +10,3 @@ UserMentionMetadata(user: 'User' = None, type: 'UserMentionMetadataType' = None)
 
 - `ʊ` User
 - `U_0` UserMentionMetadataType
-- `ʊ` User
-- `U_0` UserMentionMetadataType
-- `ʊ` User
-- `U_0` UserMentionMetadataType

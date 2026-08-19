@@ -9,9 +9,6 @@ Geo filter request  Matches coordinates inside the polygon, defined by `exterior
 ## Valid Children
 
 - `G_1` GeoLineString
-- `G_1` GeoLineString
-- `G_1` GeoLineString
-- `G_1` GeoLineString
 
 ## Fields
 

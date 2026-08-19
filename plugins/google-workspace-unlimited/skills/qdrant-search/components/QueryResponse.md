@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `○` ScoredPoint
-- `○` ScoredPoint
 
 ## Fields
 

@@ -39,8 +39,6 @@ Attributes:
 
 - `B_2` BinaryQuantizationEncoding
 - `B_3` BinaryQuantizationQueryEncoding
-- `B_2` BinaryQuantizationEncoding
-- `B_3` BinaryQuantizationQueryEncoding
 
 ## Fields
 

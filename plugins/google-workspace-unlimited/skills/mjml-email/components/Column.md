@@ -9,7 +9,6 @@ Individual column within a ColumnsBlock.
 ## Valid Children
 
 - EmailBlock
-- EmailBlock
 
 ## Fields
 

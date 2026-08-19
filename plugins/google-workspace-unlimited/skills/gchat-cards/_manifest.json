@@ -5,7 +5,7 @@
     {
       "name": "SKILL",
       "title": "Google Chat Card Builder",
-      "description": "Skills for card_framework",
+      "description": "Google Chat Card Builder \u2014 DSL symbols, component reference, containment rules, and Jinja filters for composing Chat cards with the Google Workspace MCP server",
       "filename": "SKILL.md",
       "tags": [
         "card_framework",
@@ -18,9 +18,9 @@
       "description": "Component symbol reference table",
       "filename": "symbols.md",
       "tags": [
-        "symbols",
+        "card_framework",
         "reference",
-        "card_framework"
+        "symbols"
       ]
     },
     {
@@ -51,9 +51,18 @@
       "tags": [
         "card-params"
       ]
+    },
+    {
+      "name": "jinja-filters",
+      "title": "Jinja Filters",
+      "description": "Custom guide: jinja-filters",
+      "filename": "jinja-filters.md",
+      "tags": [
+        "jinja-filters"
+      ]
     }
   ],
-  "generated_at": "2026-08-17T22:01:38.300504",
+  "generated_at": null,
   "source_module": "card_framework",
   "version": "1.0.0"
 }

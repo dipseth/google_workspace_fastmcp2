@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `C_12` CollectionClusterInfo
+- `ʊ` Usage
 
 ## Fields
 

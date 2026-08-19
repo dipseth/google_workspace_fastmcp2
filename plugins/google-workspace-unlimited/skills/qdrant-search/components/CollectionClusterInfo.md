@@ -10,12 +10,8 @@ Current clustering distribution for the collection
 
 - `λ` LocalShardInfo
 - `R_6` RemoteShardInfo
-- `S_16` ShardTransferInfo
 - `R_1` ReshardingInfo
-- `λ` LocalShardInfo
-- `R_6` RemoteShardInfo
 - `S_16` ShardTransferInfo
-- `R_1` ReshardingInfo
 
 ## Fields
 

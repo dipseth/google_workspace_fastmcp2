@@ -9,5 +9,3 @@ HostAppDataSourceMarkup(chat_data_source: 'ChatClientDataSourceMarkup' = None)
 ## Valid Children
 
 - `C_4` ChatClientDataSourceMarkup
-- `C_4` ChatClientDataSourceMarkup
-- `C_4` ChatClientDataSourceMarkup

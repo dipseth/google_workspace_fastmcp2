@@ -8,14 +8,10 @@ Recommendation request. Provides positive and negative examples of the vectors, 
 
 ## Valid Children
 
-- `R_10` RecommendStrategy
 - `ƒ` Filter
-- `♦` SearchParams
 - `ɭ` LookupLocation
 - `R_10` RecommendStrategy
-- `ƒ` Filter
 - `♦` SearchParams
-- `ɭ` LookupLocation
 
 ## Fields
 

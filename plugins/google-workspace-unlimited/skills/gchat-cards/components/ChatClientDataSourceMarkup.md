@@ -9,6 +9,3 @@ ChatClientDataSourceMarkup(space_data_source: 'SpaceDataSource' = None)
 ## Valid Children
 
 - `S_4` SpaceDataSource
-- `S_4` SpaceDataSource
-- `S_4` SpaceDataSource
-- `S_4` SpaceDataSource

@@ -37,12 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `○` ScoredPoint
 - `ρ` Record
 - `○` ScoredPoint
-- `ρ` Record
-- `○` ScoredPoint
-- `ρ` Record
 
 ## Fields
 

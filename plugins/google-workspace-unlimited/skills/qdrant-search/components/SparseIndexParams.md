@@ -9,7 +9,6 @@ Configuration for sparse inverted index.
 ## Valid Children
 
 - `Đ` Datatype
-- `Đ` Datatype
 
 ## Fields
 

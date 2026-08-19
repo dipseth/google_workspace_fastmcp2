@@ -38,7 +38,6 @@ Attributes:
 ## Valid Children
 
 - `D_11` DistributedReplicaTelemetry
-- `D_11` DistributedReplicaTelemetry
 
 ## Fields
 

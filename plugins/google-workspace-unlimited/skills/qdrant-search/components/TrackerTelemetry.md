@@ -9,15 +9,6 @@ Tracker object used in telemetry
 ## Valid Children
 
 - `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
-- `ü` UUID
 
 ## Fields
 

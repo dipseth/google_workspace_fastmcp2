@@ -9,7 +9,6 @@ This data structure is used in API interface and applied across multiple shards
 ## Valid Children
 
 - `ƒ` Filter
-- `ƒ` Filter
 
 ## Fields
 

@@ -9,5 +9,5 @@ Container for widgets inside CarouselCard. Limited to TextParagraph, ButtonList,
 ## Valid Children
 
 - `Ƀ` ButtonList
-- `ʈ` TextParagraph
 - `ǐ` Image
+- `ʈ` TextParagraph

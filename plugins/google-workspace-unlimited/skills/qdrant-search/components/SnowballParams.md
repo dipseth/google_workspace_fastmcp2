@@ -39,12 +39,6 @@ Attributes:
 
 - `ʂ` Snowball
 - `S_13` SnowballLanguage
-- `ʂ` Snowball
-- `S_13` SnowballLanguage
-- `ʂ` Snowball
-- `S_13` SnowballLanguage
-- `ʂ` Snowball
-- `S_13` SnowballLanguage
 
 ## Fields
 

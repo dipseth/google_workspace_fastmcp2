@@ -37,8 +37,8 @@ Attributes:
 
 ## Valid Children
 
-- `ʊ` Usage
 - `D_17` DistributedTelemetryData
+- `ʊ` Usage
 
 ## Fields
 

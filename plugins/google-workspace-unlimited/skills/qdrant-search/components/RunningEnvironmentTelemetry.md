@@ -39,12 +39,6 @@ Attributes:
 
 - `©` CpuEndian
 - `G_6` GpuDeviceTelemetry
-- `©` CpuEndian
-- `G_6` GpuDeviceTelemetry
-- `©` CpuEndian
-- `G_6` GpuDeviceTelemetry
-- `©` CpuEndian
-- `G_6` GpuDeviceTelemetry
 
 ## Fields
 
