@@ -242,6 +242,14 @@ Create macros at runtime:
 | `usage_example` | str | Optional usage example |
 | `persist_to_file` | bool | Save to `templates/dynamic/` for persistence across restarts |
 
+Re-creating an existing name overwrites it. `remove_template_macro(macro_name)`
+deletes a dynamic macro (and its persisted file); file-based macros shipped with
+the server are protected. Listing stays resource-based: `template://macros`.
+
+Macro invocations inside tool parameters are detected and rendered by the
+Template Middleware, including calls with full dict/list literals in their
+arguments — e.g. `{{ my_macro(items=[{"k": "v"}], mode='params') }}`.
+
 ### `email_symbols` Global
 
 The `email_symbols` object is available as a Jinja2 global, providing \
