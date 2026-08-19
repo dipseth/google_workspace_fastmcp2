@@ -45,6 +45,43 @@ from .utils import (
 logger = setup_logger()
 
 
+async def _map_message_ids_to_draft_ids(
+    gmail_service, message_ids: set
+) -> dict[str, str]:
+    """Map draft message IDs to their draft IDs via drafts().list.
+
+    The Gmail API only exposes the message→draft mapping through drafts().list,
+    so this pages through the user's drafts until every requested message ID is
+    resolved (or the drafts run out). Errors degrade to an empty/partial map —
+    draft IDs are a convenience field, never worth failing the parent tool for.
+    """
+    mapping: dict[str, str] = {}
+    remaining = set(message_ids)
+    page_token = None
+    try:
+        # 500 per page; the page cap bounds worst-case latency for huge mailboxes.
+        for _ in range(4):
+            if not remaining:
+                break
+            request = (
+                gmail_service.users()
+                .drafts()
+                .list(userId="me", maxResults=500, pageToken=page_token)
+            )
+            response = await asyncio.to_thread(request.execute)
+            for draft in response.get("drafts", []):
+                msg_id = draft.get("message", {}).get("id")
+                if msg_id in remaining:
+                    mapping[msg_id] = draft.get("id")
+                    remaining.discard(msg_id)
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+    except Exception as e:
+        logger.warning(f"Could not map draft IDs: {e}")
+    return mapping
+
+
 async def search_gmail_messages(
     query: Annotated[
         str,
@@ -155,6 +192,19 @@ async def search_gmail_messages(
                 }
 
             messages.append(message_info)
+
+        # Resolve draft IDs for any results that are drafts, in one sweep, so
+        # callers can feed them straight into the draft_id update parameters.
+        draft_msg_ids = {
+            m["id"] for m in messages if "DRAFT" in (m.get("labels") or [])
+        }
+        if draft_msg_ids:
+            draft_id_map = await _map_message_ids_to_draft_ids(
+                gmail_service, draft_msg_ids
+            )
+            for message_info in messages:
+                if message_info["id"] in draft_id_map:
+                    message_info["draft_id"] = draft_id_map[message_info["id"]]
 
         logger.info(f"[search_gmail_messages] Found {len(messages)} messages")
 
@@ -270,6 +320,15 @@ async def get_gmail_message_content(
         }
         if attachment_metadata:
             message_content["attachments"] = attachment_metadata
+
+        # Surface the draft ID when this message is a draft, so callers can
+        # edit it in place via the draft_id update parameters.
+        if "DRAFT" in (message_full.get("labelIds") or []):
+            draft_id_map = await _map_message_ids_to_draft_ids(
+                gmail_service, {message_id}
+            )
+            if message_id in draft_id_map:
+                message_content["draft_id"] = draft_id_map[message_id]
 
         return GetGmailMessageContentResponse(
             success=True, message_content=message_content, userEmail=user_google_email
@@ -837,7 +896,7 @@ def setup_message_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="search_gmail_messages",
-        description="Search messages in Gmail account using Gmail query syntax with message and thread IDs",
+        description="Search messages in Gmail account using Gmail query syntax with message and thread IDs. Draft results (e.g. from 'in:draft') also include their draft_id, usable with the draft_id update parameters of the drafting tools",
         tags={"gmail", "search", "messages", "email"},
         annotations={
             "title": "Gmail Message Search",
@@ -863,7 +922,7 @@ def setup_message_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="get_gmail_message_content",
-        description="Retrieve the full content (subject, sender, body) of a specific Gmail message",
+        description="Retrieve the full content (subject, sender, body) of a specific Gmail message. If the message is a draft, its draft_id is included, usable with the draft_id update parameters of the drafting tools",
         tags={"gmail", "message", "content", "email"},
         annotations={
             "title": "Gmail Message Content",

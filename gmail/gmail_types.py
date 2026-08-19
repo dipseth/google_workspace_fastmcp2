@@ -251,6 +251,9 @@ class GmailMessageInfo(TypedDict):
     label_names: NotRequired[
         List[str]
     ]  # Human-readable label names corresponding to labels
+    draft_id: NotRequired[
+        Optional[str]
+    ]  # Draft ID when the message is a draft (usable with draft_id update params)
     web_url: str
 
 
@@ -285,6 +288,9 @@ class GmailMessageContent(TypedDict):
     body: str
     web_url: str
     attachments: NotRequired[List[GmailAttachmentInfo]]
+    draft_id: NotRequired[
+        Optional[str]
+    ]  # Draft ID when the message is a draft (usable with draft_id update params)
 
 
 class GetGmailMessageContentResponse(TypedDict):
