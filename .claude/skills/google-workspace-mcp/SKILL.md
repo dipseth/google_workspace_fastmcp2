@@ -27,17 +27,20 @@ Composes responsive HTML emails via DSL notation, then sends or saves as draft.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `email_description` | str | required | DSL structure string (e.g., `ε[ħ, τ×2, Ƀ]`) |
-| `email_params` | dict/str | None | Block content keyed by symbol. Supports `_shared`/`_items` merging |
-| `to` | str | "myself" | Recipients (comma-separated emails or "myself") |
+| `email_description` | str | required | DSL structure ONLY + optional subject. Text after the DSL becomes the email subject (e.g., `ε[ħ, τ] Welcome aboard`) |
+| `email_params` | dict/str | None | **REQUIRED for content** — block text/titles/URLs go here, keyed by symbol. `email_description` is structure ONLY. Also accepts `subject` and `preheader` keys. Supports `_shared`/`_items` merging |
+| `to` | str/list | "myself" | Recipients: "myself", comma-separated string, or list of emails |
+| `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `action` | "send"/"draft" | "draft" | Draft is safe default; "send" delivers immediately |
 | `cc` / `bcc` | str | None | Optional CC/BCC recipients |
+| `reply_to_message_id` | str | None | Thread the composed email as a reply to this Gmail message. Recipients derive from the original; the reply subject overrides the DSL subject |
+| `draft_id` | str | None | Update an existing draft in place with the freshly rendered email instead of creating a new one (action='draft' only) |
 
 **Email DSL Symbols:**
 
 | Symbol | Block |
 |--------|-------|
-| `ε` | EmailSpec (root container) |
+| `ε` | EmailSpec |
 | `ħ` | HeroBlock |
 | `τ` | TextBlock |
 | `Ƀ` | ButtonBlock |
@@ -72,7 +75,7 @@ Composes responsive HTML emails via DSL notation, then sends or saves as draft.
   },
   "Ƀ": {
     "_items": [
-      {"text": "View Report", "href": "https://example.com/report"}
+      {"text": "View Report", "url": "https://example.com/report"}
     ]
   }
 }
@@ -86,9 +89,75 @@ email_params: {
   "Ħ": {"_items": [{"title": "Acme Corp"}]},
   "ħ": {"_items": [{"title": "Team Standup", "subtitle": "Tomorrow at 10am"}]},
   "τ": {"_items": [{"text": "Don't forget the standup meeting."}]},
-  "Ƀ": {"_items": [{"text": "Add to Calendar", "href": "https://calendar.google.com"}]}
+  "Ƀ": {"_items": [{"text": "Add to Calendar", "url": "https://calendar.google.com"}]}
 }
 ```
+
+**Draft → patch → send workflow (iterative composition):**
+
+Email composition is rarely one-shot. Treat a draft as a canvas you refine over
+several turns — never accumulate duplicate drafts:
+
+1. **Create** — `compose_dynamic_email(..., action="draft")`. The response's
+   `draftId` is the stable handle for every later edit (the draft's *message* id
+   changes on each update; the draft id does not). Keep it.
+2. **Patch bit by bit** — change only what you need in `email_params` (or the
+   DSL), then re-call with `draft_id=<draftId>`. The same draft is re-rendered
+   in place. Repeat freely: tweak one block's text, swap a color theme, add a
+   section — one call per iteration.
+3. **Recover a lost draft id** — `search_gmail_messages(query="in:draft")`
+   returns `draft_id` on every draft result (including drafts created in the
+   Gmail UI), and `get_gmail_message_content` includes it when the message is a
+   draft. No draft is unreachable.
+4. **Thread as a reply** — add `reply_to_message_id=<message id>`:
+   `action="draft"` creates a threaded reply draft (combine with `draft_id` to
+   re-render it), `action="send"` sends the reply immediately. The reply
+   subject comes from the original message; the DSL subject is ignored.
+5. **Send** — after review, send from the Gmail UI (safest, sends the draft
+   itself), or re-call with `action="send"` (renders and sends a *new* message;
+   the draft stays behind — delete it afterwards).
+
+The plain-HTML tools follow the same pattern: `draft_gmail_message` and
+`draft_gmail_reply` accept the same `draft_id` for in-place updates, and
+`draft_gmail_reply` accepts `email_spec` for MJML reply drafts.
+
+**Example — patch one block of an existing draft (code mode):**
+```python
+drafts = await call_tool("search_gmail_messages", {"query": "in:draft", "page_size": 5})
+target = drafts["messages"][0]  # newest draft; has draft_id
+
+params = from_json(saved_params)          # the params used to create it
+params["τ"]["_items"][0]["text"] = "Updated opening paragraph."
+
+result = await call_tool("compose_dynamic_email", {
+    "email_description": "ε[ħ, τx2, Ƀ]",
+    "email_params": params,
+    "action": "draft",
+    "draft_id": target["draft_id"],
+})
+return result["draftId"]  # same id — edited in place
+```
+
+**Macro-powered iteration:** for an email you patch repeatedly (or a layout you
+reuse), store it once as a dual-mode Jinja2 macro via `create_template_macro`
+(`persist_to_file=True` survives restarts). Each iteration then re-invokes the
+macro with only the changed data instead of resending the whole params blob —
+the Template Middleware renders `{{ ... }}` in tool parameters before the
+tool runs:
+
+```python
+await call_tool("compose_dynamic_email", {
+    "email_description": "{{ team_update(email_symbols, mode='dsl') }}",
+    "email_params": "{{ team_update(email_symbols, mode='params', headline='Week 3 recap') }}",
+    "action": "draft",
+    "draft_id": known_draft_id,
+})
+```
+
+Macros can also pull live data via resource URIs (e.g. `service://gmail/labels`,
+`user://current/profile`) as macro arguments — see the Jinja2 Macro System
+section below.
+
 
 **For detailed component field reference:** Use `skill://mjml-email/` resources (15 component docs, symbols, containment rules).
 
@@ -102,9 +171,10 @@ Sends a card to Google Chat using DSL notation for structure control.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `card_description` | str | required | DSL structure string (e.g., `§[δ×3, Ƀ[ᵬ×2]]`) |
-| `card_params` | dict/str | None | Widget content keyed by symbol. Supports `_shared`/`_items` merging |
+| `card_description` | str | required | DSL structure string — see Card DSL Symbols table. Supports both Structure DSL (`§[δx2]`) and Content DSL (`δ 'text' success bold`) |
+| `card_params` | dict/str | None | Widget content keyed by symbol. Supports `_shared`/`_items` merging. Takes priority over Content DSL in `card_description` |
 | `space_id` | str | None | Chat space ID. Required only for API mode (no webhook) |
+| `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `webhook_url` | str | None | Webhook URL. Defaults to `MCP_CHAT_WEBHOOK` env var |
 | `thread_key` | str | None | Thread key for replies |
 
@@ -217,6 +287,9 @@ The `execute` tool runs sandboxed Python with `call_tool()` available for chaini
 | `tags` | List all tool tags for filtering |
 | `search` | BM25 keyword search across tool names/descriptions |
 | `get_schema` | Get full JSON schema for a tool before calling it |
+| `semantic_search` | Full Qdrant vector search — semantic, DSL filters (`filter_dsl`), recommendation (`positive/negative_point_ids`), advanced queries (`query_dsl`, `prefetch_dsl`), and `dry_run` validation |
+| `fetch_document` | Peek at a stored response by point ID (truncated preview) |
+| `tool_activity` | Dashboard of tool usage — counts, error rates, sample IDs |
 | `execute` | Run sandboxed Python code |
 
 **Example — Chain tool calls:**
@@ -339,7 +412,7 @@ Supported services: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `for
 | Resource | Content | When to Use |
 |----------|---------|-------------|
 | `skill://gchat-cards/` | 100+ component docs, symbols, containment rules, DSL syntax | Detailed card component field reference |
-| `skill://mjml-email/` | 15 component docs, email DSL syntax, symbols | Detailed email block field reference |
+| `skill://mjml-email/` | Email block symbols, DSL syntax, per-component docs | Detailed email block field reference |
 
 ---
 
@@ -354,7 +427,7 @@ Supported services: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `for
 | `scope` | str | "global" | `global` (all clients) or `session` (current client only) |
 | `service_filter` | str | None | Filter by service: `gmail`, `chat`, `drive`, etc. |
 
-**Protected tools** (cannot be disabled): `manage_tools`, `qdrant_search`, `health_check`, `start_google_auth`, `check_drive_auth`, and Code Mode meta-tools (`tags`, `search`, `get_schema`, `execute`).
+**Protected tools** (cannot be disabled): `manage_tools`, `qdrant_search`, `health_check`, `start_google_auth`, `check_drive_auth`, and Code Mode meta-tools (`tags`, `search`, `get_schema`, `semantic_search`, `fetch_document`, `tool_activity`, `execute`).
 
 ---
 
@@ -370,7 +443,7 @@ Use `manage_tools(action="list")` or `manage_tools(action="list", service_filter
 | **Chat Cards** | `send_simple_card`, `send_rich_card`, `send_enhanced_card`, `send_interactive_card`, `send_smart_card`, `preview_card_from_description`, `validate_card`, `find_card_templates`, `save_card_template` |
 | **Calendar** | `list_calendars`, `list_events`, `create_event`, `modify_event`, `delete_event`, `get_event`, `create_calendar`, `bulk_calendar_operations`, `move_events_between_calendars` |
 | **Docs** | `search_docs`, `get_doc_content`, `list_docs_in_folder`, `create_doc` |
-| **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range` |
+| **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `batch_modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range`, `batch_update_sheet` |
 | **Slides** | `create_presentation`, `get_presentation_info`, `add_slide`, `update_slide_content`, `export_and_download_presentation` |
 | **Forms** | `create_form`, `add_questions_to_form`, `get_form`, `set_form_publish_state`, `publish_form_publicly`, `get_form_response`, `list_form_responses`, `update_form_questions` |
 | **Photos** | `list_photos_albums`, `search_photos`, `upload_photos`, `upload_folder_photos`, `photos_smart_search`, `photos_batch_details`, `create_photos_album`, `get_photo_details` |
@@ -379,7 +452,33 @@ Use `manage_tools(action="list")` or `manage_tools(action="list", service_filter
 | **Email Templates** | `create_email_template`, `list_email_templates`, `preview_email_template`, `intelligent_email_composer`, `send_smart_email` |
 | **Module Wrappers** | `list_wrapped_modules`, `wrap_module`, `search_module`, `list_module_components`, `get_module_component` |
 | **Server** | `health_check`, `manage_credentials`, `manage_tools`, `create_template_macro` |
-| **Code Mode** | `tags`, `search`, `get_schema`, `execute` |
+| **Code Mode** | `tags`, `search`, `get_schema`, `semantic_search`, `fetch_document`, `tool_activity`, `execute` |
+
+---
+
+## Sheets Power Tools
+
+Beyond simple reads/writes, three tools cover advanced spreadsheet work:
+
+- **`batch_update_sheet`** — raw `spreadsheets.batchUpdate` passthrough (up to 100 requests,
+  atomic: one bad request rolls back the whole batch). This is the route to everything the
+  dedicated tools don't cover: **charts** (`addChart` — all 9 chart families: basic
+  BAR/LINE/AREA/COLUMN/SCATTER/COMBO/STEPPED_AREA, pie, bubble, candlestick, histogram, org,
+  scorecard, treemap, waterfall), **data-validation dropdowns** (`setDataValidation` with
+  `ONE_OF_LIST` + `showCustomUi`), protected/banded/named ranges, `unmergeCells`,
+  delete/duplicate/rename sheets, `sortRange`, `findReplace`, `autoResizeDimensions`,
+  row/column grouping, filter views, and slicers. Request objects follow the Sheets API
+  batchUpdate reference verbatim; replies return created IDs (e.g. chart IDs).
+  Gotcha: BAR chart series must target `BOTTOM_AXIS`; other basic charts use `LEFT_AXIS`.
+- **`batch_modify_sheet_values`** — write many ranges and/or clear ranges in single API calls;
+  prefer it over looping `modify_sheet_values` whenever touching more than ~2 ranges.
+- **`get_spreadsheet_info` with `fields`** — read back formatting, conditional-format rules,
+  charts, merges, and validation via a Google API field mask (raw response in `raw`), e.g.
+  `sheets(properties,charts(chartId,spec(title)))`. Scope grid-data masks tightly.
+
+Cell values are real scalars: numbers/booleans round-trip properly (`RAW` input writes real
+numbers; `UNFORMATTED_VALUE` reads them back typed). `modify_sheet_values` also supports
+`append=True` to add rows after existing data.
 
 ---
 

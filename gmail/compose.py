@@ -1653,6 +1653,16 @@ async def draft_gmail_message(
 
         # Auto-injected user (middleware handles user_google_email)
         draft_gmail_message("Subject", "Body content")
+
+        # Edit an existing draft in place (same draft ID, content replaced)
+        draft_gmail_message("Updated subject", "Updated body", draft_id="r-123...")
+
+    Note on draft_id:
+        When draft_id is provided the draft is updated via drafts().update
+        instead of created — full content replacement, no duplicate draft. The
+        existing draft's threadId is preserved so reply drafts stay threaded.
+        Draft IDs come from this tool's response, or from search_gmail_messages
+        / get_gmail_message_content on draft messages.
     """
     # EmailSpec rendering — overrides content_type/body/html_body
     if email_spec is not None:
@@ -2116,6 +2126,20 @@ async def draft_gmail_reply(
         # HTML draft reply with reply all
         draft_gmail_reply("msg_123", "<p>Thanks <b>everyone</b>!</p>",
                          content_type="html", reply_mode="reply_all")
+
+        # MJML reply draft (email_spec renders to HTML; reply subject from original)
+        draft_gmail_reply("msg_123", "", email_spec={
+            "subject": "(ignored)", "blocks": [{"type": "TextBlock", "text": "Thanks!"}]
+        })
+
+        # Edit an existing reply draft in place (same draft ID, content replaced)
+        draft_gmail_reply("msg_123", "Revised reply", draft_id="r-456...")
+
+    Note on email_spec / draft_id:
+        email_spec renders MJML blocks to HTML and overrides content_type/body/
+        html_body; the reply subject always comes from the original message.
+        When draft_id is provided the draft is updated via drafts().update
+        instead of created — threading is rebuilt from message_id as usual.
     """
     # EmailSpec rendering — overrides content_type/body/html_body. The reply
     # subject always comes from the original message, so the spec subject is
@@ -3921,7 +3945,13 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             ),
         ] = None,
     ):
-        """Compose responsive HTML email via DSL notation, then send or draft."""
+        """Compose responsive HTML email via DSL notation, then send or draft.
+
+        Supports iterative composition: draft_id re-renders into an existing
+        draft in place (no duplicate drafts), and reply_to_message_id threads
+        the composed email as a reply — draft via draft_gmail_reply, send via
+        reply_to_gmail_message.
+        """
         import json as _json
 
         from gmail.email_wrapper_api import (

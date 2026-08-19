@@ -124,7 +124,9 @@ def _email_params_table(symbols: Dict[str, str]) -> str:
 | `to` | str/list | "myself" | Recipients: "myself", comma-separated string, or list of emails |
 | `user_google_email` | str | None | Auto-injected from OAuth session. Pass only to override (e.g., for secondary accounts) |
 | `action` | "send"/"draft" | "draft" | Draft is safe default; "send" delivers immediately |
-| `cc` / `bcc` | str | None | Optional CC/BCC recipients |"""
+| `cc` / `bcc` | str | None | Optional CC/BCC recipients |
+| `reply_to_message_id` | str | None | Thread the composed email as a reply to this Gmail message. Recipients derive from the original; the reply subject overrides the DSL subject |
+| `draft_id` | str | None | Update an existing draft in place with the freshly rendered email instead of creating a new one (action='draft' only) |"""
 
 
 def _card_params_table(symbols: Dict[str, str]) -> str:
@@ -477,6 +479,82 @@ def _email_full_example(email_symbols: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _draft_iteration_section(email_symbols: Dict[str, str]) -> str:
+    """Generate the draft → patch → send workflow section."""
+    s = email_symbols
+    spec = s.get("EmailSpec", "?")
+    hero = s.get("HeroBlock", "?")
+    text = s.get("TextBlock", "?")
+    btn = s.get("ButtonBlock", "?")
+    dsl = f"{spec}[{hero}, {text}x2, {btn}]"
+    return f"""\
+**Draft → patch → send workflow (iterative composition):**
+
+Email composition is rarely one-shot. Treat a draft as a canvas you refine over
+several turns — never accumulate duplicate drafts:
+
+1. **Create** — `compose_dynamic_email(..., action="draft")`. The response's
+   `draftId` is the stable handle for every later edit (the draft's *message* id
+   changes on each update; the draft id does not). Keep it.
+2. **Patch bit by bit** — change only what you need in `email_params` (or the
+   DSL), then re-call with `draft_id=<draftId>`. The same draft is re-rendered
+   in place. Repeat freely: tweak one block's text, swap a color theme, add a
+   section — one call per iteration.
+3. **Recover a lost draft id** — `search_gmail_messages(query="in:draft")`
+   returns `draft_id` on every draft result (including drafts created in the
+   Gmail UI), and `get_gmail_message_content` includes it when the message is a
+   draft. No draft is unreachable.
+4. **Thread as a reply** — add `reply_to_message_id=<message id>`:
+   `action="draft"` creates a threaded reply draft (combine with `draft_id` to
+   re-render it), `action="send"` sends the reply immediately. The reply
+   subject comes from the original message; the DSL subject is ignored.
+5. **Send** — after review, send from the Gmail UI (safest, sends the draft
+   itself), or re-call with `action="send"` (renders and sends a *new* message;
+   the draft stays behind — delete it afterwards).
+
+The plain-HTML tools follow the same pattern: `draft_gmail_message` and
+`draft_gmail_reply` accept the same `draft_id` for in-place updates, and
+`draft_gmail_reply` accepts `email_spec` for MJML reply drafts.
+
+**Example — patch one block of an existing draft (code mode):**
+```python
+drafts = await call_tool("search_gmail_messages", {{"query": "in:draft", "page_size": 5}})
+target = drafts["messages"][0]  # newest draft; has draft_id
+
+params = from_json(saved_params)          # the params used to create it
+params["{text}"]["_items"][0]["text"] = "Updated opening paragraph."
+
+result = await call_tool("compose_dynamic_email", {{
+    "email_description": "{dsl}",
+    "email_params": params,
+    "action": "draft",
+    "draft_id": target["draft_id"],
+}})
+return result["draftId"]  # same id — edited in place
+```
+
+**Macro-powered iteration:** for an email you patch repeatedly (or a layout you
+reuse), store it once as a dual-mode Jinja2 macro via `create_template_macro`
+(`persist_to_file=True` survives restarts). Each iteration then re-invokes the
+macro with only the changed data instead of resending the whole params blob —
+the Template Middleware renders `{{{{ ... }}}}` in tool parameters before the
+tool runs:
+
+```python
+await call_tool("compose_dynamic_email", {{
+    "email_description": "{{{{ team_update(email_symbols, mode='dsl') }}}}",
+    "email_params": "{{{{ team_update(email_symbols, mode='params', headline='Week 3 recap') }}}}",
+    "action": "draft",
+    "draft_id": known_draft_id,
+}})
+```
+
+Macros can also pull live data via resource URIs (e.g. `service://gmail/labels`,
+`user://current/profile`) as macro arguments — see the Jinja2 Macro System
+section below.
+"""
+
+
 def _card_symbol_table(card_symbols: Dict[str, str]) -> str:
     lines = [
         "**Card DSL Symbols (primary building blocks):**\n",
@@ -611,6 +689,8 @@ def generate_server_skill(
         _email_params_example(email_symbols),
         "",
         _email_full_example(email_symbols),
+        "",
+        _draft_iteration_section(email_symbols),
         "",
         "**For detailed component field reference:** Use `skill://mjml-email/` resources "
         "(15 component docs, symbols, containment rules).",
