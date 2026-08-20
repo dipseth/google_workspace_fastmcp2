@@ -525,6 +525,14 @@ if settings.enable_app_providers:
         mcp.add_provider(tool_mgmt_app)
         logger.info("✅ Interactive tool management app registered")
 
+    # Interactive Gmail draft card — preview, edit recipients, send/save/discard
+    from gmail.draft_app import create_gmail_draft_app
+
+    gmail_draft_app = create_gmail_draft_app(mcp)
+    if gmail_draft_app is not None:
+        mcp.add_provider(gmail_draft_app)
+        logger.info("✅ Gmail draft preview app registered")
+
     logger.info("✅ App providers registered (Approval, Choice)")
 else:
     logger.info(
