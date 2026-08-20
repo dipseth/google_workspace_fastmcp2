@@ -298,7 +298,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                                 ),
                                 authUrl=status_url,
                                 clickableLink=f"[View credential status]({status_url})",
-                                userEmail=user_google_email,
+                                userEmail=user_google_email or "",
                                 sessionId=current_session_id,
                                 serviceName=requested_services,
                                 scopesIncluded=list(existing_creds.scopes or []),
@@ -416,7 +416,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 message=message,
                 authUrl=auth_url,
                 clickableLink=f"[🚀 Click here to authenticate]({auth_url})",
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 sessionId=current_session_id,
                 serviceName=service_names_list,
                 instructions=instructions,
@@ -457,7 +457,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             return StartAuthResponse(
                 status="error",
                 message="❌ Authentication Setup Failed",
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=str(e),
             )
 
@@ -627,7 +627,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
             return CheckAuthResponse(
                 authenticated=True,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 sessionId=current_session_id,
                 authMethod=auth_method,
                 keyBoundEmail=key_bound_email,
@@ -639,7 +639,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
         except GoogleAuthError:
             return CheckAuthResponse(
                 authenticated=False,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 sessionId=current_session_id,
                 authMethod=auth_method,
                 keyBoundEmail=key_bound_email,
@@ -651,7 +651,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             logger.error(f"❌ {error_msg}")
             return CheckAuthResponse(
                 authenticated=False,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 sessionId=current_session_id,
                 authMethod=auth_method,
                 keyBoundEmail=key_bound_email,
@@ -777,7 +777,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 logger.error(f"❌ {error_msg}")
                 return UploadFileResponse(
                     success=False,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="",
                     error=error_msg,
                 )
@@ -786,7 +786,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 logger.error(f"❌ {error_msg}", exc_info=True)
                 return UploadFileResponse(
                     success=False,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="",
                     error=error_msg,
                 )
@@ -838,7 +838,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
                 return UploadFileResponse(
                     success=True,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     fileInfo=file_info,
                     message=f"Successfully uploaded {result['name']} to Google Drive",
                 )
@@ -847,31 +847,46 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             error_msg = f"Authentication error: {e}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False, userEmail=user_google_email, message="", error=error_msg
+                success=False,
+                userEmail=user_google_email or "",
+                message="",
+                error=error_msg,
             )
         except DriveUploadError as e:
             error_msg = f"Upload error: {e}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False, userEmail=user_google_email, message="", error=error_msg
+                success=False,
+                userEmail=user_google_email or "",
+                message="",
+                error=error_msg,
             )
         except FileNotFoundError:
             error_msg = f"Path not found: {path}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False, userEmail=user_google_email, message="", error=error_msg
+                success=False,
+                userEmail=user_google_email or "",
+                message="",
+                error=error_msg,
             )
         except PermissionError:
             error_msg = f"Permission denied accessing: {path}"
             logger.error(f"❌ {error_msg}")
             return UploadFileResponse(
-                success=False, userEmail=user_google_email, message="", error=error_msg
+                success=False,
+                userEmail=user_google_email or "",
+                message="",
+                error=error_msg,
             )
         except Exception as e:
             error_msg = f"Unexpected error: {e}"
             logger.error(f"❌ {error_msg}", exc_info=True)
             return UploadFileResponse(
-                success=False, userEmail=user_google_email, message="", error=error_msg
+                success=False,
+                userEmail=user_google_email or "",
+                message="",
+                error=error_msg,
             )
 
 

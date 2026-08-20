@@ -611,7 +611,7 @@ async def manage_gmail_allow_list(
             return GmailAllowListResponse(
                 allowed_emails=[],
                 count=0,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 is_configured=False,
                 source="GMAIL_ALLOW_LIST environment variable",
                 error=f"Unexpected error: {e}",

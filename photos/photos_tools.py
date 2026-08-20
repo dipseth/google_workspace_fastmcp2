@@ -193,7 +193,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 albums=albums,
                 count=len(albums),
                 excludeNonAppCreated=exclude_non_app_created,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
             )
 
         except HttpError as e:
@@ -204,7 +204,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 albums=[],
                 count=0,
                 excludeNonAppCreated=exclude_non_app_created,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
         except Exception as e:
@@ -215,7 +215,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 albums=[],
                 count=0,
                 excludeNonAppCreated=exclude_non_app_created,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
 
@@ -464,7 +464,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 photos=photos,
                 count=len(photos),
                 albumId=album_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
             )
 
         except HttpError as e:
@@ -475,7 +475,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 photos=[],
                 count=0,
                 albumId=album_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
         except Exception as e:
@@ -486,7 +486,7 @@ def setup_photos_tools(mcp: FastMCP) -> None:
                 photos=[],
                 count=0,
                 albumId=album_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
 

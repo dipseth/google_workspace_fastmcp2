@@ -781,7 +781,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 spaceId=space_id,
                 spaceName=space_name,
                 orderBy=order_by,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=None,
             )
 
@@ -794,7 +794,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 spaceId=space_id,
                 spaceName="Unknown Space",
                 orderBy=order_by,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
         except Exception as e:
@@ -806,7 +806,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 spaceId=space_id,
                 spaceName="Unknown Space",
                 orderBy=order_by,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
 
@@ -874,7 +874,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     messageText=message_text,
                     threadKey=thread_key,
                     createTime=None,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="Failed to create Google Chat service. Please check your credentials and permissions.",
                     error="Service unavailable",
                 )
@@ -900,7 +900,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 messageText=message_text,
                 threadKey=thread_key,
                 createTime=create_time,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Message sent to space '{space_id}' by {user_google_email}. Message ID: {message_name}",
                 error=None,
             )
@@ -914,7 +914,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 messageText=message_text,
                 threadKey=thread_key,
                 createTime=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Failed to send message: {e}",
                 error=str(e),
             )
@@ -927,7 +927,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 messageText=message_text,
                 threadKey=thread_key,
                 createTime=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Unexpected error: {str(e)}",
                 error=str(e),
             )
@@ -975,7 +975,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                     totalResults=0,
                     searchScope="unknown",
                     spaceId=space_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="Failed to create Google Chat service. Please check your credentials and permissions.",
                     error="Service unavailable",
                 )
@@ -1050,7 +1050,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 totalResults=len(search_results),
                 searchScope=search_scope,
                 spaceId=space_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Found {len(search_results)} messages matching '{query}' in {search_scope.replace('_', ' ')}",
                 error=None,
             )
@@ -1064,7 +1064,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 totalResults=0,
                 searchScope="unknown",
                 spaceId=space_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Failed to search messages: {e}",
                 error=str(e),
             )
@@ -1077,7 +1077,7 @@ def setup_chat_tools(mcp: FastMCP) -> None:
                 totalResults=0,
                 searchScope="unknown",
                 spaceId=space_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Unexpected error: {str(e)}",
                 error=str(e),
             )

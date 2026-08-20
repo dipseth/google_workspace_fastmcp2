@@ -213,7 +213,7 @@ async def search_gmail_messages(
             messages=messages,
             total_found=len(messages),
             query=query,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             page_size=page_size,
         )
 
@@ -224,7 +224,7 @@ async def search_gmail_messages(
             messages=[],
             total_found=0,
             query=query,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             page_size=page_size,
             error=f"Gmail API error: {e}",
         )
@@ -236,7 +236,7 @@ async def search_gmail_messages(
             messages=[],
             total_found=0,
             query=query,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             page_size=page_size,
             error=f"Unexpected error: {e}",
         )
@@ -337,13 +337,17 @@ async def get_gmail_message_content(
     except HttpError as e:
         logger.error(f"Gmail API error in get_gmail_message_content: {e}")
         return GetGmailMessageContentResponse(
-            success=False, userEmail=user_google_email, error=f"Gmail API error: {e}"
+            success=False,
+            userEmail=user_google_email or "",
+            error=f"Gmail API error: {e}",
         )
 
     except Exception as e:
         logger.error(f"Unexpected error in get_gmail_message_content: {e}")
         return GetGmailMessageContentResponse(
-            success=False, userEmail=user_google_email, error=f"Unexpected error: {e}"
+            success=False,
+            userEmail=user_google_email or "",
+            error=f"Unexpected error: {e}",
         )
 
 
@@ -391,7 +395,7 @@ async def get_gmail_messages_content_batch(
             successful_count=0,
             failed_count=0,
             format=format,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error="No message IDs provided",
         )
 
@@ -548,7 +552,7 @@ async def get_gmail_messages_content_batch(
             successful_count=successful_count,
             failed_count=failed_count,
             format=format,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except Exception as e:
@@ -560,7 +564,7 @@ async def get_gmail_messages_content_batch(
             successful_count=0,
             failed_count=len(message_ids),
             format=format,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 
@@ -612,7 +616,7 @@ async def get_gmail_thread_content(
                 thread_subject="(unknown subject)",
                 message_count=0,
                 messages=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=f"No messages found in thread '{thread_id}'",
             )
 
@@ -657,7 +661,7 @@ async def get_gmail_thread_content(
             thread_subject=thread_subject,
             message_count=len(messages),
             messages=thread_messages,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except Exception as e:
@@ -668,7 +672,7 @@ async def get_gmail_thread_content(
             thread_subject="(unknown subject)",
             message_count=0,
             messages=[],
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 
@@ -767,7 +771,7 @@ async def download_gmail_attachment(
                 success=False,
                 message_id=message_id,
                 filename=filename,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=(
                     f"Attachment '{filename}' not found in message '{message_id}'. "
                     f"Available attachments: {available}"
@@ -788,7 +792,7 @@ async def download_gmail_attachment(
                 filename=filename,
                 mimeType=att_info["mimeType"],
                 size=att_info["size"],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=(
                     f"Attachment too large ({size_mb:.1f} MB). "
                     f"Limit is {limit_mb:.0f} MB. "
@@ -814,7 +818,7 @@ async def download_gmail_attachment(
             filename=filename,
             mimeType=att_info["mimeType"],
             size=len(raw_bytes),
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
         if return_url:
@@ -849,7 +853,7 @@ async def download_gmail_attachment(
                     success=False,
                     message_id=message_id,
                     filename=filename,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     error="Invalid filename: path traversal detected",
                 )
 
@@ -876,7 +880,7 @@ async def download_gmail_attachment(
             success=False,
             message_id=message_id,
             filename=filename,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Gmail API error: {e}",
         )
 
@@ -886,7 +890,7 @@ async def download_gmail_attachment(
             success=False,
             message_id=message_id,
             attachment_id=attachment_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 

@@ -266,7 +266,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                         return SpreadsheetListResponse(
                             items=[],
                             count=0,
-                            userEmail=user_google_email,
+                            userEmail=user_google_email or "",
                             error="Failed to create Google Drive service. Please check your credentials and permissions.",
                         )
                 else:
@@ -277,7 +277,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                     return SpreadsheetListResponse(
                         items=[],
                         count=0,
-                        userEmail=user_google_email,
+                        userEmail=user_google_email or "",
                         error=f"Drive service injection error: {e}",
                     )
 
@@ -288,7 +288,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
                 return SpreadsheetListResponse(
                     items=[],
                     count=0,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     error=f"Unexpected error getting Drive service: {e}",
                 )
 
@@ -324,20 +324,20 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             return SpreadsheetListResponse(
                 items=spreadsheets,  # Changed from 'spreadsheets' to 'items' to match TypedDict
                 count=len(spreadsheets),
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
             )
 
         except HttpError as e:
             error_msg = f"Failed to list spreadsheets: {e}"
             logger.error(f"❌ {error_msg}")
             return SpreadsheetListResponse(
-                items=[], count=0, userEmail=user_google_email, error=error_msg
+                items=[], count=0, userEmail=user_google_email or "", error=error_msg
             )
         except Exception as e:
             error_msg = f"Unexpected error listing spreadsheets: {str(e)}"
             logger.error(f"❌ {error_msg}")
             return SpreadsheetListResponse(
-                items=[], count=0, userEmail=user_google_email, error=error_msg
+                items=[], count=0, userEmail=user_google_email or "", error=error_msg
             )
 
     @mcp.tool(

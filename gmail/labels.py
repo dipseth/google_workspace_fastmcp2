@@ -905,7 +905,7 @@ async def manage_gmail_label(
                 labels_processed=len(primary_list),
                 results=results,
                 color_adjustments=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
             )
 
         else:
@@ -992,7 +992,7 @@ async def manage_gmail_label(
                 labels_processed=1,
                 results=all_results,
                 color_adjustments=color_warnings if color_warnings else None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
             )
 
     except ValueError as e:
@@ -1264,7 +1264,7 @@ async def modify_gmail_message_labels(
                 message_id=message_id,
                 labels_added=[],
                 labels_removed=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error="At least one of add_label_ids or remove_label_ids must be provided.",
             )
 
@@ -1313,7 +1313,7 @@ async def modify_gmail_message_labels(
             labels_removed=parsed_remove_label_ids or [],
             labels_added_names=labels_added_names,
             labels_removed_names=labels_removed_names,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except ValueError as e:

@@ -487,7 +487,7 @@ async def search_drive_files(
             resultCount=len(structured_results),
             totalResults=None,  # Unknown unless we get total from API
             nextPageToken=results.get("nextPageToken"),
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             driveId=drive_id,
             corpora=corpora,
             searchScope=search_scope,
@@ -524,7 +524,7 @@ async def search_drive_files(
             resultCount=0,
             totalResults=None,
             nextPageToken=None,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             driveId=drive_id,
             corpora=corpora,
             searchScope=corpora or "user",
@@ -545,7 +545,7 @@ async def search_drive_files(
             resultCount=0,
             totalResults=None,
             nextPageToken=None,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             driveId=drive_id,
             corpora=corpora,
             searchScope=corpora or "user",
@@ -810,7 +810,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                     folderName=folder_name,
                     items=[],
                     count=0,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     driveId=None,
                     error=None,
                 )
@@ -868,7 +868,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderName=folder_name,
                 items=structured_items,
                 count=len(structured_items),
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 driveId=None,
                 error=None,
             )
@@ -880,7 +880,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderName="Unknown",
                 items=[],
                 count=0,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 driveId=None,
                 error=f"Drive API error: {str(e)}",
             )
@@ -892,7 +892,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 folderName="Unknown",
                 items=[],
                 count=0,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 driveId=None,
                 error=f"Unexpected error: {str(e)}",
             )
@@ -944,7 +944,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 mimeType=mime_type,
                 folderId=folder_id,
                 webViewLink=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="You must provide either 'content' or 'fileUrl'.",
                 error="Missing required content or fileUrl parameter",
             )
@@ -1001,7 +1001,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 mimeType=mime_type,
                 folderId=folder_id,
                 webViewLink=created_file.get("webViewLink"),
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Successfully created file '{created_file.get('name', file_name)}' (ID: {created_file.get('id', 'N/A')}) in folder '{folder_id}' for {user_google_email}.",
                 error=None,
             )
@@ -1015,7 +1015,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 mimeType=mime_type,
                 folderId=folder_id,
                 webViewLink=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Drive API error: {e}",
                 error=str(e),
             )
@@ -1029,7 +1029,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 mimeType=mime_type,
                 folderId=folder_id,
                 webViewLink=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Unexpected error: {e}",
                 error=str(e),
             )
@@ -1101,7 +1101,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="No file IDs provided.",
                 error="No file IDs provided",
             )
@@ -1117,7 +1117,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="No email addresses provided.",
                 error="No email addresses provided",
             )
@@ -1134,7 +1134,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Invalid role '{role}'. Must be one of: {', '.join(valid_roles)}",
                 error=f"Invalid role: {role}",
             )
@@ -1228,7 +1228,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=share_results,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Sharing completed. Files processed: {len(file_ids)}, Recipients: {len(email_addresses)}, Successful: {successful_operations}, Failed: {failed_operations}",
                 error=None,
             )
@@ -1245,7 +1245,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Drive API error: {e}",
                 error=str(e),
             )
@@ -1262,7 +1262,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 role=role,
                 sendNotification=send_notification,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Unexpected error: {e}",
                 error=str(e),
             )
@@ -1311,7 +1311,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 public=public,
                 role=role if public else None,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="No file IDs provided.",
                 error="No file IDs provided",
             )
@@ -1326,7 +1326,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 public=public,
                 role=role,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Invalid public role '{role}'. Must be one of: {', '.join(valid_public_roles)}",
                 error=f"Invalid role: {role}",
             )
@@ -1438,7 +1438,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 public=public,
                 role=role if public else None,
                 results=public_results,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Public sharing completed. Files processed: {len(file_ids)}, Successfully {action}: {successful_operations}, Failed: {failed_operations}",
                 error=None,
             )
@@ -1453,7 +1453,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 public=public,
                 role=role if public else None,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Drive API error: {e}",
                 error=str(e),
             )
@@ -1468,7 +1468,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
                 public=public,
                 role=role if public else None,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Unexpected error: {e}",
                 error=str(e),
             )
