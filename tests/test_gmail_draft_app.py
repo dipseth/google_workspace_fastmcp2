@@ -13,6 +13,8 @@ from fastmcp import Client, FastMCP
 
 from gmail.draft_app import (
     _PREVIEW_MAX_BYTES,
+    _REMOTE_ATTR_RE,
+    _REMOTE_CSS_URL_RE,
     DraftSnapshot,
     _b64url_decode,
     _build_draft_view,
@@ -115,7 +117,8 @@ def test_preview_falls_back_to_plain_text():
 
 
 def test_preview_truncates_oversized_html():
-    huge = "<html><body>" + ("<p>x</p>" * 200_000) + "</body></html>"
+    filler = "<p>x</p>" * ((_PREVIEW_MAX_BYTES // 8) + 50_000)
+    huge = "<html><body>" + filler + "</body></html>"
     html, warning = _make_draft(html=huge, with_inline_image=False).preview_html()
     assert warning is not None and "truncated" in warning
     assert len(html.encode("utf-8")) <= _PREVIEW_MAX_BYTES + 1024  # banner overhead
@@ -264,3 +267,119 @@ async def test_renderer_resource_allows_remote_images(draft_app_server):
     domains = resources[0].meta["ui"]["csp"]["resourceDomains"]
     assert "https:" in domains and "data:" in domains
     assert "https://cdn.jsdelivr.net" in domains  # renderer default preserved
+
+
+# ── View regression: components must attach to their container ──────
+
+
+def _walk(node, out):
+    """Flatten a serialized Prefab tree into a list of component dicts.
+
+    Descends every nested value, not just ``children`` — ``If`` serializes to
+    a ``Condition`` node that hides its subtree under ``cases[].children``.
+    """
+    if isinstance(node, dict):
+        if node.get("type"):
+            out.append(node)
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                _walk(value, out)
+    elif isinstance(node, list):
+        for item in node:
+            _walk(item, out)
+    return out
+
+
+def _components(app, type_name):
+    return [n for n in _walk(app.to_json(), []) if n.get("type") == type_name]
+
+
+def test_view_renders_every_recipient_input():
+    """Regression: components built outside their `with` block vanish.
+
+    Prefab attaches a component to the enclosing container at construction
+    time, so constructing an Input first and merely referencing it inside the
+    layout silently drops it — the card renders labels with no fields.
+    """
+    app = _build_draft_view(_make_draft(cc="c@example.com"), "me@example.com")
+    names = {i.get("name") for i in _components(app, "Input")}
+    assert names == {"subject", "to", "cc", "bcc"}
+
+
+def test_view_prefills_inputs_from_the_draft():
+    app = _build_draft_view(_make_draft(cc="c@example.com"), "me@example.com")
+    by_name = {i["name"]: i.get("value") for i in _components(app, "Input")}
+    assert by_name["to"] == "a@example.com, b@example.com"
+    assert by_name["cc"] == "c@example.com"
+    assert by_name["subject"] == "Quarterly ✨ Update"
+
+
+def test_contact_picker_appears_only_with_contacts():
+    without = _build_draft_view(_make_draft(), "me@example.com")
+    assert _components(without, "Combobox") == []
+
+    with_contacts = _build_draft_view(
+        _make_draft(),
+        "me@example.com",
+        contacts=[{"name": "Ada Lovelace", "email": "ada@example.com"}],
+    )
+    options = _components(with_contacts, "ComboboxOption")
+    assert [o["value"] for o in options] == ["ada@example.com"]
+    assert "Ada Lovelace" in options[0]["label"]
+
+
+def test_actions_send_edited_values_not_snapshot_values():
+    """Buttons must interpolate live state, or edits are silently discarded."""
+    payload = json.dumps(_build_draft_view(_make_draft(), "me@example.com").to_json())
+    assert '"to": "{{ to }}"' in payload
+    assert '"subject": "{{ subject }}"' in payload
+
+
+# ── Remote image handling ───────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "markup,expected",
+    [
+        (
+            '<img src="https://cdn.example.com/a.png">',
+            ["https://cdn.example.com/a.png"],
+        ),
+        (
+            '<td background="https://cdn.example.com/b.jpg">',
+            ["https://cdn.example.com/b.jpg"],
+        ),
+        (
+            '<v:image src="https://cdn.example.com/c.png"/>',
+            ["https://cdn.example.com/c.png"],
+        ),
+    ],
+)
+def test_remote_attr_regex_covers_mjml_markup(markup, expected):
+    assert [m.group(2) for m in _REMOTE_ATTR_RE.finditer(markup)] == expected
+
+
+def test_remote_css_url_regex_covers_background_images():
+    css = "background:url(https://cdn.example.com/hero.jpg) center/cover"
+    assert [m.group(2) for m in _REMOTE_CSS_URL_RE.finditer(css)] == [
+        "https://cdn.example.com/hero.jpg"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unfetchable_remote_images_are_left_intact():
+    """A failed fetch must leave the markup alone, never mangle it."""
+    from gmail.draft_app import _inline_remote_images
+
+    html = '<img src="https://invalid.invalid/nope.png">'
+    out, unresolved = await _inline_remote_images(html)
+    assert out == html
+    assert unresolved == 1
+
+
+@pytest.mark.asyncio
+async def test_inlining_is_a_noop_without_remote_images():
+    from gmail.draft_app import _inline_remote_images
+
+    html = "<p>no images here</p>"
+    assert await _inline_remote_images(html) == (html, 0)

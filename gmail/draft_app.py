@@ -54,13 +54,27 @@ logger = logging.getLogger(__name__)
 # Hard ceiling on the HTML we inline into the app payload. MCP messages are
 # JSON over a single transport frame; a 50 MB newsletter would wedge the
 # client. Above this we degrade gracefully instead of failing.
-_PREVIEW_MAX_BYTES = 400_000
+_PREVIEW_MAX_BYTES = 3_000_000
 
 # Cap on a single inlined image. Anything larger stays a broken cid: ref
 # rather than blowing the whole payload on one hero photo.
-_INLINE_IMAGE_MAX_BYTES = 200_000
+_INLINE_IMAGE_MAX_BYTES = 400_000
+
+# Total budget for all inlined images in one preview.
+_INLINE_IMAGE_TOTAL_BYTES = 2_000_000
+
+# How long to wait on the whole remote-image fetch before giving up and
+# rendering with whatever came back.
+_REMOTE_FETCH_TIMEOUT = 8.0
 
 _CID_PATTERN = re.compile(r"""cid:([^"'\s>)]+)""", re.IGNORECASE)
+
+# Remote references MJML emits: <img src>, <td background>, CSS url(...) for
+# mj-section background images, and VML <v:image src> for Outlook.
+_REMOTE_ATTR_RE = re.compile(
+    r"""(?i)\b(?:src|background)\s*=\s*(["\'])(https?://[^"\']+)\1"""
+)
+_REMOTE_CSS_URL_RE = re.compile(r"""(?i)url\(\s*(["\']?)(https?://[^)"\'\s]+)\1\s*\)""")
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +206,93 @@ def _inline_cid_references(html: str, images: dict[str, str]) -> tuple[str, int]
     return _CID_PATTERN.sub(_replace, html), unresolved
 
 
+async def _fetch_remote_images(urls: list[str]) -> dict[str, str]:
+    """Fetch remote images and return ``{url: data_uri}`` for those that fit.
+
+    Email clients load these over the network; a sandboxed app iframe often
+    cannot (hosts build a restrictive ``img-src`` from the app's declared CSP,
+    and scheme-only grants like ``https:`` are not honoured everywhere).
+    Fetching server-side and inlining as ``data:`` makes the preview match what
+    the recipient sees regardless of host CSP.
+
+    Failures are silent by design — a broken image in the preview is better
+    than a failed preview, and the sent email is unaffected either way.
+    """
+    if not urls:
+        return {}
+
+    import httpx
+
+    resolved: dict[str, str] = {}
+    budget = _INLINE_IMAGE_TOTAL_BYTES
+
+    async def _one(client, url: str) -> tuple[str, bytes, str] | None:
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        except Exception:
+            return None
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+        if not content_type.startswith("image/"):
+            return None
+        payload = resp.content
+        if not payload or len(payload) > _INLINE_IMAGE_MAX_BYTES:
+            return None
+        return url, payload, content_type
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=_REMOTE_FETCH_TIMEOUT, follow_redirects=True
+        ) as client:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *(_one(client, u) for u in urls), return_exceptions=True
+                ),
+                timeout=_REMOTE_FETCH_TIMEOUT,
+            )
+    except Exception:
+        return {}
+
+    for item in results:
+        if not isinstance(item, tuple):
+            continue
+        url, payload, content_type = item
+        if len(payload) > budget:
+            continue
+        budget -= len(payload)
+        encoded = base64.b64encode(payload).decode("ascii")
+        resolved[url] = f"data:{content_type};base64,{encoded}"
+    return resolved
+
+
+async def _inline_remote_images(html: str) -> tuple[str, int]:
+    """Replace remote image URLs with data URIs. Returns (html, unresolved)."""
+    urls: list[str] = []
+    for match in _REMOTE_ATTR_RE.finditer(html):
+        urls.append(match.group(2))
+    for match in _REMOTE_CSS_URL_RE.finditer(html):
+        urls.append(match.group(2))
+
+    unique = list(dict.fromkeys(urls))
+    if not unique:
+        return html, 0
+
+    resolved = await _fetch_remote_images(unique)
+    if not resolved:
+        return html, len(unique)
+
+    def _sub_attr(match):
+        url = match.group(2)
+        data_uri = resolved.get(url)
+        if data_uri is None:
+            return match.group(0)
+        return match.group(0).replace(url, data_uri)
+
+    html = _REMOTE_ATTR_RE.sub(_sub_attr, html)
+    html = _REMOTE_CSS_URL_RE.sub(_sub_attr, html)
+    return html, len(unique) - len(resolved)
+
+
 def _ensure_html_document(html: str) -> str:
     """Wrap bare fragments and guarantee a UTF-8 charset declaration.
 
@@ -312,26 +413,30 @@ class DraftSnapshot:
             if (part.get_content_disposition() or "").lower() == "attachment"
         ]
 
-    def preview_html(self) -> tuple[str, Optional[str]]:
-        """Build the iframe document. Returns ``(html, warning)``."""
-        warning: Optional[str] = None
+    def _cid_stage(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """First stage: pick the body part and inline ``cid:`` images.
 
+        Returns ``(html, warning, finished_document)``. When
+        ``finished_document`` is set there is no HTML part to post-process and
+        the caller should use it verbatim.
+        """
         html_part = _find_body_part(self.msg, "html")
-        if html_part is not None:
-            html = _decode_part_text(html_part)
-        else:
+        if html_part is None:
             plain_part = _find_body_part(self.msg, "plain")
             plain = _decode_part_text(plain_part) if plain_part is not None else ""
             if not plain.strip():
                 return (
-                    _plain_text_fallback("(This draft has no readable body.)"),
+                    None,
                     "Draft has no text/html or text/plain body part.",
+                    _plain_text_fallback("(This draft has no readable body.)"),
                 )
-            return _plain_text_fallback(plain), None
+            return None, None, _plain_text_fallback(plain)
 
+        html = _decode_part_text(html_part)
         images = _collect_inline_images(self.msg)
         inlined, unresolved = _inline_cid_references(html, images)
 
+        warning: Optional[str] = None
         if len(inlined.encode("utf-8", errors="replace")) > _PREVIEW_MAX_BYTES:
             # Embedded images are almost always the culprit — drop them first
             # so the layout still renders.
@@ -345,8 +450,11 @@ class DraftSnapshot:
                 f"{unresolved} embedded image reference(s) could not be resolved "
                 "in this preview. The sent email is unaffected."
             )
+        return inlined, warning, None
 
-        document = _ensure_html_document(inlined)
+    def _finalize(self, html: str, warning: Optional[str]) -> tuple[str, Optional[str]]:
+        """Wrap, size-check and banner the preview document."""
+        document = _ensure_html_document(html)
         encoded = document.encode("utf-8", errors="replace")
         if len(encoded) > _PREVIEW_MAX_BYTES:
             document = encoded[:_PREVIEW_MAX_BYTES].decode("utf-8", errors="ignore")
@@ -354,10 +462,34 @@ class DraftSnapshot:
                 "Preview truncated — this email is larger than the inline "
                 "preview limit. The draft itself is complete and unmodified."
             )
-
         if warning:
             document = _banner(warning, document)
         return document, warning
+
+    def preview_html(self) -> tuple[str, Optional[str]]:
+        """Build the iframe document without touching the network.
+
+        Remote images keep their original URLs — use :meth:`preview_document`
+        for a preview that also inlines those.
+        """
+        html, warning, finished = self._cid_stage()
+        if finished is not None:
+            return finished, warning
+        return self._finalize(html or "", warning)
+
+    async def preview_document(self) -> tuple[str, Optional[str]]:
+        """Build the iframe document, inlining remote images too."""
+        html, warning, finished = self._cid_stage()
+        if finished is not None:
+            return finished, warning
+
+        html, unresolved = await _inline_remote_images(html or "")
+        if unresolved and not warning:
+            warning = (
+                f"{unresolved} remote image(s) could not be fetched for this "
+                "preview and may appear broken. The sent email is unaffected."
+            )
+        return self._finalize(html, warning)
 
 
 async def _load_draft(gmail_service: Any, draft_id: str) -> DraftSnapshot:
@@ -378,11 +510,14 @@ async def _update_draft_headers(
     to: list[str],
     cc: list[str],
     bcc: list[str],
+    subject: Optional[str] = None,
 ) -> None:
-    """Rewrite recipient headers in place and re-upload the draft."""
+    """Rewrite recipient/subject headers in place and re-upload the draft."""
     _set_header(snapshot.msg, "To", ", ".join(to))
     _set_header(snapshot.msg, "Cc", ", ".join(cc))
     _set_header(snapshot.msg, "Bcc", ", ".join(bcc))
+    if subject is not None:
+        _set_header(snapshot.msg, "Subject", subject)
 
     body: dict[str, Any] = {"message": {"raw": _serialize(snapshot.msg)}}
     if snapshot.thread_id:
@@ -455,8 +590,68 @@ def _error_app(message: str, detail: str | None = None):
     return PrefabApp(view=view)
 
 
-def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
-    """Build the Prefab view for one draft snapshot."""
+async def _load_contacts(user_google_email: str, limit: int = 60) -> list[dict]:
+    """Return the user's saved contacts as ``[{"name", "email"}]``.
+
+    Best-effort: a failure here just means the card renders without the
+    contact picker, never that the preview fails.
+    """
+    if not user_google_email:
+        return []
+    try:
+        from people.people_tools import _get_people_service
+
+        service = await _get_people_service(user_google_email)
+        if service is None:
+            return []
+        resp = await asyncio.to_thread(
+            service.people()
+            .connections()
+            .list(
+                resourceName="people/me",
+                personFields="names,emailAddresses",
+                pageSize=min(limit, 1000),
+                sortOrder="LAST_MODIFIED_DESCENDING",
+            )
+            .execute
+        )
+    except Exception as exc:
+        logger.debug(f"[draft_app] contact lookup skipped: {exc}")
+        return []
+
+    contacts: list[dict] = []
+    seen: set[str] = set()
+    for person in resp.get("connections", []):
+        emails = [
+            e.get("value") for e in person.get("emailAddresses", []) if e.get("value")
+        ]
+        if not emails:
+            continue
+        names = person.get("names", [])
+        display = names[0].get("displayName") if names else None
+        for address in emails:
+            key = address.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            contacts.append({"name": display or address, "email": address})
+    contacts.sort(key=lambda c: c["name"].lower())
+    return contacts[:limit]
+
+
+def _build_draft_view(
+    snapshot: DraftSnapshot,
+    user_email: str,
+    preview: tuple[str, Optional[str]] | None = None,
+    contacts: list[dict] | None = None,
+):
+    """Build the Prefab view for one draft snapshot.
+
+    NOTE: every component must be constructed *inside* its ``with`` block —
+    Prefab attaches a component to the enclosing container at construction
+    time, so building one earlier and merely referencing it here silently
+    drops it from the tree.
+    """
     from prefab_ui.actions import SetState, ToggleState
     from prefab_ui.actions.mcp import (
         CallTool,
@@ -474,6 +669,8 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
         CardFooter,
         CardHeader,
         Column,
+        Combobox,
+        ComboboxOption,
         If,
         Input,
         Label,
@@ -485,7 +682,7 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
     from prefab_ui.components.embed import Embed
     from prefab_ui.rx import ERROR, RESULT, STATE
 
-    preview_html, warning = snapshot.preview_html()
+    preview_html, warning = preview if preview is not None else snapshot.preview_html()
 
     to_value = ", ".join(snapshot.to)
     cc_value = ", ".join(snapshot.cc)
@@ -494,15 +691,14 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
     subject = snapshot.subject or "(no subject)"
     from_addr = snapshot.from_addr or user_email
 
-    to_input = Input(name="to", value=to_value, placeholder="name@example.com")
-    cc_input = Input(name="cc", value=cc_value, placeholder="Cc (optional)")
-    bcc_input = Input(name="bcc", value=bcc_value, placeholder="Bcc (optional)")
-
+    # State keys the inputs bind to; the action arguments interpolate the same
+    # keys, so whatever the user types is what gets sent.
     recipient_args = {
         "draft_id": snapshot.draft_id,
-        "to": to_input.rx,
-        "cc": cc_input.rx,
-        "bcc": bcc_input.rx,
+        "to": STATE.to,
+        "cc": STATE.cc,
+        "bcc": STATE.bcc,
+        "subject": STATE.subject,
     }
 
     with Card(css_class="max-w-3xl") as view:
@@ -520,8 +716,30 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
 
         with CardContent(), Column(gap=3):
             with Column(gap=1):
+                Label("Subject")
+                Input(name="subject", value=snapshot.subject)
+
+            with Column(gap=1):
                 Label("To")
-                to_input
+                Input(
+                    name="to",
+                    value=to_value,
+                    input_type="text",
+                    placeholder="name@example.com, another@example.com",
+                )
+                if contacts:
+                    with Combobox(
+                        name="contact_pick",
+                        placeholder="Add from contacts…",
+                        search_placeholder="Search contacts",
+                        on_change=SetState("to", STATE.contact_pick),
+                    ):
+                        for contact in contacts:
+                            ComboboxOption(
+                                f"{contact['name']} <{contact['email']}>",
+                                value=contact["email"],
+                            )
+
             with Row(gap=2):
                 Button(
                     "Cc / Bcc",
@@ -531,9 +749,9 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
                 )
             with If(STATE.show_cc), Column(gap=1):
                 Label("Cc")
-                cc_input
+                Input(name="cc", value=cc_value, placeholder="Cc (optional)")
                 Label("Bcc")
-                bcc_input
+                Input(name="bcc", value=bcc_value, placeholder="Bcc (optional)")
 
             Separator()
 
@@ -651,9 +869,11 @@ def _build_draft_view(snapshot: DraftSnapshot, user_email: str):
     return PrefabApp(
         view=view,
         state={
+            "subject": snapshot.subject,
             "to": to_value,
             "cc": cc_value,
             "bcc": bcc_value,
+            "contact_pick": "",
             "show_cc": bool(cc_value or bcc_value),
             "confirm_discard": False,
             "needs_confirm": False,
@@ -685,6 +905,7 @@ def create_gmail_draft_app(mcp: Any = None):
         to: str = "",
         cc: str = "",
         bcc: str = "",
+        subject: Optional[str] = None,
         confirm_untrusted: bool = False,
         user_google_email: UserGoogleEmail = None,
     ) -> dict:
@@ -726,13 +947,15 @@ def create_gmail_draft_app(mcp: Any = None):
                         ),
                     }
 
+            subject_changed = subject is not None and subject != snapshot.subject
             if (
                 to_list != snapshot.to
                 or cc_list != snapshot.cc
                 or bcc_list != snapshot.bcc
+                or subject_changed
             ):
                 await _update_draft_headers(
-                    service, snapshot, to_list, cc_list, bcc_list
+                    service, snapshot, to_list, cc_list, bcc_list, subject
                 )
 
             sent = await asyncio.to_thread(
@@ -749,7 +972,10 @@ def create_gmail_draft_app(mcp: Any = None):
                 "draft_id": draft_id,
                 "message_id": sent.get("id", ""),
                 "thread_id": sent.get("threadId", ""),
-                "message": f"Sent “{snapshot.subject or '(no subject)'}” to {recipients}.",
+                "message": (
+                    f"Sent “{subject or snapshot.subject or '(no subject)'}” "
+                    f"to {recipients}."
+                ),
             }
         except Exception as exc:
             logger.error(f"[gmail_draft_send] {exc}", exc_info=True)
@@ -767,9 +993,10 @@ def create_gmail_draft_app(mcp: Any = None):
         to: str = "",
         cc: str = "",
         bcc: str = "",
+        subject: Optional[str] = None,
         user_google_email: UserGoogleEmail = None,
     ) -> dict:
-        """Persist recipient edits to the draft without sending it."""
+        """Persist subject/recipient edits to the draft without sending it."""
         from gmail.service import _get_gmail_service_with_fallback
 
         to_list = _split_recipients(to)
@@ -779,7 +1006,9 @@ def create_gmail_draft_app(mcp: Any = None):
         try:
             service = await _get_gmail_service_with_fallback(user_google_email)
             snapshot = await _load_draft(service, draft_id)
-            await _update_draft_headers(service, snapshot, to_list, cc_list, bcc_list)
+            await _update_draft_headers(
+                service, snapshot, to_list, cc_list, bcc_list, subject
+            )
             summary = ", ".join(to_list) if to_list else "no recipients yet"
             return {
                 "ok": True,
@@ -870,7 +1099,18 @@ def create_gmail_draft_app(mcp: Any = None):
 
             service = await _get_gmail_service_with_fallback(user_google_email)
             snapshot = await _load_draft(service, draft_id)
-            return _build_draft_view(snapshot, user_google_email or "")
+            # Preview and contacts are independent — fetch them together so the
+            # card is not gated on the slower of the two.
+            preview, contacts = await asyncio.gather(
+                snapshot.preview_document(),
+                _load_contacts(user_google_email or ""),
+            )
+            return _build_draft_view(
+                snapshot,
+                user_google_email or "",
+                preview=preview,
+                contacts=contacts,
+            )
         except Exception as exc:
             logger.error(f"[preview_gmail_draft] {exc}", exc_info=True)
             return _error_app("Could not load the draft.", str(exc))

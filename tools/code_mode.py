@@ -871,13 +871,40 @@ def setup_code_mode(mcp: FastMCP) -> None:
     # causes the bypass flag to be invisible by the time transforms run,
     # so the catalog returns the 7 discovery tools instead of 72+ real
     # tools.  Fix: read from the provider (pre-transform) directly.
+    def _model_visible_provider_tools() -> list:
+        """Collect model-visible tools contributed by non-local providers.
+
+        MCP App providers (FastMCPApp) keep their tools in their own
+        LocalProvider, so ``mcp.local_provider._components`` misses them and
+        ``execute`` cannot call an app's entry tool. Include those entry tools
+        here, but deliberately skip app-only backends: they are marked
+        ``visibility=["app"]`` precisely so the card is their only caller — a
+        model that could invoke ``gmail_draft_send`` directly would bypass the
+        button press that authorises the send.
+        """
+        collected: list = []
+        for provider in getattr(mcp, "providers", []):
+            local = getattr(provider, "_local", None)
+            if local is None or provider is mcp.local_provider:
+                continue
+            for component in getattr(local, "_components", {}).values():
+                if not isinstance(component, Tool):
+                    continue
+                visibility = ((component.meta or {}).get("ui") or {}).get("visibility")
+                if visibility and "model" not in visibility:
+                    continue
+                collected.append(component)
+        return collected
+
     async def _patched_get_tool_catalog(
         ctx: Context = None, *, run_middleware: bool = True
     ):
         """Return the real registered tools, bypassing transforms."""
         try:
             components = mcp.local_provider._components
-            return [v for v in components.values() if isinstance(v, Tool)]
+            tools = [v for v in components.values() if isinstance(v, Tool)]
+            tools.extend(_model_visible_provider_tools())
+            return tools
         except Exception:
             logger.warning(
                 "code_mode: patched get_tool_catalog failed, falling back to upstream"
@@ -929,6 +956,17 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     cached_tools = await transform.get_tool_catalog(ctx)
                 return cached_tools
 
+            # A tool called during this execute may itself return a Prefab app
+            # (MCP App entry tools do). Remember the last one so the UI still
+            # renders even though the model reached it through execute.
+            prefab_result: dict[str, Any] | None = None
+
+            def _capture_prefab(result: Any) -> None:
+                nonlocal prefab_result
+                structured = getattr(result, "structured_content", None)
+                if isinstance(structured, dict) and "view" in structured:
+                    prefab_result = structured
+
             async def call_tool(tool_name: str, params: dict[str, Any]) -> Any:
                 backend_tools = await _get_cached_tools()
                 tool = transform._find_tool(tool_name, backend_tools)
@@ -937,12 +975,14 @@ def setup_code_mode(mcp: FastMCP) -> None:
 
                 try:
                     result = await ctx.fastmcp.call_tool(tool.name, params)
+                    _capture_prefab(result)
                     return _unwrap_tool_result(result)
                 except _VE as ve:
                     # Attempt argument recovery via LLM
                     corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
                         result = await ctx.fastmcp.call_tool(tool.name, corrected)
+                        _capture_prefab(result)
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
@@ -961,6 +1001,11 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 code,
                 external_functions={"call_tool": call_tool},
             )
+
+            # A tool that returned its own Prefab app wins over a synthesized
+            # dashboard — it is a purpose-built UI, not a generic table.
+            if prefab_result is not None:
+                return _ToolResult(content=raw, structured_content=prefab_result)
 
             # If a dashboard-enabled tool was called during THIS execute,
             # embed a Prefab dashboard directly in the ToolResult so
