@@ -960,29 +960,33 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # (MCP App entry tools do). Remember the last one so the UI still
             # renders even though the model reached it through execute.
             prefab_result: dict[str, Any] | None = None
+            prefab_tool: str | None = None
+            called_tools: list[str] = []
 
-            def _capture_prefab(result: Any) -> None:
-                nonlocal prefab_result
+            def _capture_prefab(result: Any, tool_name: str) -> None:
+                nonlocal prefab_result, prefab_tool
                 structured = getattr(result, "structured_content", None)
                 if isinstance(structured, dict) and "view" in structured:
                     prefab_result = structured
+                    prefab_tool = tool_name
 
             async def call_tool(tool_name: str, params: dict[str, Any]) -> Any:
                 backend_tools = await _get_cached_tools()
                 tool = transform._find_tool(tool_name, backend_tools)
                 if tool is None:
                     raise NotFoundError(f"Unknown tool: {tool_name}")
+                called_tools.append(tool_name)
 
                 try:
                     result = await ctx.fastmcp.call_tool(tool.name, params)
-                    _capture_prefab(result)
+                    _capture_prefab(result, tool_name)
                     return _unwrap_tool_result(result)
                 except _VE as ve:
                     # Attempt argument recovery via LLM
                     corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
                         result = await ctx.fastmcp.call_tool(tool.name, corrected)
-                        _capture_prefab(result)
+                        _capture_prefab(result, tool_name)
                         return _unwrap_tool_result(result)
                     raise  # re-raise if recovery failed
 
@@ -1005,7 +1009,40 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # A tool that returned its own Prefab app wins over a synthesized
             # dashboard — it is a purpose-built UI, not a generic table.
             if prefab_result is not None:
-                return _ToolResult(content=raw, structured_content=prefab_result)
+                # Deliberately do NOT echo the view spec back to the model.
+                # An app tool's return value *is* the serialized view, so
+                # passing it through as content would flood the model's
+                # context with layout JSON it cannot act on — and the card is
+                # for the user, not the model.
+                summary = (
+                    f"Rendered the {prefab_tool} app card for the user."
+                    if prefab_tool
+                    else "Rendered an app card for the user."
+                )
+                return _ToolResult(content=summary, structured_content=prefab_result)
+
+            def _default_view() -> Any:
+                """Fall back to a generic result card.
+
+                ``execute`` advertises a UI resource, so the host draws a panel
+                for every call. Without a view of its own an ordinary result
+                would render as an empty box.
+                """
+                try:
+                    from tools.ui_apps import build_default_execute_view
+
+                    app = build_default_execute_view(raw, called_tools)
+                    if app is not None:
+                        # ToolResult falls back to structured_content when
+                        # content is None, which would hand the model the view
+                        # spec instead of its own (empty) result.
+                        return _ToolResult(
+                            content=raw if raw is not None else "",
+                            structured_content=app.to_json(),
+                        )
+                except Exception:
+                    pass
+                return raw
 
             # If a dashboard-enabled tool was called during THIS execute,
             # embed a Prefab dashboard directly in the ToolResult so
@@ -1034,7 +1071,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
                             )
             except Exception:
                 pass
-            return raw
+            return _default_view()
 
         tool = Tool.from_function(
             fn=execute,
@@ -1042,9 +1079,29 @@ def setup_code_mode(mcp: FastMCP) -> None:
             description=transform._build_execute_description(),
         )
 
-        # Dashboard rendering is now handled inline via Prefab
-        # structured_content in the ToolResult (see execute body above),
-        # so no resourceUri is needed on the tool definition.
+        # Point the host at a Prefab renderer. Hosts decide a tool can draw UI
+        # from ``meta.ui.resourceUri`` on the *tool definition* — there is no
+        # per-result channel — and under Code Mode ``execute`` is the only tool
+        # the host ever sees. Without this the app card returned by an entry
+        # tool arrives as plain JSON text and is printed rather than rendered.
+        #
+        # The placeholder URI is not usable here: Prefab resource synthesis
+        # walks provider ``_components`` and ``execute`` is built by a
+        # transform, so no per-tool renderer would ever be created for it.
+        # ``ui_apps.setup_ui_apps`` registers this URI explicitly instead.
+        try:
+            from fastmcp.apps.config import AppConfig, app_config_to_meta_dict
+
+            meta = dict(tool.meta) if tool.meta else {}
+            meta["ui"] = app_config_to_meta_dict(
+                AppConfig(
+                    resource_uri="ui://prefab/code-mode/renderer.html",
+                    prefers_border=True,
+                )
+            )
+            tool.meta = meta
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"code_mode: could not attach UI renderer to execute: {exc}")
 
         return tool
 
