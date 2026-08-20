@@ -142,3 +142,17 @@ card instead.
 field: `structuredContent` carries the view because the renderer needs it, and
 a host may surface that to the model too. That is host behaviour, not something
 the server can suppress — it is the reason the image budgets above are tight.
+
+
+## Client capability gating (opt-in)
+
+`ctx.client_supports_extension(UI_EXTENSION_ID)` reports whether the connected
+client advertised the MCP Apps UI extension. With
+`DRAFT_PREVIEW_UI_GATING=true`, a client that did not advertise it gets a
+compact text summary instead of a card, and `execute` returns raw results with
+no view — saving the whole view payload for clients that cannot draw it.
+
+**Default off, deliberately.** "Did not advertise the extension" is not the
+same as "cannot render": FastMCP's own `Client` does not advertise it, and
+Claude Desktop renders these cards today. Enabling this without checking your
+client would strip working cards. Verify first, then turn it on.

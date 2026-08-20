@@ -579,6 +579,44 @@ _PREVIEW_RESOURCE_DOMAINS = ["https:", "data:"]
 _PREVIEW_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"
 
 
+def _client_renders_ui() -> bool:
+    """True when the connected client advertised the MCP Apps UI extension.
+
+    A client that cannot render a card gains nothing from a serialized view —
+    and pays for it, since the view travels in ``structuredContent`` and some
+    hosts surface that to the model. When this is False the card degrades to a
+    compact text summary instead.
+    """
+    if not settings.draft_preview_ui_gating:
+        return True
+    try:
+        from fastmcp.apps.config import UI_EXTENSION_ID
+        from fastmcp.server.dependencies import get_context
+
+        return bool(get_context().client_supports_extension(UI_EXTENSION_ID))
+    except Exception:
+        # No request context, older FastMCP, or an unknown client — assume it
+        # can render rather than silently downgrading a working card.
+        return True
+
+
+def _text_only_app(snapshot: DraftSnapshot, plain_excerpt: str):
+    """Compact stand-in for clients that cannot render the interactive card."""
+    from prefab_ui.app import PrefabApp
+    from prefab_ui.components import H3, Card, CardContent, CardHeader, Column, Muted
+
+    with Card() as view:
+        with CardHeader():
+            H3(snapshot.subject or "(no subject)")
+        with CardContent(), Column(gap=1):
+            Muted(f"Draft {snapshot.draft_id}")
+            Muted("To: " + (", ".join(snapshot.to) or "(no recipients)"))
+            if snapshot.cc:
+                Muted("Cc: " + ", ".join(snapshot.cc))
+            Muted(plain_excerpt)
+    return PrefabApp(view=view)
+
+
 def _error_app(message: str, detail: str | None = None):
     """Render a failure as a card so the user sees why nothing appeared."""
     from prefab_ui.app import PrefabApp
@@ -1103,6 +1141,21 @@ def create_gmail_draft_app(mcp: Any = None):
 
             service = await _get_gmail_service_with_fallback(user_google_email)
             snapshot = await _load_draft(service, draft_id)
+
+            if not _client_renders_ui():
+                # Skip the image fetch, the contact lookup and the full HTML
+                # body — none of it can be drawn, and all of it would be paid
+                # for in the result payload.
+                plain_part = _find_body_part(snapshot.msg, "plain")
+                excerpt = (
+                    _decode_part_text(plain_part) if plain_part is not None else ""
+                ).strip()
+                if len(excerpt) > 500:
+                    excerpt = excerpt[:500] + "…"
+                return _text_only_app(
+                    snapshot, excerpt or "(no plain-text body in this draft)"
+                )
+
             # Preview and contacts are independent — fetch them together so the
             # card is not gated on the slower of the two.
             preview, contacts = await asyncio.gather(

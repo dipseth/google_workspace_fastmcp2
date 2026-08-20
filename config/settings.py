@@ -253,6 +253,18 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "DRAFT_PREVIEW_INLINE_IMAGES"},
     )
 
+    # Downgrade app cards to plain results for clients that do not advertise
+    # the MCP Apps UI extension (io.modelcontextprotocol/ui). Saves the view
+    # payload on clients that cannot render it — but "did not advertise" is not
+    # the same as "cannot render": some hosts draw MCP UI without declaring the
+    # extension, and enabling this would strip their cards. Verify against your
+    # client before turning it on.
+    draft_preview_ui_gating: bool = Field(
+        default=False,
+        description="Return plain results instead of app cards to clients that do not advertise the MCP Apps UI extension",
+        json_schema_extra={"env": "DRAFT_PREVIEW_UI_GATING"},
+    )
+
     # Skills Provider Configuration
     # When enabled, generates skill documents from ModuleWrapper and serves via FastMCP
     enable_skills_provider: bool = Field(

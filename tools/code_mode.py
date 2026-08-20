@@ -1006,6 +1006,24 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 external_functions={"call_tool": call_tool},
             )
 
+            # A client that cannot render MCP UI gains nothing from a view
+            # spec and pays for it: the view rides in structuredContent, which
+            # some hosts also surface to the model. Hand back the raw result.
+            def _renders_ui() -> bool:
+                try:
+                    from config.settings import settings as _settings
+
+                    if not _settings.draft_preview_ui_gating:
+                        return True
+                    from fastmcp.apps.config import UI_EXTENSION_ID
+
+                    return bool(ctx.client_supports_extension(UI_EXTENSION_ID))
+                except Exception:
+                    return True
+
+            if not _renders_ui():
+                return raw
+
             # A tool that returned its own Prefab app wins over a synthesized
             # dashboard — it is a purpose-built UI, not a generic table.
             if prefab_result is not None:
