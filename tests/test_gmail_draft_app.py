@@ -383,3 +383,30 @@ async def test_inlining_is_a_noop_without_remote_images():
 
     html = "<p>no images here</p>"
     assert await _inline_remote_images(html) == (html, 0)
+
+
+# ── Degraded (text-only) card ───────────────────────────────────────
+
+
+def test_text_only_app_omits_the_preview_iframe():
+    """The whole point of degrading: none of the expensive payload ships."""
+    from gmail.draft_app import _text_only_app
+
+    app = _text_only_app(_make_draft(cc="c@example.com"), "Plain excerpt")
+    assert _components(app, "Iframe") == []
+    assert _components(app, "Image") == []
+
+
+def test_text_only_app_keeps_the_identifying_details():
+    """Degraded does not mean useless — the model still needs to act on it."""
+    from gmail.draft_app import _text_only_app
+
+    snapshot = _make_draft(cc="c@example.com")
+    payload = json.dumps(
+        _text_only_app(snapshot, "Plain excerpt").to_json(), ensure_ascii=False
+    )
+    assert snapshot.subject in payload
+    assert "a@example.com" in payload
+    assert "c@example.com" in payload
+    assert "Plain excerpt" in payload
+    assert snapshot.draft_id in payload

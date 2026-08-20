@@ -39,6 +39,7 @@ from email.message import Message
 from typing import Any, Optional, Union
 
 from config.settings import settings
+from tools.client_capabilities import client_renders_ui
 from tools.common_types import UserGoogleEmail
 
 try:  # Optional extra: fastmcp[apps] / prefab-ui
@@ -577,27 +578,6 @@ _PREVIEW_RESOURCE_DOMAINS = ["https:", "data:"]
 # No allow-scripts: Gmail strips <script> too, so a script-free iframe is both
 # safer and a more honest preview. Popups keep links clickable.
 _PREVIEW_SANDBOX = "allow-popups allow-popups-to-escape-sandbox"
-
-
-def _client_renders_ui() -> bool:
-    """True when the connected client advertised the MCP Apps UI extension.
-
-    A client that cannot render a card gains nothing from a serialized view —
-    and pays for it, since the view travels in ``structuredContent`` and some
-    hosts surface that to the model. When this is False the card degrades to a
-    compact text summary instead.
-    """
-    if not settings.draft_preview_ui_gating:
-        return True
-    try:
-        from fastmcp.apps.config import UI_EXTENSION_ID
-        from fastmcp.server.dependencies import get_context
-
-        return bool(get_context().client_supports_extension(UI_EXTENSION_ID))
-    except Exception:
-        # No request context, older FastMCP, or an unknown client — assume it
-        # can render rather than silently downgrading a working card.
-        return True
 
 
 def _text_only_app(snapshot: DraftSnapshot, plain_excerpt: str):
@@ -1142,7 +1122,7 @@ def create_gmail_draft_app(mcp: Any = None):
             service = await _get_gmail_service_with_fallback(user_google_email)
             snapshot = await _load_draft(service, draft_id)
 
-            if not _client_renders_ui():
+            if not client_renders_ui():
                 # Skip the image fetch, the contact lookup and the full HTML
                 # body — none of it can be drawn, and all of it would be paid
                 # for in the result payload.

@@ -4,6 +4,8 @@ An MCP App (`FastMCPApp`) that renders a Gmail draft as an interactive card in
 the chat: the fully rendered email in a sandboxed iframe, editable To/Cc/Bcc
 fields, and **Send** / **Save draft** / **Discard** buttons.
 
+![The draft preview card rendering an MJML email](../documentation/gmail_draft_preview.png)
+
 Source: [`gmail/draft_app.py`](../gmail/draft_app.py). Registered in
 [`server.py`](../server.py) alongside the other app providers, behind
 `ENABLE_APP_PROVIDERS=true`.
@@ -144,15 +146,43 @@ a host may surface that to the model too. That is host behaviour, not something
 the server can suppress — it is the reason the image budgets above are tight.
 
 
-## Client capability gating (opt-in)
+## Client capability gating
 
-`ctx.client_supports_extension(UI_EXTENSION_ID)` reports whether the connected
-client advertised the MCP Apps UI extension. With
-`DRAFT_PREVIEW_UI_GATING=true`, a client that did not advertise it gets a
-compact text summary instead of a card, and `execute` returns raw results with
-no view — saving the whole view payload for clients that cannot draw it.
+A view spec is worthless to a client that cannot draw it, and it is not free —
+the view rides in `structuredContent`. With `DRAFT_PREVIEW_UI_GATING=true`
+(the default), a client showing no sign of MCP UI support gets a compact text
+summary instead of a card, `preview_gmail_draft` skips the image fetch and
+contact lookup entirely, and `execute` returns raw results with no view.
 
-**Default off, deliberately.** "Did not advertise the extension" is not the
-same as "cannot render": FastMCP's own `Client` does not advertise it, and
-Claude Desktop renders these cards today. Enabling this without checking your
-client would strip working cards. Verify first, then turn it on.
+Two signals from the client's `initialize` handshake decide this, and **either
+one is enough**:
+
+1. **The MCP Apps UI extension.** `ctx.client_supports_extension(UI_EXTENSION_ID)`
+   reports whether the client advertised `io.modelcontextprotocol/ui`.
+   Protocol-correct, but under-reported — a host can render MCP UI without
+   declaring it.
+2. **`clientInfo.name`**, matched case-insensitively as a substring against
+   `DRAFT_PREVIEW_UI_CLIENTS` (default `claude-ai,claudeai,claude-desktop`).
+   This is what makes gating safe to default on: a host that renders but never
+   advertises still gets its card.
+
+Name matching is a heuristic — a client may send any name it likes — but this
+decides payload size, not access, so a wrong guess costs tokens rather than
+granting anything. OAuth is deliberately not consulted: under dynamic client
+registration the `client_id` is minted per registration, so auth identifies the
+*user*, not the software they are running.
+
+Verified behaviour against real handshakes: FastMCP's own `Client` reports
+`name="mcp"` and advertises nothing, so it is gated to text; a client reporting
+`name="claude-ai"` gets the card without advertising the extension.
+
+**Finding out what your client reports.** The server logs each client's identity
+once per session:
+
+```
+[ui-gating] client=claude-ai version=2.1.0 advertises_extension=False allowlisted=True -> card
+```
+
+If a host you expect to render lands on `-> text-only`, add its reported name to
+`DRAFT_PREVIEW_UI_CLIENTS`. To switch the whole mechanism off and send cards to
+every client unconditionally, set `DRAFT_PREVIEW_UI_GATING=false`.

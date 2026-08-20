@@ -1009,19 +1009,9 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # A client that cannot render MCP UI gains nothing from a view
             # spec and pays for it: the view rides in structuredContent, which
             # some hosts also surface to the model. Hand back the raw result.
-            def _renders_ui() -> bool:
-                try:
-                    from config.settings import settings as _settings
+            from tools.client_capabilities import client_renders_ui
 
-                    if not _settings.draft_preview_ui_gating:
-                        return True
-                    from fastmcp.apps.config import UI_EXTENSION_ID
-
-                    return bool(ctx.client_supports_extension(UI_EXTENSION_ID))
-                except Exception:
-                    return True
-
-            if not _renders_ui():
+            if not client_renders_ui():
                 return raw
 
             # A tool that returned its own Prefab app wins over a synthesized

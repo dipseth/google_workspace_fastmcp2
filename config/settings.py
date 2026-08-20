@@ -253,16 +253,28 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "DRAFT_PREVIEW_INLINE_IMAGES"},
     )
 
-    # Downgrade app cards to plain results for clients that do not advertise
-    # the MCP Apps UI extension (io.modelcontextprotocol/ui). Saves the view
-    # payload on clients that cannot render it — but "did not advertise" is not
-    # the same as "cannot render": some hosts draw MCP UI without declaring the
-    # extension, and enabling this would strip their cards. Verify against your
-    # client before turning it on.
+    # Downgrade app cards to plain results for clients that cannot draw them,
+    # saving the whole view payload. A client qualifies by advertising the MCP
+    # Apps UI extension (io.modelcontextprotocol/ui) *or* by matching
+    # draft_preview_ui_clients below — because "did not advertise" is not the
+    # same as "cannot render": some hosts draw MCP UI without declaring the
+    # extension. Set false to send cards to every client unconditionally.
     draft_preview_ui_gating: bool = Field(
-        default=False,
-        description="Return plain results instead of app cards to clients that do not advertise the MCP Apps UI extension",
+        default=True,
+        description="Return plain results instead of app cards to clients with no sign of MCP UI support",
         json_schema_extra={"env": "DRAFT_PREVIEW_UI_GATING"},
+    )
+
+    # Clients known to render MCP UI without advertising the extension, matched
+    # case-insensitively as substrings of clientInfo.name from the initialize
+    # handshake. A heuristic — a client may send any name it likes — but this
+    # decides payload size, not access, so a wrong guess costs tokens only.
+    # The server logs each client's reported name once per session; check the
+    # log for "[ui-gating] client=" to see what a host actually calls itself.
+    draft_preview_ui_clients: str = Field(
+        default="claude-ai,claudeai,claude-desktop",
+        description="Comma-separated clientInfo.name fragments treated as MCP UI capable",
+        json_schema_extra={"env": "DRAFT_PREVIEW_UI_CLIENTS"},
     )
 
     # Skills Provider Configuration

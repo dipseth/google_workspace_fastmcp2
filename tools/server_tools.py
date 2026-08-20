@@ -17,7 +17,7 @@ import os
 from pathlib import Path
 
 from fastmcp import Context, FastMCP
-from fastmcp.apps import UI_EXTENSION_ID, AppConfig
+from fastmcp.apps import AppConfig
 from mcp.types import ToolListChangedNotification
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Literal, Optional, Union
@@ -955,9 +955,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     f", {session_state.sessionDisabledCount} session-disabled"
                 )
 
-            # Detect if client supports MCP Apps UI extension
+            # Report what the handshake actually revealed about UI support —
+            # the extension or a known client name — rather than the gate's
+            # verdict, so this stays diagnostic when gating is switched off.
             try:
-                client_supports_ui = ctx.client_supports_extension(UI_EXTENSION_ID)
+                from tools.client_capabilities import detect_ui_support
+
+                client_supports_ui = detect_ui_support().renders
             except Exception:
                 client_supports_ui = False
 
