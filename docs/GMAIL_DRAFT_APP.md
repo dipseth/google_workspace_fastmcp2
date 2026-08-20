@@ -44,10 +44,22 @@ previewing.
 matches Gmail's own behaviour (Gmail strips `<script>`), so the preview is both
 safe and honest. Only popups are allowed, so links stay clickable.
 
-**Remote images.** The Prefab renderer's default CSP only permits
-`cdn.jsdelivr.net`. `_widen_preview_csp()` patches the entry tool's
-`meta["ui"]["csp"].resourceDomains` to add `https:` and `data:` after
-registration, so email images from arbitrary CDNs load.
+**Remote images.** Hosts build the app iframe's `img-src` from the declared
+CSP domains, and scheme-only grants like `https:` are not honoured everywhere —
+in Claude Desktop remote images rendered broken. So they are fetched
+server-side and inlined as `data:` URIs, covering every remote form MJML emits:
+`<img src>`, `<td background>`, CSS `url(...)` for `mj-section` backgrounds and
+VML `<v:image>`. Failures are silent — a broken image beats a failed preview.
+
+Budgets are deliberately tight (150 KB per image, 500 KB total) because the
+base64 rides in the result's `structuredContent`, and some hosts surface
+structured content to the model as well as to the iframe — an unbounded budget
+would charge every preview a large slice of context. Set
+`DRAFT_PREVIEW_INLINE_IMAGES=false` to turn inlining off entirely.
+
+The CSP is still widened (`_widen_preview_csp()` adds `https:` and `data:` to
+the entry tool's `meta["ui"]["csp"].resourceDomains`) so hosts that *do* honour
+it can load anything the budget skipped.
 
 ## Recipient edits are lossless
 
@@ -68,13 +80,18 @@ MCP Apps only render in clients that advertise the
 `io.modelcontextprotocol/ui` extension. **Claude Desktop** and the **MCP
 Inspector** do; VS Code Copilot does not.
 
-App entry tools are hidden when Code Mode is on (this is true of the existing
-`Approval` / `Choice` / `ToolManager` apps too), so run with:
+The card works with Code Mode either on or off — see
+"Code Mode" below for how that bridge works. To run over HTTP:
 
 ```bash
-MCP_TRANSPORT=http ENABLE_CODE_MODE=false ENABLE_APP_PROVIDERS=true \
-  uv run python server.py
+MCP_TRANSPORT=http ENABLE_APP_PROVIDERS=true uv run python server.py
 ```
+
+For a stdio client (Claude Desktop), point it at
+`uv run --no-sync --directory <repo> python server.py`. Set `HF_HUB_OFFLINE=1`
+— without it, Hugging Face revalidates already-cached embedding models over the
+network and startup exceeds the client's ~60s handshake timeout (22s with it,
+~60s+ without).
 
 Then point the client at `https://localhost:8002/mcp` and ask it to draft an
 email — for example *"draft an MJML email to me with a hero, a button and a
@@ -90,3 +107,38 @@ What to check in the card:
 3. **Discard** asks for confirmation, then the draft disappears from Gmail.
 4. **Send** delivers the email, and a non-allow-listed recipient surfaces the
    **Send anyway** path instead of sending.
+
+
+## Code Mode
+
+Under Code Mode the model never sees the real catalog — every call goes through
+`execute`. Two things are needed for an app card to survive that.
+
+**Reachability.** `execute` resolves tool names against
+`get_tool_catalog()`, which reads `mcp.local_provider._components`. A
+`FastMCPApp` keeps its tools in its *own* `LocalProvider`, so app tools were
+absent and `call_tool("preview_gmail_draft", …)` raised `NotFoundError`. The
+catalog now also walks `mcp.providers` and includes model-visible provider
+tools — deliberately **not** the `["app"]`-only backends, so the model still
+cannot send mail without the card's button press. Calling `gmail_draft_send`
+from inside `execute` returns `Unknown tool`, by design.
+
+**Rendering.** A host decides a tool can draw UI from `meta.ui.resourceUri` on
+the *tool definition*; there is no per-result channel. Under Code Mode the only
+tool the host sees is `execute`, which carried no UI meta — so the card arrived
+as plain JSON and was printed instead of rendered. `execute` now points at
+`ui://prefab/code-mode/renderer.html`, registered by `setup_ui_apps`. FastMCP's
+placeholder URI cannot be used here: Prefab resource synthesis walks provider
+`_components`, and `execute` is built by a transform, so no per-tool renderer
+would ever be synthesized for it.
+
+Because `execute` now always advertises UI, ordinary results would otherwise
+render as an empty panel — `build_default_execute_view()` gives them a result
+card instead.
+
+**Context cost.** An app tool's return value *is* the serialized view, so
+`execute` replaces the content with a one-line summary rather than echoing
+~15 KB of layout JSON at the model. Note this only controls the `content`
+field: `structuredContent` carries the view because the renderer needs it, and
+a host may surface that to the model too. That is host behaviour, not something
+the server can suppress — it is the reason the image budgets above are tight.

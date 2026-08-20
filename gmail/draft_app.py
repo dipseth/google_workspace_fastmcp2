@@ -58,10 +58,12 @@ _PREVIEW_MAX_BYTES = 3_000_000
 
 # Cap on a single inlined image. Anything larger stays a broken cid: ref
 # rather than blowing the whole payload on one hero photo.
-_INLINE_IMAGE_MAX_BYTES = 400_000
+_INLINE_IMAGE_MAX_BYTES = 150_000
 
-# Total budget for all inlined images in one preview.
-_INLINE_IMAGE_TOTAL_BYTES = 2_000_000
+# Total budget for all inlined images in one preview. Kept deliberately tight:
+# the base64 travels in the result's structuredContent, and hosts that also
+# surface structured content to the model would charge every preview for it.
+_INLINE_IMAGE_TOTAL_BYTES = 500_000
 
 # How long to wait on the whole remote-image fetch before giving up and
 # rendering with whatever came back.
@@ -219,6 +221,8 @@ async def _fetch_remote_images(urls: list[str]) -> dict[str, str]:
     than a failed preview, and the sent email is unaffected either way.
     """
     if not urls:
+        return {}
+    if not settings.draft_preview_inline_images:
         return {}
 
     import httpx

@@ -240,6 +240,19 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "COLBERT_EMBEDDING_DEV"},
     )
 
+    # Gmail draft preview card
+    # Remote email images are fetched and inlined as data: URIs because hosts
+    # build the app iframe's img-src from declared CSP domains and scheme-only
+    # grants ("https:") are not honoured everywhere. The cost is payload: the
+    # base64 rides in the tool result's structuredContent, and some hosts also
+    # surface that to the model. Disable if preview payload size matters more
+    # than seeing remote images.
+    draft_preview_inline_images: bool = Field(
+        default=True,
+        description="Fetch and inline remote images in the Gmail draft preview card",
+        json_schema_extra={"env": "DRAFT_PREVIEW_INLINE_IMAGES"},
+    )
+
     # Skills Provider Configuration
     # When enabled, generates skill documents from ModuleWrapper and serves via FastMCP
     enable_skills_provider: bool = Field(
