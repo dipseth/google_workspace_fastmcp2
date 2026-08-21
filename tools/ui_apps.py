@@ -12,7 +12,8 @@ import json
 import logging
 
 from fastmcp import FastMCP
-from fastmcp.apps import AppConfig
+from fastmcp.apps import AppConfig, ResourceCSP
+from fastmcp.utilities.mime import UI_MIME_TYPE
 
 logger = logging.getLogger(__name__)
 
@@ -448,6 +449,41 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         config = get_data_dashboard_config(tool_name)
         payload = json.dumps({"data": cached, "config": config})
         return _build_data_dashboard_html(payload)
+
+    # Code Mode renderer — see tools/code_mode.py. Under Code Mode the host
+    # only ever sees the ``execute`` tool, so no per-tool Prefab renderer is
+    # synthesized for the app whose card we actually want to draw (synthesis
+    # walks provider ``_components``, and ``execute`` is built by a transform).
+    # Serving the generic Prefab renderer from a URI we own gives ``execute``
+    # something stable to point ``meta.ui.resourceUri`` at.
+    try:
+        from prefab_ui.renderer import get_renderer_html as _get_renderer_html
+
+        @mcp.resource(
+            "ui://prefab/code-mode/renderer.html",
+            name="code_mode_prefab_renderer",
+            title="Code Mode Prefab Renderer",
+            description="Prefab renderer used to draw app cards returned via execute",
+            tags={"ui", "prefab", "code-mode"},
+            mime_type=UI_MIME_TYPE,
+            app=AppConfig(
+                prefers_border=True,
+                # Email previews inline images as data: URIs, and app content
+                # may pull from arbitrary CDNs. The renderer default only
+                # allows jsdelivr, which would break both.
+                csp=ResourceCSP(
+                    resource_domains=[
+                        "https://cdn.jsdelivr.net",
+                        "https:",
+                        "data:",
+                    ]
+                ),
+            ),
+        )
+        def code_mode_prefab_renderer() -> str:
+            return _get_renderer_html()
+    except ImportError:  # pragma: no cover - prefab-ui not installed
+        logger.info("⏭️ Code Mode Prefab renderer unavailable (prefab-ui missing)")
 
     @mcp.resource(
         "ui://data-dashboard/_latest",
@@ -1265,3 +1301,78 @@ def create_tool_management_app(mcp: FastMCP):
         return PrefabApp(view=view, state=tool_states)
 
     return app
+
+
+# ---------------------------------------------------------------------------
+# Code Mode default result view
+# ---------------------------------------------------------------------------
+
+#: Beyond this the rendered JSON is truncated — the model still receives the
+#: full result in the ToolResult content, this only bounds what we draw.
+_CODE_MODE_VIEW_MAX_CHARS = 20_000
+
+
+def build_default_execute_view(raw, tool_names: list[str] | None = None):
+    """Render an ordinary ``execute`` result as a Prefab card.
+
+    Under Code Mode every tool call is funnelled through ``execute``, whose
+    ``meta.ui.resourceUri`` points at the Code Mode renderer. That makes the
+    host draw *something* for every call, so plain results need a view of their
+    own — otherwise they render as an empty panel.
+
+    Returns ``None`` when prefab-ui is unavailable or the result cannot be
+    represented, in which case the caller should return the raw result
+    unchanged.
+    """
+    try:
+        from prefab_ui.app import PrefabApp
+        from prefab_ui.components import (
+            H3,
+            Badge,
+            Card,
+            CardContent,
+            CardHeader,
+            Code,
+            Column,
+            Muted,
+            Row,
+            Text,
+        )
+    except ImportError:
+        return None
+
+    try:
+        if isinstance(raw, str):
+            body, language = raw, "text"
+        else:
+            body, language = json.dumps(raw, indent=2, default=str), "json"
+    except Exception:
+        try:
+            body, language = str(raw), "text"
+        except Exception:
+            return None
+
+    truncated = len(body) > _CODE_MODE_VIEW_MAX_CHARS
+    if truncated:
+        body = body[:_CODE_MODE_VIEW_MAX_CHARS]
+
+    called = [t for t in (tool_names or []) if t]
+
+    try:
+        with Card(css_class="max-w-3xl") as view:
+            with CardHeader(), Row(gap=2, css_class="items-center justify-between"):
+                H3("Result")
+                Badge(language.upper(), variant="secondary")
+            with CardContent(), Column(gap=2):
+                if called:
+                    Muted("Called: " + ", ".join(called))
+                Code(body, language=language)
+                if truncated:
+                    Text(
+                        "Output truncated for display — the full result was "
+                        "returned to the model.",
+                        css_class="text-xs",
+                    )
+        return PrefabApp(view=view)
+    except Exception:
+        return None

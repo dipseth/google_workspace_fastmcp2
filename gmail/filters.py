@@ -354,7 +354,10 @@ async def list_gmail_filters(
         )
 
         return GmailFiltersResponse(
-            filters=filters, count=len(filters), userEmail=user_google_email, error=None
+            filters=filters,
+            count=len(filters),
+            userEmail=user_google_email or "",
+            error=None,
         )
 
     except HttpError as e:
@@ -369,7 +372,7 @@ async def list_gmail_filters(
 
         # Return structured error response
         return GmailFiltersResponse(
-            filters=[], count=0, userEmail=user_google_email, error=error_msg
+            filters=[], count=0, userEmail=user_google_email or "", error=error_msg
         )
 
     except Exception as e:
@@ -378,7 +381,7 @@ async def list_gmail_filters(
         return GmailFiltersResponse(
             filters=[],
             count=0,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 
@@ -831,7 +834,7 @@ async def get_gmail_filter(
             success=True,
             filter_info=filter_info,
             filter_id=filter_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except HttpError as e:
@@ -849,7 +852,7 @@ async def get_gmail_filter(
         return GetGmailFilterResponse(
             success=False,
             filter_id=filter_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=error_msg,
         )
 
@@ -858,7 +861,7 @@ async def get_gmail_filter(
         return GetGmailFilterResponse(
             success=False,
             filter_id=filter_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 
@@ -927,7 +930,7 @@ async def delete_gmail_filter(
             success=True,
             filter_id=filter_id,
             criteria_summary=criteria_summary,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
         )
 
     except HttpError as e:
@@ -945,7 +948,7 @@ async def delete_gmail_filter(
         return DeleteGmailFilterResponse(
             success=False,
             filter_id=filter_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=error_msg,
         )
 
@@ -954,7 +957,7 @@ async def delete_gmail_filter(
         return DeleteGmailFilterResponse(
             success=False,
             filter_id=filter_id,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=f"Unexpected error: {e}",
         )
 

@@ -522,7 +522,7 @@ async def list_calendars(
         return CalendarListResponse(
             calendars=calendars,
             count=len(calendars),
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             error=None,
         )
 
@@ -687,7 +687,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 timeZone=created_calendar.get("timeZone"),
                 location=created_calendar.get("location"),
                 htmlLink=html_link,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=success_message,
                 error=None,
             )
@@ -703,7 +703,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 timeZone=time_zone,
                 location=location,
                 htmlLink=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -718,7 +718,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 timeZone=time_zone,
                 location=location,
                 htmlLink=None,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -944,7 +944,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 calendarId=calendar_id,
                 timeMin=effective_time_min,
                 timeMax=effective_time_max,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=None,
             )
 
@@ -962,7 +962,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 timeMax=(
                     effective_time_max if "effective_time_max" in locals() else None
                 ),
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
         except Exception as e:
@@ -979,7 +979,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 timeMax=(
                     effective_time_max if "effective_time_max" in locals() else None
                 ),
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 error=error_msg,
             )
 
@@ -1151,7 +1151,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                             eventsCreated=[],
                             eventsFailed=[],
                             calendarId=calendar_id,
-                            userEmail=user_google_email,
+                            userEmail=user_google_email or "",
                             message=f"❌ Failed to parse event data: {str(e)}",
                             error=f"Invalid event data format: {str(e)}",
                         )
@@ -1166,7 +1166,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsCreated=[],
                     eventsFailed=[],
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"❌ Failed to parse JSON string: {str(e)}",
                     error=f"Invalid JSON format: {str(e)}",
                 )
@@ -1178,7 +1178,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsCreated=[],
                     eventsFailed=[],
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"❌ Unexpected error parsing events: {str(e)}",
                     error=f"Unexpected error: {str(e)}",
                 )
@@ -1197,7 +1197,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsCreated=[],
                     eventsFailed=[],
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="❌ No events provided for bulk creation",
                     error="No events provided",
                 )
@@ -1286,7 +1286,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsCreated=results["succeeded"],
                     eventsFailed=results["failed"],
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=confirmation_message,
                     error=(
                         None
@@ -1304,7 +1304,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsCreated=[],
                     eventsFailed=[],
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"❌ {error_msg}",
                     error=error_msg,
                 )
@@ -1330,7 +1330,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         start=start_time,
                         end=None,
                         calendarId=calendar_id,
-                        userEmail=user_google_email,
+                        userEmail=user_google_email or "",
                         message=f"❌ Invalid duration: {e}",
                         error=str(e),
                     )
@@ -1479,7 +1479,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     start=start_time,
                     end=end_time,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=confirmation_message,
                     error=None,
                 )
@@ -1495,7 +1495,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     start=start_time,
                     end=end_time,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"❌ {error_msg}",
                     error=error_msg,
                 )
@@ -1510,7 +1510,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     start=start_time,
                     end=end_time,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"❌ {error_msg}",
                     error=error_msg,
                 )
@@ -1527,7 +1527,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 start=None,
                 end=None,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -1667,7 +1667,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         summary=summary,
                         htmlLink=None,
                         calendarId=calendar_id,
-                        userEmail=user_google_email,
+                        userEmail=user_google_email or "",
                         fieldsModified=[],
                         message=f"❌ Invalid duration: {e}",
                         error=str(e),
@@ -1740,7 +1740,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     summary=None,
                     htmlLink=None,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     fieldsModified=[],
                     message=f"❌ {message}",
                     error=message,
@@ -1773,7 +1773,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                         summary=summary,
                         htmlLink=None,
                         calendarId=calendar_id,
-                        userEmail=user_google_email,
+                        userEmail=user_google_email or "",
                         fieldsModified=[],
                         message=f"❌ {message}",
                         error=message,
@@ -1803,7 +1803,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 summary=updated_event.get("summary", summary),
                 htmlLink=link,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 fieldsModified=fields_modified,
                 message=confirmation_message,
                 error=None,
@@ -1818,7 +1818,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 summary=summary,
                 htmlLink=None,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 fieldsModified=[],
                 message=f"❌ {error_msg}",
                 error=error_msg,
@@ -1832,7 +1832,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 summary=summary,
                 htmlLink=None,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 fieldsModified=[],
                 message=f"❌ {error_msg}",
                 error=error_msg,
@@ -1921,7 +1921,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 eventsFailed=[],
                 totalProcessed=0,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="❌ No event IDs provided for deletion",
                 error="No event IDs provided",
             )
@@ -1982,7 +1982,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                             ],
                             totalProcessed=1,
                             calendarId=calendar_id,
-                            userEmail=user_google_email,
+                            userEmail=user_google_email or "",
                             message=f"❌ {message}",
                             error=message,
                         )
@@ -2006,7 +2006,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsFailed=[],
                     totalProcessed=1,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=confirmation_message,
                     error=None,
                 )
@@ -2066,7 +2066,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     eventsFailed=results["failed"],
                     totalProcessed=total_count,
                     calendarId=calendar_id,
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=confirmation_message,
                     error=(
                         None
@@ -2084,7 +2084,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 eventsFailed=[],
                 totalProcessed=0,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -2097,7 +2097,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 eventsFailed=[],
                 totalProcessed=0,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -2362,7 +2362,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 success=True,
                 operation=operation,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 totalFound=len(all_events),
                 totalMatched=len(filtered_events),
                 totalProcessed=(
@@ -2390,7 +2390,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 success=False,
                 operation=operation,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 totalFound=0,
                 totalMatched=0,
                 totalProcessed=0,
@@ -2645,7 +2645,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 success=(len(failed_copies) == 0),
                 sourceCalendarId=source_calendar_id,
                 targetCalendarId=target_calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 totalFound=len(source_events),
                 totalCopied=len(copied_events),
                 totalDeleted=deleted_count,
@@ -2665,7 +2665,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 success=False,
                 sourceCalendarId=source_calendar_id,
                 targetCalendarId=target_calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 totalFound=0,
                 totalCopied=0,
                 totalDeleted=0,
@@ -2791,7 +2791,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 attendees=attendee_emails,
                 attachments=event.get("attachments"),
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"Successfully retrieved event '{event.get('summary', 'No Title')}' (ID: {event_id})",
                 error=None,
             )
@@ -2816,7 +2816,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 attendees=None,
                 attachments=None,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
@@ -2840,7 +2840,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 attendees=None,
                 attachments=None,
                 calendarId=calendar_id,
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )

@@ -29,6 +29,7 @@
 - [Service Capabilities](#-service-capabilities)
 - [Middleware Architecture](#-middleware-architecture)
 - [Tool Management Dashboard](#️-tool-management-dashboard)
+- [Gmail Draft Preview Card](#-gmail-draft-preview-card)
 - [Template System](#-template-system)
 - [Resource Discovery](#-resource-discovery)
 - [Testing Framework](#-testing-framework)
@@ -169,6 +170,14 @@ All environment variables are **optional** — the server starts with sensible d
 | `SKILLS_DIRECTORY` | `~/.claude/skills` | Directory for generated skill documents |
 | `RESPONSE_LIMIT_MAX_SIZE` | `500000` | Max tool response size in bytes (0 = disabled) |
 | `RESPONSE_LIMIT_TOOLS` | _(empty)_ | Comma-separated tool names to limit (empty = all) |
+
+**Gmail Draft Preview Card:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DRAFT_PREVIEW_UI_GATING` | `true` | Send a compact text summary instead of the card to clients showing no sign of MCP UI support |
+| `DRAFT_PREVIEW_UI_CLIENTS` | `claude-ai,claudeai,claude-desktop` | `clientInfo.name` fragments treated as UI-capable even without the extension |
+| `DRAFT_PREVIEW_INLINE_IMAGES` | `true` | Fetch remote email images and inline them as `data:` URIs so they render in the preview |
 
 **Qdrant Vector Database:**
 
@@ -345,7 +354,7 @@ GoogleUnlimited supports **10 Google Workspace services** with **90+ specialized
 
 | Service | Icon | Tools | Key Features | Documentation |
 |---------|------|-------|--------------|---------------|
-| **Gmail** | 📧 | 14 | Send, reply, labels, filters, search, allowlist | [`api-reference/gmail/`](documentation/api-reference/gmail/) |
+| **Gmail** | 📧 | 14 | Send, reply, labels, filters, search, allowlist, interactive draft preview card | [`api-reference/gmail/`](documentation/api-reference/gmail/) |
 | **Drive** | 📁 | 9 | Upload, download, sharing, Office docs, file management | [`api-reference/drive/`](documentation/api-reference/drive/) |
 | **Docs** | 📄 | 4 | Create, edit, format, batch operations | [`api-reference/docs/`](documentation/api-reference/docs/) |
 | **Sheets** | 📊 | 7 | Read, write, formulas, formatting | [`api-reference/sheets/`](documentation/api-reference/sheets/) |
@@ -501,6 +510,44 @@ GoogleUnlimited includes a built-in **Tool Management Dashboard** served via the
 - **Live data** — powered by `DashboardCacheMiddleware` which caches list-tool results for instant `ui://data-dashboard` resource access
 
 The dashboard is automatically wired to all list tools via `wire_dashboard_to_list_tools()` — no per-tool configuration needed.
+
+### 📧 Gmail Draft Preview Card
+
+`preview_gmail_draft` returns a second MCP App: an interactive card showing a
+Gmail draft exactly as it will arrive, with **Send**, **Save** and **Discard**
+buttons and editable To/Cc/Bcc fields backed by contact autocomplete.
+
+![Gmail Draft Preview Card](documentation/gmail_draft_preview.png)
+
+```python
+# Draft and preview in one step — or pass a draft_id from draft_gmail_message
+preview_gmail_draft(subject="Q3 numbers", body="...", to="team@example.com")
+```
+
+The card renders the real MJML/HTML body in a sandboxed iframe (no scripts —
+Gmail strips those too, so a script-free preview is both safer and more
+honest). Remote images are fetched and inlined as `data:` URIs, because hosts
+build the iframe's `img-src` from declared CSP domains and scheme-only grants
+are not honoured everywhere.
+
+**Payload discipline.** A rendered view is not free: it travels in the tool
+result's `structuredContent`, and some hosts surface that to the model as well
+as to the renderer. Inlined images are therefore capped (150 KB per image,
+500 KB per preview), and the server only builds the card for clients that show
+some sign of being able to draw it — either they advertised the MCP Apps UI
+extension, or their `clientInfo.name` matches `DRAFT_PREVIEW_UI_CLIENTS`.
+Everything else gets a compact text summary, skipping the image fetch and
+contact lookup entirely.
+
+The server logs each client's identity once per session, so you can see which
+way a given host was routed:
+
+```
+[ui-gating] client=claude-ai version=2.1.0 advertises_extension=False allowlisted=True -> card
+```
+
+> 📚 Full details, including the Code Mode interaction and per-flag behaviour:
+> **[docs/GMAIL_DRAFT_APP.md](docs/GMAIL_DRAFT_APP.md)**
 
 ### 🔗 URL-Based Service Filtering (HTTP Transport)
 

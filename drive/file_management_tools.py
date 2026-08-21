@@ -241,7 +241,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     targetFolderId=target_folder_id,
                     targetFolderName=None,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=error_msg,
                     error=error_msg,
                 )
@@ -253,7 +253,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     failedCopies=0,
                     targetFolderId=target_folder_id,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=error_msg,
                     error=error_msg,
                 )
@@ -264,7 +264,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     oldName="",
                     newName="",
                     webViewLink="",
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=error_msg,
                     error=error_msg,
                 )
@@ -276,7 +276,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     failedDeletes=0,
                     permanent=permanent,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=error_msg,
                     error=error_msg,
                 )
@@ -290,7 +290,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                 targetFolderId=None,
                 targetFolderName=None,
                 results=[],
-                userEmail=user_google_email,
+                userEmail=user_google_email or "",
                 message="target_folder_id is required for move operation",
                 error="target_folder_id is required for move operation",
             )
@@ -303,7 +303,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     oldName="",
                     newName=new_name or "",
                     webViewLink="",
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="Rename operation requires exactly one file_id",
                     error="Rename operation requires exactly one file_id",
                 )
@@ -314,7 +314,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     oldName="",
                     newName="",
                     webViewLink="",
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message="new_name is required for rename operation",
                     error="new_name is required for rename operation",
                 )
@@ -362,7 +362,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     targetFolderId=target_folder_id,
                     targetFolderName=None,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"Error: {error_msg}",
                     error=error_msg,
                 )
@@ -374,7 +374,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     failedCopies=len(file_ids),
                     targetFolderId=target_folder_id,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"Error: {error_msg}",
                     error=error_msg,
                 )
@@ -385,7 +385,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     oldName="",
                     newName=new_name or "",
                     webViewLink="",
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"Error: {error_msg}",
                     error=error_msg,
                 )
@@ -397,7 +397,7 @@ def setup_file_management_tools(mcp: FastMCP) -> None:
                     failedDeletes=len(file_ids),
                     permanent=permanent,
                     results=[],
-                    userEmail=user_google_email,
+                    userEmail=user_google_email or "",
                     message=f"Error: {error_msg}",
                     error=error_msg,
                 )
@@ -515,7 +515,7 @@ async def _handle_move_operation(
         targetFolderId=target_folder_id,
         targetFolderName=target_folder_name,
         results=move_results,
-        userEmail=user_google_email,
+        userEmail=user_google_email or "",
         message=f"Move operation completed. Files processed: {len(file_ids)}, Successfully moved: {successful_moves}, Failed: {failed_moves}",
         error=None,
     )
@@ -609,7 +609,7 @@ async def _handle_copy_operation(
         failedCopies=failed_copies,
         targetFolderId=target_folder_id,
         results=copy_results,
-        userEmail=user_google_email,
+        userEmail=user_google_email or "",
         message=f"Copy operation completed. Files processed: {len(file_ids)}, Successfully copied: {successful_copies}, Failed: {failed_copies}",
         error=None,
     )
@@ -635,7 +635,7 @@ async def _handle_rename_operation(
             oldName="Unknown",
             newName=new_name,
             webViewLink="#",
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             message=f"Failed to get file metadata: {e}",
             error=str(e),
         )
@@ -659,7 +659,7 @@ async def _handle_rename_operation(
             oldName=old_name,
             newName=updated_file.get("name", new_name),
             webViewLink=updated_file.get("webViewLink", file_link),
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             message=f"Successfully renamed '{old_name}' to '{new_name}'",
             error=None,
         )
@@ -670,7 +670,7 @@ async def _handle_rename_operation(
             oldName=old_name,
             newName=new_name,
             webViewLink=file_link,
-            userEmail=user_google_email,
+            userEmail=user_google_email or "",
             message=f"Failed to rename file: {e}",
             error=str(e),
         )
@@ -751,7 +751,7 @@ async def _handle_delete_operation(
         failedDeletes=failed_deletes,
         permanent=permanent,
         results=delete_results,
-        userEmail=user_google_email,
+        userEmail=user_google_email or "",
         message=f"Delete operation completed. Files processed: {len(file_ids)}, Successfully {action}: {successful_deletes}, Failed: {failed_deletes}",
         error=None,
     )
