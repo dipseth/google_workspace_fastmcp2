@@ -740,6 +740,22 @@ def main():
             if os.getenv("FASTMCP_HTTP_HOST_ORIGIN_PROTECTION") is None:
                 run_args["host_origin_protection"] = "auto"
 
+            # Accept the minted MCP API key via X-API-Key (etc.) for clients
+            # that can't set Authorization directly (e.g. Claude Desktop).
+            # FastMCP's `middleware=` kwarg lands *inside* its auth middleware,
+            # so wrap the built app instead: Starlette's add_middleware()
+            # inserts at the outermost position, ahead of bearer auth.
+            from auth.api_key_header_middleware import ApiKeyHeaderMiddleware
+
+            _orig_http_app = mcp.http_app
+
+            def _http_app_with_api_key_header(*a, **kw):
+                app = _orig_http_app(*a, **kw)
+                app.add_middleware(ApiKeyHeaderMiddleware)
+                return app
+
+            mcp.http_app = _http_app_with_api_key_header
+
             # Run the server with appropriate transport and SSL configuration
             mcp.run(**run_args)
 
