@@ -24,6 +24,18 @@ from .core import ModuleComponent
 
 logger = setup_logger()
 
+#: Points per scroll when loading a collection back into memory at startup.
+#:
+#: Draining a collection is latency-bound, not bandwidth-bound: every scroll is
+#: a sequential round-trip and a hosted Qdrant answers in ~50-100ms. At the old
+#: batch of 100, the 10k-component models collection cost 101 trips and 6.4s of
+#: a ~17s cold start — long enough that a client launching its own server (as
+#: Claude Desktop does) gives up first. Measured against the hosted cluster:
+#: 100 → 9.3s across the three startup collections, 1000 → 3.8s, 4000 → 3.3s.
+#: Past 1000 the trips are no longer the cost, so the larger response buffer
+#: buys nothing.
+COMPONENT_SCROLL_BATCH = 1000
+
 # =============================================================================
 # STANDARD LIBRARY DETECTION
 # =============================================================================
@@ -658,7 +670,7 @@ class IndexingMixin:
             while True:
                 scroll_result = self.client.scroll(
                     collection_name=self.collection_name,
-                    limit=100,
+                    limit=COMPONENT_SCROLL_BATCH,
                     offset=offset,
                     with_payload=True,
                     with_vectors=False,
