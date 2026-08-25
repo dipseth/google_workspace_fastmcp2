@@ -73,6 +73,9 @@ class AuthMiddleware(Middleware):
 
         # Credential storage configuration
         self._storage_mode = storage_mode
+        # tool name -> does its schema accept user_google_email. Schemas are
+        # fixed at registration, so one lookup per tool for the process life.
+        self._accepts_email_cache: dict[str, bool] = {}
         self._memory_credentials: Dict[str, Credentials] = {}
         self._encryption_key = encryption_key
 
@@ -2963,6 +2966,42 @@ class AuthMiddleware(Middleware):
         except Exception as e:
             logger.debug(f"Failed to send identity-changed notifications: {e}")
 
+    async def _tool_accepts_email(
+        self, context: MiddlewareContext, tool_name: str
+    ) -> bool:
+        """Whether *tool_name* declares ``user_google_email``.
+
+        Injecting the parameter into a tool that does not declare it makes
+        Pydantic reject the call outright ("Unexpected keyword argument"),
+        which silently makes every no-argument tool unreachable — the
+        ``_CODE_MODE_TOOLS`` list below is that same bug, patched by name.
+
+        Returns True when the schema cannot be read, so a lookup failure
+        preserves the existing behaviour rather than stripping the parameter
+        from the many tools that need it.
+        """
+        cached = self._accepts_email_cache.get(tool_name)
+        if cached is not None:
+            return cached
+
+        accepts = True
+        try:
+            fastmcp_context = getattr(context, "fastmcp_context", None)
+            server = getattr(fastmcp_context, "fastmcp", None)
+            if server is not None:
+                tool = await server.get_tool(tool_name)
+                schema = getattr(tool, "parameters", None) or {}
+                properties = schema.get("properties")
+                if isinstance(properties, dict):
+                    accepts = "user_google_email" in properties or bool(
+                        schema.get("additionalProperties")
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Could not read schema for {tool_name}: {exc}")
+
+        self._accepts_email_cache[tool_name] = accepts
+        return accepts
+
     async def _auto_inject_email_parameter(
         self, context: MiddlewareContext, user_email: str
     ) -> None:
@@ -2980,6 +3019,14 @@ class AuthMiddleware(Middleware):
         try:
             # Skip injection for CodeMode meta-tools (strict Pydantic schemas)
             if context.message.name in self._CODE_MODE_TOOLS:
+                return
+
+            # ...and for anything else whose schema has no such parameter.
+            if not await self._tool_accepts_email(context, context.message.name):
+                logger.debug(
+                    f"Skipping user_google_email injection: {context.message.name} "
+                    "does not declare it"
+                )
                 return
 
             # Standard FastMCP pattern: arguments are in context.message.arguments
