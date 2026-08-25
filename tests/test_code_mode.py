@@ -863,3 +863,51 @@ class TestExecuteDoesNotReturnViewJSON:
         assert text == "Blue Crushers\nDraft r-764"
         assert "$prefab" not in text
         assert result.structured_content is None
+
+
+class TestTemplateEnvelope:
+    """Discovery tools must see the payload, not the middleware's wrapper.
+
+    The Jinja template middleware wraps every tool result as
+    {"jinjaTemplateApplied": ..., "jinjaTemplateError": ..., "result": ...}.
+    Reading fields off that envelope made `tool_activity` report 0 responses
+    against a store holding 447, and would make `fetch` report "not found"
+    for a document it actually returned.
+    """
+
+    def test_envelope_is_peeled(self):
+        from tools.code_mode import _parse_unwrapped
+
+        envelope = {
+            "jinjaTemplateApplied": False,
+            "jinjaTemplateError": None,
+            "result": {"total_responses": 447, "collection_name": "mcp_tool_responses"},
+        }
+        assert _parse_unwrapped(envelope) == {
+            "total_responses": 447,
+            "collection_name": "mcp_tool_responses",
+        }
+
+    def test_envelope_with_json_string_payload_is_parsed(self):
+        from tools.code_mode import _parse_unwrapped
+
+        envelope = {"jinjaTemplateApplied": True, "result": '{"found": true}'}
+        assert _parse_unwrapped(envelope) == {"found": True}
+
+    def test_a_tools_own_result_key_is_left_alone(self):
+        """No Jinja marker means this is the tool's own payload, not a wrapper."""
+        from tools.code_mode import _parse_unwrapped
+
+        payload = {"result": "ok", "count": 3}
+        assert _parse_unwrapped(payload) == payload
+
+    def test_json_string_input_still_parses(self):
+        from tools.code_mode import _parse_unwrapped
+
+        assert _parse_unwrapped('{"found": false}') == {"found": False}
+        assert _parse_unwrapped("not json") == "not json"
+
+    def test_unwrapped_payload_passes_through(self):
+        from tools.code_mode import _parse_unwrapped
+
+        assert _parse_unwrapped({"total_responses": 5}) == {"total_responses": 5}

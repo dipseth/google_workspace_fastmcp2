@@ -463,7 +463,7 @@ async def manage_credentials(
                 success=True,
                 action=action,
                 email=email,
-                message=f"Current storage mode: {auth_middleware.storage_mode.value}. Use 'status' action with specific email for detailed information.",
+                message=f"Current storage mode: {auth_middleware._storage_mode.value}. Use 'status' action with specific email for detailed information.",
             )
 
         elif action == "delete":

@@ -390,14 +390,41 @@ def _prefab_plain_text(value: Any) -> str | None:
     return "\n".join(lines) or None
 
 
+def _strip_template_envelope(value: Any) -> Any:
+    """Peel the template middleware's wrapper off a tool result.
+
+    The Jinja template middleware returns every result as
+    ``{"jinjaTemplateApplied": ..., "jinjaTemplateError": ..., "result": ...}``.
+    Discovery tools read their fields off the payload directly, so without
+    this they see an envelope with none of the keys they want — reporting 0
+    responses over a store holding hundreds, or "not found" for a document
+    that was returned.
+
+    Only unwraps when a Jinja marker is present, so a tool with a legitimate
+    ``result`` key of its own is left alone.
+    """
+    if not isinstance(value, dict) or "result" not in value:
+        return value
+    if not any(k.startswith("jinjaTemplate") for k in value):
+        return value
+
+    inner = value["result"]
+    if isinstance(inner, str):
+        try:
+            return json.loads(inner)
+        except (json.JSONDecodeError, ValueError):
+            return inner
+    return inner
+
+
 def _parse_unwrapped(raw: dict[str, Any] | str) -> dict[str, Any] | str:
     """If *raw* is a JSON string, parse it; otherwise return as-is."""
     if isinstance(raw, str):
         try:
-            return json.loads(raw)
+            raw = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             return raw
-    return raw
+    return _strip_template_envelope(raw)
 
 
 # ---------------------------------------------------------------------------
