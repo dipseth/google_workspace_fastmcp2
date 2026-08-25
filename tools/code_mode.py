@@ -1092,7 +1092,16 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     if prefab_tool
                     else "Rendered an app card for the user."
                 )
-                return _ToolResult(content=summary, structured_content=prefab_result)
+                # The block's *own* return value is a different thing from
+                # the card, though, and dropping it loses whatever the code
+                # actually computed: an orchestration that previews a draft
+                # mid-chain would silently return the card instead of its
+                # own result. Keep it unless it is itself the view spec,
+                # which is the single-call `return await call_tool(...)` case
+                # the summary exists for.
+                own_output = None if _prefab_plain_text(raw) is not None else raw
+                content = summary if own_output in (None, "") else own_output
+                return _ToolResult(content=content, structured_content=prefab_result)
 
             def _default_view() -> Any:
                 """Fall back to a generic result card.

@@ -911,3 +911,74 @@ class TestTemplateEnvelope:
         from tools.code_mode import _parse_unwrapped
 
         assert _parse_unwrapped({"total_responses": 5}) == {"total_responses": 5}
+
+
+class TestExecuteKeepsItsOwnResult:
+    """A card rendered mid-chain must not swallow the block's return value.
+
+    `execute` captures any Prefab app a called tool returns and puts it in
+    structured_content. It used to *replace* the block's own output with a
+    "Rendered the X app card" summary, so an orchestration that previewed a
+    draft partway through silently lost its result — and its exceptions,
+    which the sandbox surfaces as the block's value.
+    """
+
+    CARD = {
+        "$prefab": {"version": "0.2"},
+        "view": {"type": "Div", "children": [{"content": "Draft card", "type": "H3"}]},
+    }
+
+    @staticmethod
+    def _server():
+        from fastmcp import FastMCP
+
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        def fake_card() -> dict:
+            """A prefab UI tool."""
+            return TestExecuteKeepsItsOwnResult.CARD
+
+        setup_code_mode(mcp)
+        return mcp
+
+    @pytest.fixture(autouse=True)
+    def _ui_capable(self, monkeypatch):
+        import tools.client_capabilities as cc
+
+        monkeypatch.setattr(cc, "client_renders_ui", lambda: True)
+
+    async def _run(self, code):
+        from fastmcp import Client
+
+        async with Client(self._server()) as client:
+            result = await client.call_tool("execute", {"code": code})
+        text = result.content[0].text if result.content else ""
+        return text, result.structured_content
+
+    @pytest.mark.asyncio
+    async def test_block_result_survives_a_card_call(self):
+        text, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn {'my': 'value', 'n': 42}"
+        )
+        assert "value" in text and "42" in text
+        assert structured and "view" in structured, "card still rendered for the user"
+
+    @pytest.mark.asyncio
+    async def test_returning_the_card_itself_is_still_summarized(self):
+        """The view spec must not be echoed back as the block's output."""
+        text, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn r"
+        )
+        assert "$prefab" not in text
+        assert "app card" in text
+        assert structured and "view" in structured
+
+    @pytest.mark.asyncio
+    async def test_errors_are_not_swallowed_by_the_card(self):
+        text, _ = await self._run(
+            "r = await call_tool('fake_card', {})\nraise ValueError('boom')"
+        )
+        assert "boom" in text
