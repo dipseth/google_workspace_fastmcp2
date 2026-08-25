@@ -390,6 +390,43 @@ def _prefab_plain_text(value: Any) -> str | None:
     return "\n".join(lines) or None
 
 
+def _fold_block_output_into_card(
+    card_spec: dict[str, Any],
+    own_output: Any,
+    called_tools: list[str] | None = None,
+) -> dict[str, Any]:
+    """Draw the block's own return value below the card it rendered.
+
+    When a tool called mid-block returns a Prefab app, ``execute`` sends the
+    card in ``structuredContent`` and the block's output as the result text.
+    A host that draws the card shows *only* the card — Claude Desktop does —
+    so the value the code actually computed reaches the model and never the
+    person watching. Append it as a second section so both see the same thing.
+
+    Returns *card_spec* unchanged when there is nothing to add or the view
+    cannot take another child.
+    """
+    if own_output in (None, ""):
+        return card_spec
+
+    view = card_spec.get("view")
+    if not isinstance(view, dict) or not isinstance(view.get("children"), list):
+        return card_spec
+
+    try:
+        from tools.ui_apps import build_block_output_node
+
+        node = build_block_output_node(own_output, called_tools or [])
+    except Exception:
+        node = None
+    if node is None:
+        return card_spec
+
+    # Copy rather than mutate: *card_spec* is the called tool's own
+    # structured_content, which it is free to cache and hand out again.
+    return {**card_spec, "view": {**view, "children": [*view["children"], node]}}
+
+
 def _strip_template_envelope(value: Any) -> Any:
     """Peel the template middleware's wrapper off a tool result.
 
@@ -1101,7 +1138,12 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 # the summary exists for.
                 own_output = None if _prefab_plain_text(raw) is not None else raw
                 content = summary if own_output in (None, "") else own_output
-                return _ToolResult(content=content, structured_content=prefab_result)
+                return _ToolResult(
+                    content=content,
+                    structured_content=_fold_block_output_into_card(
+                        prefab_result, own_output, called_tools
+                    ),
+                )
 
             def _default_view() -> Any:
                 """Fall back to a generic result card.

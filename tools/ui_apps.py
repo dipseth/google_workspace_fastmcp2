@@ -1312,20 +1312,19 @@ def create_tool_management_app(mcp: FastMCP):
 _CODE_MODE_VIEW_MAX_CHARS = 20_000
 
 
-def build_default_execute_view(raw, tool_names: list[str] | None = None):
-    """Render an ordinary ``execute`` result as a Prefab card.
+def _build_result_card(
+    raw,
+    tool_names: list[str] | None = None,
+    *,
+    heading: str = "Result",
+    css_class: str = "max-w-3xl",
+):
+    """Build the card that shows an ``execute`` block's return value.
 
-    Under Code Mode every tool call is funnelled through ``execute``, whose
-    ``meta.ui.resourceUri`` points at the Code Mode renderer. That makes the
-    host draw *something* for every call, so plain results need a view of their
-    own — otherwise they render as an empty panel.
-
-    Returns ``None`` when prefab-ui is unavailable or the result cannot be
-    represented, in which case the caller should return the raw result
-    unchanged.
+    Returns the card component, or ``None`` when prefab-ui is unavailable or
+    the value cannot be rendered.
     """
     try:
-        from prefab_ui.app import PrefabApp
         from prefab_ui.components import (
             H3,
             Badge,
@@ -1359,9 +1358,9 @@ def build_default_execute_view(raw, tool_names: list[str] | None = None):
     called = [t for t in (tool_names or []) if t]
 
     try:
-        with Card(css_class="max-w-3xl") as view:
+        with Card(css_class=css_class) as view:
             with CardHeader(), Row(gap=2, css_class="items-center justify-between"):
-                H3("Result")
+                H3(heading)
                 Badge(language.upper(), variant="secondary")
             with CardContent(), Column(gap=2):
                 if called:
@@ -1373,6 +1372,56 @@ def build_default_execute_view(raw, tool_names: list[str] | None = None):
                         "returned to the model.",
                         css_class="text-xs",
                     )
+        return view
+    except Exception:
+        return None
+
+
+def build_default_execute_view(raw, tool_names: list[str] | None = None):
+    """Render an ordinary ``execute`` result as a Prefab card.
+
+    Under Code Mode every tool call is funnelled through ``execute``, whose
+    ``meta.ui.resourceUri`` points at the Code Mode renderer. That makes the
+    host draw *something* for every call, so plain results need a view of their
+    own — otherwise they render as an empty panel.
+
+    Returns ``None`` when prefab-ui is unavailable or the result cannot be
+    represented, in which case the caller should return the raw result
+    unchanged.
+    """
+    try:
+        from prefab_ui.app import PrefabApp
+    except ImportError:
+        return None
+
+    view = _build_result_card(raw, tool_names)
+    if view is None:
+        return None
+    try:
         return PrefabApp(view=view)
+    except Exception:
+        return None
+
+
+def build_block_output_node(raw, tool_names: list[str] | None = None):
+    """Serialize a block's return value as a card node, ready to append.
+
+    Unlike :func:`build_default_execute_view` this returns the bare serialized
+    component rather than a ``PrefabApp`` — the caller splices it into a view
+    that already exists, so a second app root would only nest one theme
+    container inside another.
+
+    Returns ``None`` when the value cannot be rendered.
+    """
+    card = _build_result_card(
+        raw,
+        tool_names,
+        heading="Block result",
+        css_class="max-w-3xl mt-4",
+    )
+    if card is None:
+        return None
+    try:
+        return card.to_json()
     except Exception:
         return None

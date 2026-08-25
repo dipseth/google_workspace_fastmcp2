@@ -17,6 +17,9 @@ Two layers of tests:
        serialises lambda objects to strings before passing them to the helper.
 """
 
+import copy
+import json
+
 import pytest
 import pytest_asyncio
 
@@ -982,3 +985,40 @@ class TestExecuteKeepsItsOwnResult:
             "r = await call_tool('fake_card', {})\nraise ValueError('boom')"
         )
         assert "boom" in text
+
+    @pytest.mark.asyncio
+    async def test_block_result_is_drawn_below_the_card(self):
+        """A host that draws only the card must still show the block's output.
+
+        Keeping the value in the result text is enough for the model and
+        invisible to the user, so it has to reach the view as well.
+        """
+        _, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn {'my': 'value', 'n': 42}"
+        )
+        children = structured["view"]["children"]
+        assert len(children) == 2, "card's own children plus the block result"
+        assert children[0] == self.CARD["view"]["children"][0], "card left intact"
+        assert "42" in json.dumps(children[1])
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_appended_when_the_block_returns_the_card(self):
+        _, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn r"
+        )
+        assert structured["view"]["children"] == self.CARD["view"]["children"]
+
+    def test_folding_does_not_mutate_the_tools_own_spec(self):
+        from tools.code_mode import _fold_block_output_into_card
+
+        spec = copy.deepcopy(self.CARD)
+        folded = _fold_block_output_into_card(spec, {"n": 1}, ["fake_card"])
+
+        assert spec == self.CARD, "the called tool may cache and reuse this"
+        assert len(folded["view"]["children"]) == 2
+
+    def test_a_view_that_cannot_take_a_child_is_left_alone(self):
+        from tools.code_mode import _fold_block_output_into_card
+
+        spec = {"$prefab": {"version": "0.2"}, "view": {"type": "H3"}}
+        assert _fold_block_output_into_card(spec, {"n": 1}) == spec
