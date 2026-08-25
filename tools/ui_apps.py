@@ -541,6 +541,18 @@ _DASHBOARD_CONFIGS: dict = {
             {"key": "color", "label": "Color", "type": "color"},
         ],
     },
+    "manage_tools": {
+        "itemsField": "toolList",
+        "title": "Tool Management",
+        "icon": "\U0001f527",
+        "columns": [
+            {"key": "name", "label": "Tool", "type": "primary"},
+            {"key": "service", "label": "Service", "type": "badge"},
+            {"key": "enabled", "label": "Enabled", "type": "boolean"},
+            {"key": "sessionDisabled", "label": "Session-off", "type": "boolean"},
+            {"key": "description", "label": "Description", "type": "text"},
+        ],
+    },
     "list_gmail_filters": {
         "itemsField": "filters",
         "title": "Gmail Filters",
@@ -1076,7 +1088,11 @@ def _scalarize_cell(value, col_type: str | None = None):
     ``{textColor, backgroundColor}`` and Gmail filters carry nested
     ``criteria``/``action`` dicts, so this is not an edge case.
     """
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, bool):
+        # Ahead of the int check — bool is an int, and "True"/"False" reads
+        # worse in a table than a plain answer to the column's question.
+        return "Yes" if value else "No"
+    if value is None or isinstance(value, (str, int, float)):
         return value
     if isinstance(value, dict):
         if col_type == "color":
@@ -1240,6 +1256,12 @@ def wire_dashboard_to_list_tools(mcp: FastMCP) -> int:
         if tool_name not in _DASHBOARD_CONFIGS:
             continue
         component.meta = component.meta or {}
+        if "ui" in component.meta:
+            # The tool already points at a renderer of its own — manage_tools
+            # has a purpose-built HTML dashboard. Registering it above still
+            # gets its result cached, so Code Mode can draw the Prefab card,
+            # but a direct caller keeps the richer page.
+            continue
         component.meta["ui"] = app_config_to_meta_dict(
             AppConfig(resource_uri=f"ui://data-dashboard/{tool_name}")
         )

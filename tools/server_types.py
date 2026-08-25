@@ -183,6 +183,17 @@ class ToolInfo(BaseModel):
     isProtected: bool = Field(
         ..., description="Whether the tool is protected from being disabled"
     )
+    sessionDisabled: bool = Field(
+        False,
+        description=(
+            "Whether the tool is disabled for THIS session. Distinct from "
+            "`enabled`, which reports global state: a session-disabled tool is "
+            "globally enabled but will refuse to run for this caller."
+        ),
+    )
+    service: Optional[str] = Field(
+        None, description="Google Workspace service the tool belongs to"
+    )
     description: Optional[str] = Field(
         None, description="Tool description if available"
     )
