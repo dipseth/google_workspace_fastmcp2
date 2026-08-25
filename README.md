@@ -295,7 +295,7 @@ claude mcp add --transport http google-workspace https://localhost:8002/mcp
 }
 ```
 
-**Claude Desktop (bridge to a server you already run)** — recommended when you keep a local HTTP server up for development. Every `command` entry starts its *own* copy of the server, and Cowork / Code sessions start a second one on top of that; when startup is slow (Qdrant hydration on a cold cache runs ~15s) the client gives up first and reports `Couldn't start this server … Request timed out`. Bridging to the already-warm server connects in about a second instead:
+**Claude Desktop (bridge to a server you already run)** — recommended when you keep a local HTTP server up for development. Every `command` entry starts its *own* copy of the server, and Cowork / Code sessions start a second one on top of that; when startup is slow (Qdrant hydration on a cold cache runs ~12s) the client gives up first and reports `Couldn't start this server … Request timed out`. Bridging to the already-warm server connects in about a second instead:
 
 ```json
 {
