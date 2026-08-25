@@ -1088,6 +1088,49 @@ def _scalarize_cell(value, col_type: str | None = None):
     return str(value)
 
 
+def _color_swatch(value: dict):
+    """Draw a Gmail label colour as the chip Gmail itself draws.
+
+    A cell whose value serializes to a component node is rendered as a
+    component rather than stringified, so the colour can be *shown* instead of
+    described. The chip carries the label's real background and text colours
+    and prints the background hex, so the preview and the value are both there.
+
+    Returns ``None`` when there is no colour to draw, leaving the caller's
+    text fallback in place.
+    """
+    try:
+        from prefab_ui.components import Span
+    except ImportError:
+        return None
+
+    background = value.get("backgroundColor")
+    foreground = value.get("textColor")
+    if not background and not foreground:
+        return None
+
+    style = {}
+    if background:
+        style["backgroundColor"] = background
+    if foreground:
+        style["color"] = foreground
+
+    return Span(
+        background or foreground,
+        css_class="inline-block rounded px-2 py-0.5 text-xs font-medium",
+        style=style,
+    )
+
+
+def _cell_value(value, col_type: str | None = None):
+    """Return what a cell should render as — a component, or plain text."""
+    if col_type == "color" and isinstance(value, dict):
+        swatch = _color_swatch(value)
+        if swatch is not None:
+            return swatch
+    return _scalarize_cell(value, col_type)
+
+
 def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict):
     """Build a Prefab DataTable dashboard from cached tool data.
 
@@ -1107,6 +1150,9 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     icon = config.get("icon", "")
     columns_config = config.get("columns", [])
 
+    # Built before the `with` block below on purpose: a component created while
+    # a container is open auto-attaches to it, so a swatch would render twice.
+    #
     # The renderer prints every cell with String(value), so a dict cell arrives
     # as the literal "[object Object]" — which is what a Gmail label's
     # {textColor, backgroundColor} and a filter's criteria/action did. The
@@ -1115,17 +1161,23 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     if columns_config:
         keys = [(c["key"], c.get("type")) for c in columns_config]
         rows = [
-            {key: _scalarize_cell(item.get(key), col_type) for key, col_type in keys}
+            {key: _cell_value(item.get(key), col_type) for key, col_type in keys}
             for item in items
             if isinstance(item, dict)
         ]
     else:
         rows = items
 
-    # Map _DASHBOARD_CONFIGS column specs to DataTableColumn
+    # Map _DASHBOARD_CONFIGS column specs to DataTableColumn. A component cell
+    # is an object to the table, so it can be neither sorted nor searched —
+    # advertising it as sortable would only render a control that does nothing.
     dt_columns = (
         [
-            DataTableColumn(key=c["key"], header=c["label"], sortable=True)
+            DataTableColumn(
+                key=c["key"],
+                header=c["label"],
+                sortable=c.get("type") != "color",
+            )
             for c in columns_config
         ]
         if columns_config

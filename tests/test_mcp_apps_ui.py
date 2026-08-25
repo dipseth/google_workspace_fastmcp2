@@ -137,7 +137,8 @@ class TestDashboardCellsAreScalar:
         view = app.to_json()["view"]
         return view["children"][0]["children"][1]["rows"]
 
-    def test_label_colour_renders_as_a_hex_string(self):
+    def test_label_colour_is_drawn_not_described(self):
+        """A component-valued cell is rendered as a component, so show the colour."""
         rows = self._rows(
             "list_gmail_labels",
             {
@@ -156,7 +157,36 @@ class TestDashboardCellsAreScalar:
                 ]
             },
         )
-        assert rows[0]["color"] == "#ac2b16"
+        cell = rows[0]["color"]
+        assert cell["type"] == "Span", "must be a component node, not a string"
+        assert cell["style"] == {
+            "backgroundColor": "#ac2b16",
+            "color": "#ffffff",
+        }
+        assert cell["content"] == "#ac2b16", "the hex stays readable"
+
+    def test_a_colour_column_is_not_advertised_as_sortable(self):
+        """A component cell is an object to the table — sorting it does nothing."""
+        from tools.ui_apps import (
+            _build_prefab_data_dashboard,
+            get_data_dashboard_config,
+        )
+
+        app = _build_prefab_data_dashboard(
+            "list_gmail_labels",
+            {"labels": [{"name": "x", "color": None}]},
+            get_data_dashboard_config("list_gmail_labels"),
+        )
+        columns = app.to_json()["view"]["children"][0]["children"][1]["columns"]
+        by_key = {c["key"]: c.get("sortable") for c in columns}
+        assert by_key["color"] is False
+        assert by_key["name"] is True
+
+    def test_a_colourless_swatch_falls_back_to_text(self):
+        from tools.ui_apps import _cell_value
+
+        assert _cell_value({}, "color") is None
+        assert _cell_value({"backgroundColor": "#fff"}, "color").type == "Span"
 
     def test_a_missing_colour_stays_empty(self):
         rows = self._rows(
