@@ -113,3 +113,102 @@ async def test_resource_ui_meta(mcp_with_ui):
         assert dashboard.meta is not None
         ui = dashboard.meta.get("ui", {})
         assert ui.get("prefersBorder") is True
+
+
+class TestDashboardCellsAreScalar:
+    """The renderer draws each cell with String(value).
+
+    A dict cell therefore arrives as the literal "[object Object]" — which is
+    what Gmail label colours ({textColor, backgroundColor}) and Gmail filter
+    criteria/action did. The "type" in _DASHBOARD_CONFIGS is understood only by
+    our own HTML dashboard, so the Prefab path has to flatten these itself.
+    """
+
+    @staticmethod
+    def _rows(tool_name, data):
+        from tools.ui_apps import (
+            _build_prefab_data_dashboard,
+            get_data_dashboard_config,
+        )
+
+        app = _build_prefab_data_dashboard(
+            tool_name, data, get_data_dashboard_config(tool_name)
+        )
+        view = app.to_json()["view"]
+        return view["children"][0]["children"][1]["rows"]
+
+    def test_label_colour_renders_as_a_hex_string(self):
+        rows = self._rows(
+            "list_gmail_labels",
+            {
+                "labels": [
+                    {
+                        "name": "junk",
+                        "type": "user",
+                        "color": {
+                            "textColor": "#ffffff",
+                            "backgroundColor": "#ac2b16",
+                        },
+                        "messagesTotal": 118,
+                        "messagesUnread": 2,
+                        "threadsTotal": 117,
+                    }
+                ]
+            },
+        )
+        assert rows[0]["color"] == "#ac2b16"
+
+    def test_a_missing_colour_stays_empty(self):
+        rows = self._rows(
+            "list_gmail_labels",
+            {"labels": [{"name": "CHAT", "type": "system", "color": None}]},
+        )
+        assert rows[0]["color"] is None
+
+    def test_nested_filter_fields_are_flattened(self):
+        rows = self._rows(
+            "list_gmail_filters",
+            {
+                "filters": [
+                    {
+                        "id": "f1",
+                        "criteria": {"from": "a@b.com"},
+                        "action": {"addLabelIds": ["Label_1"]},
+                    }
+                ]
+            },
+        )
+        assert rows[0]["criteria"] == "from: a@b.com"
+        assert "Label_1" in rows[0]["action"]
+
+    def test_rows_carry_only_the_displayed_columns(self):
+        """Undisplayed keys ride to the model in structuredContent for nothing."""
+        rows = self._rows(
+            "list_gmail_labels",
+            {
+                "labels": [
+                    {
+                        "name": "CHAT",
+                        "type": "system",
+                        "id": "CHAT",
+                        "threadsUnread": 0,
+                        "messageListVisibility": "hide",
+                    }
+                ]
+            },
+        )
+        assert set(rows[0]) == {
+            "name",
+            "type",
+            "messagesTotal",
+            "messagesUnread",
+            "threadsTotal",
+            "color",
+        }
+
+    def test_every_cell_is_renderable(self):
+        from tools.ui_apps import _scalarize_cell
+
+        for value in ({"a": 1}, ["x", "y"], ("x",), {"a": None}):
+            out = _scalarize_cell(value)
+            assert out is None or isinstance(out, str), value

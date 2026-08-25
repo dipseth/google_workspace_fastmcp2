@@ -1068,6 +1068,26 @@ def get_data_dashboard_config(tool_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _scalarize_cell(value, col_type: str | None = None):
+    """Flatten a cell value the Prefab renderer would otherwise mangle.
+
+    Cells are drawn with ``String(value)``, so anything that is not already a
+    string or a number renders as ``[object Object]``. Gmail label colours are
+    ``{textColor, backgroundColor}`` and Gmail filters carry nested
+    ``criteria``/``action`` dicts, so this is not an edge case.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        if col_type == "color":
+            return value.get("backgroundColor") or value.get("textColor") or None
+        parts = [f"{k}: {v}" for k, v in value.items() if v is not None]
+        return ", ".join(parts) or None
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value) or None
+    return str(value)
+
+
 def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict):
     """Build a Prefab DataTable dashboard from cached tool data.
 
@@ -1087,6 +1107,21 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     icon = config.get("icon", "")
     columns_config = config.get("columns", [])
 
+    # The renderer prints every cell with String(value), so a dict cell arrives
+    # as the literal "[object Object]" — which is what a Gmail label's
+    # {textColor, backgroundColor} and a filter's criteria/action did. The
+    # column "type" in _DASHBOARD_CONFIGS is only understood by our own HTML
+    # dashboard, so flatten here instead.
+    if columns_config:
+        keys = [(c["key"], c.get("type")) for c in columns_config]
+        rows = [
+            {key: _scalarize_cell(item.get(key), col_type) for key, col_type in keys}
+            for item in items
+            if isinstance(item, dict)
+        ]
+    else:
+        rows = items
+
     # Map _DASHBOARD_CONFIGS column specs to DataTableColumn
     dt_columns = (
         [
@@ -1100,7 +1135,7 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     with Column(gap=4, css_class="p-6") as view:
         Heading(f"{icon} {title}" if icon else title)
         DataTable(
-            rows=items,
+            rows=rows,
             columns=dt_columns,
             search=True,
             paginated=True,
