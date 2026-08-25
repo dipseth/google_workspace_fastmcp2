@@ -811,3 +811,55 @@ class TestPrefabPlainText:
 
         spec = {"$prefab": {"version": "0.2"}, "view": {"type": "Div", "children": []}}
         assert _prefab_plain_text(spec) is None
+
+
+class TestExecuteDoesNotReturnViewJSON:
+    """End-to-end: the gate's downgrade path through the real `execute` tool.
+
+    The unit tests above cover the flattening; this covers the wiring, which
+    is where the bug actually lived — `execute` returned an app tool's view
+    spec verbatim to a client that could not draw it.
+
+    The in-memory client reports `clientInfo.name == "mcp"`, which is not on
+    the `DRAFT_PREVIEW_UI_CLIENTS` allowlist and advertises no UI extension,
+    so it exercises the downgrade without any monkeypatching.
+    """
+
+    CARD = {
+        "$prefab": {"version": "0.2"},
+        "view": {
+            "type": "Div",
+            "children": [
+                {
+                    "type": "CardHeader",
+                    "children": [{"content": "Blue Crushers", "type": "H3"}],
+                },
+                {"content": "Draft r-764", "type": "Muted"},
+            ],
+        },
+    }
+
+    @pytest.mark.asyncio
+    async def test_app_view_spec_is_flattened_for_a_non_ui_client(self):
+        from fastmcp import Client, FastMCP
+
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        def fake_card() -> dict:
+            """An app entry tool: its return value IS the serialized view."""
+            return TestExecuteDoesNotReturnViewJSON.CARD
+
+        setup_code_mode(mcp)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "execute", {"code": "r = await call_tool('fake_card', {})\nreturn r"}
+            )
+
+        text = result.content[0].text if result.content else ""
+        assert text == "Blue Crushers\nDraft r-764"
+        assert "$prefab" not in text
+        assert result.structured_content is None
