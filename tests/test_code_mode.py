@@ -714,3 +714,100 @@ class TestEdgeCases:
         from tools.code_mode import EXECUTE_DESCRIPTION
 
         assert "gather_tools" in EXECUTE_DESCRIPTION
+
+
+# =============================================================================
+# Prefab view specs handed to clients that cannot draw them
+# =============================================================================
+
+
+class TestPrefabPlainText:
+    """`execute` must not return layout JSON to a non-UI client.
+
+    An MCP App entry tool (``preview_gmail_draft``) returns its serialized
+    view as the tool result. When the UI gate says the client cannot draw a
+    card, that JSON is pure cost — the model cannot act on it and nobody
+    renders it — so it is flattened back to the text the card would show.
+    """
+
+    @staticmethod
+    def _draft_card():
+        """The Gmail draft text-only fallback, as `_text_only_app` emits it."""
+        return {
+            "$prefab": {"version": "0.2"},
+            "view": {
+                "cssClass": "pf-app-root",
+                "type": "Div",
+                "children": [
+                    {
+                        "type": "Card",
+                        "children": [
+                            {
+                                "type": "CardHeader",
+                                "children": [
+                                    {"content": "Blue Crushers", "type": "H3"}
+                                ],
+                            },
+                            {
+                                "type": "CardContent",
+                                "children": [
+                                    {
+                                        "cssClass": "gap-1",
+                                        "type": "Column",
+                                        "children": [
+                                            {"content": "Draft r-764", "type": "Muted"},
+                                            {
+                                                "content": "To: julia@example.com",
+                                                "type": "Muted",
+                                            },
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+        }
+
+    def test_view_spec_becomes_its_visible_text(self):
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text(self._draft_card()) == (
+            "Blue Crushers\nDraft r-764\nTo: julia@example.com"
+        )
+
+    def test_ordinary_tool_results_pass_through_untouched(self):
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text({"messages": [{"id": "1"}]}) is None
+        assert _prefab_plain_text("plain string") is None
+        assert _prefab_plain_text(None) is None
+
+    def test_dict_with_a_view_key_but_no_prefab_marker_is_not_a_card(self):
+        """A tool returning its own `view` field must not be mangled."""
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text({"view": "grid", "content": "hi"}) is None
+
+    def test_state_bindings_are_skipped(self):
+        """A binding serializes as a dict; it has no text until resolved."""
+        from tools.code_mode import _prefab_plain_text
+
+        spec = {
+            "$prefab": {"version": "0.2"},
+            "view": {
+                "type": "Div",
+                "children": [
+                    {"content": {"$state": "status"}, "type": "Text"},
+                    {"content": "  Send  ", "type": "Button"},
+                ],
+            },
+        }
+        assert _prefab_plain_text(spec) == "Send"
+
+    def test_a_card_with_no_text_falls_back_rather_than_erasing_the_result(self):
+        from tools.code_mode import _prefab_plain_text
+
+        spec = {"$prefab": {"version": "0.2"}, "view": {"type": "Div", "children": []}}
+        assert _prefab_plain_text(spec) is None

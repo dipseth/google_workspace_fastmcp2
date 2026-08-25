@@ -958,10 +958,16 @@ def setup_server_tools(mcp: FastMCP) -> None:
             # Report what the handshake actually revealed about UI support —
             # the extension or a known client name — rather than the gate's
             # verdict, so this stays diagnostic when gating is switched off.
+            # Report the name too: when the gate downgrades a card, this is
+            # the only place to see what the host actually calls itself
+            # without shell access to the server log.
+            client_name = None
             try:
                 from tools.client_capabilities import detect_ui_support
 
-                client_supports_ui = detect_ui_support().renders
+                support = detect_ui_support()
+                client_supports_ui = support.renders
+                client_name = support.name
             except Exception:
                 client_supports_ui = False
 
@@ -976,6 +982,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 protectedTools=list(protected_tools_set),
                 sessionState=session_state,
                 clientSupportsUI=client_supports_ui,
+                clientName=client_name,
                 message=f"Listed {len(tool_list)} tools ({enabled_count} enabled, {disabled_count} disabled{session_info})",
             )
 

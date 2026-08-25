@@ -356,6 +356,40 @@ def _unwrap_result(result: ToolResult) -> dict[str, Any] | str:
     return "\n".join(parts)
 
 
+def _prefab_plain_text(value: Any) -> str | None:
+    """Flatten a serialized Prefab view to the text it displays.
+
+    An MCP App entry tool's return value *is* its serialized view, so handing
+    that back to a client that cannot draw it costs the model a faceful of
+    layout JSON it can neither act on nor show anyone. Keep the words, drop
+    the tree.
+
+    Returns ``None`` when *value* is not a view spec, so any tool result can
+    be passed through and only view specs are rewritten.
+    """
+    if not isinstance(value, dict) or "$prefab" not in value or "view" not in value:
+        return None
+
+    lines: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        # Only literal strings: a state binding serializes as a dict and has
+        # no text to show until the client resolves it.
+        content = node.get("content")
+        if isinstance(content, str) and content.strip():
+            lines.append(content.strip())
+        _walk(node.get("children"))
+
+    _walk(value.get("view"))
+    return "\n".join(lines) or None
+
+
 def _parse_unwrapped(raw: dict[str, Any] | str) -> dict[str, Any] | str:
     """If *raw* is a JSON string, parse it; otherwise return as-is."""
     if isinstance(raw, str):
@@ -1012,7 +1046,11 @@ def setup_code_mode(mcp: FastMCP) -> None:
             from tools.client_capabilities import client_renders_ui
 
             if not client_renders_ui():
-                return raw
+                # ...except when the raw result *is* a view spec, which is
+                # exactly what an app entry tool returns. Dumping that JSON
+                # would flood the model with layout nobody will draw, so send
+                # the text the card would have shown instead.
+                return _prefab_plain_text(raw) or raw
 
             # A tool that returned its own Prefab app wins over a synthesized
             # dashboard — it is a purpose-built UI, not a generic table.
