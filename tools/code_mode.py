@@ -356,14 +356,75 @@ def _unwrap_result(result: ToolResult) -> dict[str, Any] | str:
     return "\n".join(parts)
 
 
+def _prefab_plain_text(value: Any) -> str | None:
+    """Flatten a serialized Prefab view to the text it displays.
+
+    An MCP App entry tool's return value *is* its serialized view, so handing
+    that back to a client that cannot draw it costs the model a faceful of
+    layout JSON it can neither act on nor show anyone. Keep the words, drop
+    the tree.
+
+    Returns ``None`` when *value* is not a view spec, so any tool result can
+    be passed through and only view specs are rewritten.
+    """
+    if not isinstance(value, dict) or "$prefab" not in value or "view" not in value:
+        return None
+
+    lines: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        # Only literal strings: a state binding serializes as a dict and has
+        # no text to show until the client resolves it.
+        content = node.get("content")
+        if isinstance(content, str) and content.strip():
+            lines.append(content.strip())
+        _walk(node.get("children"))
+
+    _walk(value.get("view"))
+    return "\n".join(lines) or None
+
+
+def _strip_template_envelope(value: Any) -> Any:
+    """Peel the template middleware's wrapper off a tool result.
+
+    The Jinja template middleware returns every result as
+    ``{"jinjaTemplateApplied": ..., "jinjaTemplateError": ..., "result": ...}``.
+    Discovery tools read their fields off the payload directly, so without
+    this they see an envelope with none of the keys they want — reporting 0
+    responses over a store holding hundreds, or "not found" for a document
+    that was returned.
+
+    Only unwraps when a Jinja marker is present, so a tool with a legitimate
+    ``result`` key of its own is left alone.
+    """
+    if not isinstance(value, dict) or "result" not in value:
+        return value
+    if not any(k.startswith("jinjaTemplate") for k in value):
+        return value
+
+    inner = value["result"]
+    if isinstance(inner, str):
+        try:
+            return json.loads(inner)
+        except (json.JSONDecodeError, ValueError):
+            return inner
+    return inner
+
+
 def _parse_unwrapped(raw: dict[str, Any] | str) -> dict[str, Any] | str:
     """If *raw* is a JSON string, parse it; otherwise return as-is."""
     if isinstance(raw, str):
         try:
-            return json.loads(raw)
+            raw = json.loads(raw)
         except (json.JSONDecodeError, ValueError):
             return raw
-    return raw
+    return _strip_template_envelope(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +1073,11 @@ def setup_code_mode(mcp: FastMCP) -> None:
             from tools.client_capabilities import client_renders_ui
 
             if not client_renders_ui():
-                return raw
+                # ...except when the raw result *is* a view spec, which is
+                # exactly what an app entry tool returns. Dumping that JSON
+                # would flood the model with layout nobody will draw, so send
+                # the text the card would have shown instead.
+                return _prefab_plain_text(raw) or raw
 
             # A tool that returned its own Prefab app wins over a synthesized
             # dashboard — it is a purpose-built UI, not a generic table.
@@ -1027,7 +1092,16 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     if prefab_tool
                     else "Rendered an app card for the user."
                 )
-                return _ToolResult(content=summary, structured_content=prefab_result)
+                # The block's *own* return value is a different thing from
+                # the card, though, and dropping it loses whatever the code
+                # actually computed: an orchestration that previews a draft
+                # mid-chain would silently return the card instead of its
+                # own result. Keep it unless it is itself the view spec,
+                # which is the single-call `return await call_tool(...)` case
+                # the summary exists for.
+                own_output = None if _prefab_plain_text(raw) is not None else raw
+                content = summary if own_output in (None, "") else own_output
+                return _ToolResult(content=content, structured_content=prefab_result)
 
             def _default_view() -> Any:
                 """Fall back to a generic result card.

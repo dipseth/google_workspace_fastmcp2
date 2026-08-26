@@ -410,3 +410,96 @@ def test_text_only_app_keeps_the_identifying_details():
     assert "c@example.com" in payload
     assert "Plain excerpt" in payload
     assert snapshot.draft_id in payload
+
+
+class TestContactPickerScope:
+    """The contact roster must not ride along on every preview.
+
+    `_load_contacts` returns up to 60 names and addresses, which the card
+    renders as Combobox options. Those travel in structuredContent, so on a
+    draft that already has recipients they are ~59% of the payload and put
+    the user's address book in front of the model for no benefit.
+    """
+
+    class _Snapshot:
+        subject = "Preview card test"
+        draft_id = "r-1"
+        cc: list = []
+        bcc: list = []
+        from_addr = "me@example.com"
+        attachments: list = []
+
+        def __init__(self, to):
+            self.to = to
+
+    @staticmethod
+    def _card(to, contacts):
+        from gmail.draft_app import _build_draft_view
+
+        snap = TestContactPickerScope._Snapshot(to)
+        return _build_draft_view(
+            snap,
+            "me@example.com",
+            preview=("<html><body>hi</body></html>", None),
+            contacts=contacts,
+        ).to_json()
+
+    def test_roster_dominates_the_card_when_included(self):
+        import json
+
+        contacts = [
+            {"name": f"Contact Person {i}", "email": f"person{i}@company{i}.com"}
+            for i in range(60)
+        ]
+        with_c = len(json.dumps(self._card(["a@b.com"], contacts)))
+        without = len(json.dumps(self._card(["a@b.com"], [])))
+        assert with_c > without * 2, "roster should be the bulk of the payload"
+
+    def test_no_contact_options_when_roster_is_empty(self):
+        import json
+
+        card = json.dumps(self._card(["a@b.com"], []))
+        assert "ComboboxOption" not in card
+        assert "Add from contacts" not in card
+
+    @pytest.mark.asyncio
+    async def test_entry_tool_skips_the_lookup_when_recipients_exist(
+        self, draft_app_server, monkeypatch
+    ):
+        """Drive the real tool: the People API call must not happen at all."""
+        import gmail.draft_app as da
+
+        mcp, _ = draft_app_server
+        called = []
+
+        async def _spy_contacts(email, limit=60):
+            called.append(email)
+            return [{"name": "Someone", "email": "someone@example.com"}]
+
+        async def _fake_service(email):
+            return object()
+
+        async def _fake_load(service, draft_id):
+            return self._Snapshot(["already@there.com"])
+
+        monkeypatch.setattr(da, "_load_contacts", _spy_contacts)
+        monkeypatch.setattr(da, "_load_draft", _fake_load)
+        monkeypatch.setattr(da, "client_renders_ui", lambda: True)
+        monkeypatch.setattr(
+            "gmail.service._get_gmail_service_with_fallback", _fake_service
+        )
+
+        async def _preview_doc(self_):
+            return ("<html><body>hi</body></html>", None)
+
+        monkeypatch.setattr(
+            self._Snapshot, "preview_document", _preview_doc, raising=False
+        )
+
+        async with Client(mcp) as client:
+            result = await client.call_tool("preview_gmail_draft", {"draft_id": "r-1"})
+
+        card = json.dumps(result.structured_content or {})
+        assert called == [], "no People API call for a draft that has recipients"
+        assert "ComboboxOption" not in card
+        assert "already@there.com" in card

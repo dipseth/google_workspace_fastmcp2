@@ -36,7 +36,7 @@ import email.policy
 import logging
 import re
 from email.message import Message
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from config.settings import settings
 from tools.client_capabilities import client_renders_ui
@@ -1085,7 +1085,7 @@ def create_gmail_draft_app(mcp: Any = None):
         to: Optional[str] = None,
         cc: Optional[str] = None,
         bcc: Optional[str] = None,
-        content_type: str = "mixed",
+        content_type: Literal["plain", "html", "mixed"] = "mixed",
         user_google_email: UserGoogleEmail = None,
     ) -> PrefabApp:
         """Render a Gmail draft as an interactive card."""
@@ -1106,7 +1106,7 @@ def create_gmail_draft_app(mcp: Any = None):
                     body=body or "",
                     user_google_email=user_google_email,
                     to=_split_recipients(to) or None,
-                    content_type=content_type,  # type: ignore[arg-type]
+                    content_type=content_type,
                     html_body=html_body,
                     cc=_split_recipients(cc) or None,
                     bcc=_split_recipients(bcc) or None,
@@ -1136,12 +1136,20 @@ def create_gmail_draft_app(mcp: Any = None):
                     snapshot, excerpt or "(no plain-text body in this draft)"
                 )
 
-            # Preview and contacts are independent — fetch them together so the
-            # card is not gated on the slower of the two.
-            preview, contacts = await asyncio.gather(
-                snapshot.preview_document(),
-                _load_contacts(user_google_email or ""),
-            )
+            # The contact picker only helps a draft that has nobody to send
+            # to yet, and it is the bulk of the payload: 60 names and
+            # addresses, ~59% of the card, riding to the model in
+            # structuredContent on every preview. Skip the lookup entirely
+            # once the draft has recipients.
+            if snapshot.to:
+                preview, contacts = await snapshot.preview_document(), []
+            else:
+                # Independent — fetch together so the card is not gated on
+                # the slower of the two.
+                preview, contacts = await asyncio.gather(
+                    snapshot.preview_document(),
+                    _load_contacts(user_google_email or ""),
+                )
             return _build_draft_view(
                 snapshot,
                 user_google_email or "",

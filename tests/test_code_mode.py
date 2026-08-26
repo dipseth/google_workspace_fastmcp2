@@ -714,3 +714,271 @@ class TestEdgeCases:
         from tools.code_mode import EXECUTE_DESCRIPTION
 
         assert "gather_tools" in EXECUTE_DESCRIPTION
+
+
+# =============================================================================
+# Prefab view specs handed to clients that cannot draw them
+# =============================================================================
+
+
+class TestPrefabPlainText:
+    """`execute` must not return layout JSON to a non-UI client.
+
+    An MCP App entry tool (``preview_gmail_draft``) returns its serialized
+    view as the tool result. When the UI gate says the client cannot draw a
+    card, that JSON is pure cost — the model cannot act on it and nobody
+    renders it — so it is flattened back to the text the card would show.
+    """
+
+    @staticmethod
+    def _draft_card():
+        """The Gmail draft text-only fallback, as `_text_only_app` emits it."""
+        return {
+            "$prefab": {"version": "0.2"},
+            "view": {
+                "cssClass": "pf-app-root",
+                "type": "Div",
+                "children": [
+                    {
+                        "type": "Card",
+                        "children": [
+                            {
+                                "type": "CardHeader",
+                                "children": [
+                                    {"content": "Blue Crushers", "type": "H3"}
+                                ],
+                            },
+                            {
+                                "type": "CardContent",
+                                "children": [
+                                    {
+                                        "cssClass": "gap-1",
+                                        "type": "Column",
+                                        "children": [
+                                            {"content": "Draft r-764", "type": "Muted"},
+                                            {
+                                                "content": "To: julia@example.com",
+                                                "type": "Muted",
+                                            },
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            },
+        }
+
+    def test_view_spec_becomes_its_visible_text(self):
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text(self._draft_card()) == (
+            "Blue Crushers\nDraft r-764\nTo: julia@example.com"
+        )
+
+    def test_ordinary_tool_results_pass_through_untouched(self):
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text({"messages": [{"id": "1"}]}) is None
+        assert _prefab_plain_text("plain string") is None
+        assert _prefab_plain_text(None) is None
+
+    def test_dict_with_a_view_key_but_no_prefab_marker_is_not_a_card(self):
+        """A tool returning its own `view` field must not be mangled."""
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text({"view": "grid", "content": "hi"}) is None
+
+    def test_state_bindings_are_skipped(self):
+        """A binding serializes as a dict; it has no text until resolved."""
+        from tools.code_mode import _prefab_plain_text
+
+        spec = {
+            "$prefab": {"version": "0.2"},
+            "view": {
+                "type": "Div",
+                "children": [
+                    {"content": {"$state": "status"}, "type": "Text"},
+                    {"content": "  Send  ", "type": "Button"},
+                ],
+            },
+        }
+        assert _prefab_plain_text(spec) == "Send"
+
+    def test_a_card_with_no_text_falls_back_rather_than_erasing_the_result(self):
+        from tools.code_mode import _prefab_plain_text
+
+        spec = {"$prefab": {"version": "0.2"}, "view": {"type": "Div", "children": []}}
+        assert _prefab_plain_text(spec) is None
+
+
+class TestExecuteDoesNotReturnViewJSON:
+    """End-to-end: the gate's downgrade path through the real `execute` tool.
+
+    The unit tests above cover the flattening; this covers the wiring, which
+    is where the bug actually lived — `execute` returned an app tool's view
+    spec verbatim to a client that could not draw it.
+
+    The in-memory client reports `clientInfo.name == "mcp"`, which is not on
+    the `DRAFT_PREVIEW_UI_CLIENTS` allowlist and advertises no UI extension,
+    so it exercises the downgrade without any monkeypatching.
+    """
+
+    CARD = {
+        "$prefab": {"version": "0.2"},
+        "view": {
+            "type": "Div",
+            "children": [
+                {
+                    "type": "CardHeader",
+                    "children": [{"content": "Blue Crushers", "type": "H3"}],
+                },
+                {"content": "Draft r-764", "type": "Muted"},
+            ],
+        },
+    }
+
+    @pytest.mark.asyncio
+    async def test_app_view_spec_is_flattened_for_a_non_ui_client(self):
+        from fastmcp import Client, FastMCP
+
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        def fake_card() -> dict:
+            """An app entry tool: its return value IS the serialized view."""
+            return TestExecuteDoesNotReturnViewJSON.CARD
+
+        setup_code_mode(mcp)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "execute", {"code": "r = await call_tool('fake_card', {})\nreturn r"}
+            )
+
+        text = result.content[0].text if result.content else ""
+        assert text == "Blue Crushers\nDraft r-764"
+        assert "$prefab" not in text
+        assert result.structured_content is None
+
+
+class TestTemplateEnvelope:
+    """Discovery tools must see the payload, not the middleware's wrapper.
+
+    The Jinja template middleware wraps every tool result as
+    {"jinjaTemplateApplied": ..., "jinjaTemplateError": ..., "result": ...}.
+    Reading fields off that envelope made `tool_activity` report 0 responses
+    against a store holding 447, and would make `fetch` report "not found"
+    for a document it actually returned.
+    """
+
+    def test_envelope_is_peeled(self):
+        from tools.code_mode import _parse_unwrapped
+
+        envelope = {
+            "jinjaTemplateApplied": False,
+            "jinjaTemplateError": None,
+            "result": {"total_responses": 447, "collection_name": "mcp_tool_responses"},
+        }
+        assert _parse_unwrapped(envelope) == {
+            "total_responses": 447,
+            "collection_name": "mcp_tool_responses",
+        }
+
+    def test_envelope_with_json_string_payload_is_parsed(self):
+        from tools.code_mode import _parse_unwrapped
+
+        envelope = {"jinjaTemplateApplied": True, "result": '{"found": true}'}
+        assert _parse_unwrapped(envelope) == {"found": True}
+
+    def test_a_tools_own_result_key_is_left_alone(self):
+        """No Jinja marker means this is the tool's own payload, not a wrapper."""
+        from tools.code_mode import _parse_unwrapped
+
+        payload = {"result": "ok", "count": 3}
+        assert _parse_unwrapped(payload) == payload
+
+    def test_json_string_input_still_parses(self):
+        from tools.code_mode import _parse_unwrapped
+
+        assert _parse_unwrapped('{"found": false}') == {"found": False}
+        assert _parse_unwrapped("not json") == "not json"
+
+    def test_unwrapped_payload_passes_through(self):
+        from tools.code_mode import _parse_unwrapped
+
+        assert _parse_unwrapped({"total_responses": 5}) == {"total_responses": 5}
+
+
+class TestExecuteKeepsItsOwnResult:
+    """A card rendered mid-chain must not swallow the block's return value.
+
+    `execute` captures any Prefab app a called tool returns and puts it in
+    structured_content. It used to *replace* the block's own output with a
+    "Rendered the X app card" summary, so an orchestration that previewed a
+    draft partway through silently lost its result — and its exceptions,
+    which the sandbox surfaces as the block's value.
+    """
+
+    CARD = {
+        "$prefab": {"version": "0.2"},
+        "view": {"type": "Div", "children": [{"content": "Draft card", "type": "H3"}]},
+    }
+
+    @staticmethod
+    def _server():
+        from fastmcp import FastMCP
+
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        def fake_card() -> dict:
+            """A prefab UI tool."""
+            return TestExecuteKeepsItsOwnResult.CARD
+
+        setup_code_mode(mcp)
+        return mcp
+
+    @pytest.fixture(autouse=True)
+    def _ui_capable(self, monkeypatch):
+        import tools.client_capabilities as cc
+
+        monkeypatch.setattr(cc, "client_renders_ui", lambda: True)
+
+    async def _run(self, code):
+        from fastmcp import Client
+
+        async with Client(self._server()) as client:
+            result = await client.call_tool("execute", {"code": code})
+        text = result.content[0].text if result.content else ""
+        return text, result.structured_content
+
+    @pytest.mark.asyncio
+    async def test_block_result_survives_a_card_call(self):
+        text, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn {'my': 'value', 'n': 42}"
+        )
+        assert "value" in text and "42" in text
+        assert structured and "view" in structured, "card still rendered for the user"
+
+    @pytest.mark.asyncio
+    async def test_returning_the_card_itself_is_still_summarized(self):
+        """The view spec must not be echoed back as the block's output."""
+        text, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn r"
+        )
+        assert "$prefab" not in text
+        assert "app card" in text
+        assert structured and "view" in structured
+
+    @pytest.mark.asyncio
+    async def test_errors_are_not_swallowed_by_the_card(self):
+        text, _ = await self._run(
+            "r = await call_tool('fake_card', {})\nraise ValueError('boom')"
+        )
+        assert "boom" in text

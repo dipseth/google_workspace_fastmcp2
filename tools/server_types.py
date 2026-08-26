@@ -255,6 +255,12 @@ class ManageToolsResponse(BaseModel):
         None,
         description="Whether the connected client supports the MCP Apps UI extension",
     )
+    clientName: Optional[str] = Field(
+        None,
+        description="clientInfo.name from the initialize handshake. When "
+        "clientSupportsUI is false, this is the name to add to "
+        "DRAFT_PREVIEW_UI_CLIENTS if the client can in fact draw app cards.",
+    )
     message: str = Field(..., description="Human-readable summary of the operation")
     errors: Optional[List[str]] = Field(
         None,

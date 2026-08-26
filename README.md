@@ -295,6 +295,24 @@ claude mcp add --transport http google-workspace https://localhost:8002/mcp
 }
 ```
 
+**Claude Desktop (bridge to a server you already run)** — recommended when you keep a local HTTP server up for development. Every `command` entry starts its *own* copy of the server, and Cowork / Code sessions start a second one on top of that; when startup is slow (Qdrant hydration on a cold cache runs ~15s) the client gives up first and reports `Couldn't start this server … Request timed out`. Bridging to the already-warm server connects in about a second instead:
+
+```json
+{
+  "mcpServers": {
+    "google-workspace-local": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://localhost:8002/mcp"],
+      "env": {
+        "NODE_EXTRA_CA_CERTS": "/path/to/mkcert/rootCA.pem"
+      }
+    }
+  }
+}
+```
+
+`mcp-remote` registers itself through the server's OAuth 2.1 dynamic client registration, opens a browser once, and caches the token under `~/.mcp-auth` — no API key in the config file, and rotating `MCP_API_KEY` does not break it. `NODE_EXTRA_CA_CERTS` is only needed when the server uses a self-signed certificate (Node will not trust mkcert's CA otherwise); drop it if you terminate TLS with a public certificate.
+
 **Claude.ai / Claude Desktop (hosted connector)** — run the server behind a public HTTPS endpoint (e.g. a Cloudflare or ngrok tunnel), then add it under **Settings → Connectors → Add custom connector** with your `https://your-domain/mcp` URL. The server's OAuth 2.1 + PKCE flow handles authentication, including the `https://claude.ai/api/mcp/auth_callback` redirect. See the [Claude.ai Integration Guide](documentation/config/claude_ai_integration_guide.md) for the full walkthrough.
 
 ### 📚 Complete Connection Guide
