@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # tools/drive_upload_endpoints.py). Enable this on remote/hosted
     # deployments where clients and the server are on different machines.
     drive_upload_client_fs: bool = False
+    # Embed each rendered EmailSpec in the HTML as an invisible comment so a
+    # sent/drafted email can later be saved as a re-parametrisable template
+    # (manage_email_templates action="save" with draft_id/message_id).
+    gmail_embed_email_spec: bool = True
     drive_upload_temp_dir: str = "/tmp/gw-mcp-drive-uploads"
     drive_upload_max_size_mb: int = 100
     drive_upload_ttl_seconds: int = 900

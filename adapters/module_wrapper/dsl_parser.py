@@ -1292,7 +1292,13 @@ class DSLParser:
                     first_char = char
                     break
             else:
-                return None
+                # No symbol: accept expanded notation ("EmailSpec[HeroBlock, …]"),
+                # which parse() already understands, so both spellings extract.
+                start = self._find_component_name_dsl_start(text)
+                if start is None:
+                    return None
+                text = text[start:]
+                first_char = text[0]
 
         # Find the end of DSL structure (after matching brackets)
         # Supports pipe-separated multi-section DSL: §[δ×3] | §[ℊ[ǵ×6]]
@@ -1326,6 +1332,17 @@ class DSLParser:
             return first_char
 
         return None
+
+    def _find_component_name_dsl_start(self, text: str) -> Optional[int]:
+        """Position of the first ``KnownComponent[`` in ``text``, if any."""
+        if not self._symbol_mapping:
+            return None
+        names = sorted(self._symbol_mapping.keys(), key=len, reverse=True)
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(n) for n in names) + r")\s*\["
+        )
+        match = pattern.search(text)
+        return match.start() if match else None
 
     def normalize_dsl(self, dsl_string: str) -> str:
         """

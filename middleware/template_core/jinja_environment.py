@@ -256,6 +256,17 @@ class JinjaEnvironmentManager:
         # This ensures functions like now() are available when macros are loaded
         self._setup_resource_functions()
 
+        # Custom filters must exist before macros compile: Jinja resolves
+        # filter names at compile time and emits a runtime "No filter named"
+        # error for unknown ones, which would break persisted macros (e.g.
+        # saved email templates using deep_merge/fill_placeholders) on restart.
+        try:
+            from middleware.filters import register_all_filters
+
+            register_all_filters(self.jinja2_env)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"⚠️ Could not register custom filters early: {exc}")
+
         # Load and register macros from template files
         self._load_template_macros()
 

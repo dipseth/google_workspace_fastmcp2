@@ -24,7 +24,10 @@ Styling filters work in both Jinja2 (Python) and Nunjucks (JavaScript):
 """
 
 from .data_filters import (
+    deep_merge,
     extract_filter,
+    fill_placeholders,
+    find_placeholders,
     map_attribute_filter,
     map_list_filter,
     safe_get_filter,
@@ -77,6 +80,8 @@ def register_all_filters(jinja_env):
             "safe_get": safe_get_filter,
             "map_list": map_list_filter,
             "map_attr": map_attribute_filter,
+            "deep_merge": deep_merge,
+            "fill_placeholders": fill_placeholders,
             # Date filters
             "format_date": format_date_filter,
             "strftime": strftime_filter,
@@ -101,6 +106,9 @@ __all__ = [
     "safe_get_filter",
     "map_list_filter",
     "map_attribute_filter",
+    "deep_merge",
+    "fill_placeholders",
+    "find_placeholders",
     # JSON filters
     "json_pretty_filter",
     # Drive filters

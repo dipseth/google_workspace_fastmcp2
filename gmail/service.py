@@ -124,11 +124,19 @@ def setup_gmail_tools(mcp: FastMCP) -> None:
 
     # Import all Gmail tool modules and call their setup functions
     try:
-        from . import allowlist, compose, filters, labels, messages
+        from . import (
+            allowlist,
+            compose,
+            email_templates_tool,
+            filters,
+            labels,
+            messages,
+        )
 
         # Call each module's setup function to register their tools
         messages.setup_message_tools(mcp)
         compose.setup_compose_tools(mcp)
+        email_templates_tool.setup_email_template_tools(mcp)
         labels.setup_label_tools(mcp)
         filters.setup_filter_tools(mcp)
         allowlist.setup_allowlist_tools(mcp)

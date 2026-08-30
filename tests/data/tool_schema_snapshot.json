@@ -49,6 +49,8 @@
     "email_description",
     "email_params",
     "reply_to_message_id",
+    "template",
+    "template_values",
     "to",
     "user_google_email"
   ],
@@ -144,6 +146,10 @@
   "delete_event": [
     "calendar_id",
     "event_id",
+    "user_google_email"
+  ],
+  "delete_gmail_draft": [
+    "draft_id",
     "user_google_email"
   ],
   "delete_gmail_filter": [
@@ -415,6 +421,20 @@
     "permanent",
     "remove_from_all_parents",
     "target_folder_id",
+    "user_google_email"
+  ],
+  "manage_email_templates": [
+    "action",
+    "auto_placeholders",
+    "description",
+    "draft_id",
+    "email_description",
+    "email_params",
+    "message_id",
+    "name",
+    "overwrite",
+    "placeholders",
+    "subject",
     "user_google_email"
   ],
   "manage_gmail_allow_list": [
