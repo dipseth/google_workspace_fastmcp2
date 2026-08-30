@@ -1558,6 +1558,22 @@ def create_tool_management_app(mcp: FastMCP):
 _CODE_MODE_VIEW_MAX_CHARS = 20_000
 
 
+def _parse_json_data(text: str):
+    """The dict or list *text* encodes, or ``None`` when it is not JSON data.
+
+    Scalars ("42", "true", a quoted string) are left alone: they read fine as
+    text and re-encoding them would only add quotes.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
 def _build_result_card(
     raw,
     tool_names: list[str] | None = None,
@@ -1589,8 +1605,17 @@ def _build_result_card(
     try:
         if isinstance(raw, str):
             body, language = raw, "text"
+            # The sandbox hands a block's return value back already
+            # serialized, so a dict reaches this card as one long line of
+            # compact JSON that has to be scrolled sideways to read. Anything
+            # that parses as JSON data is re-rendered one key per line.
+            parsed = _parse_json_data(raw)
+            if parsed is not None:
+                body = json.dumps(parsed, indent=2, default=str, ensure_ascii=False)
+                language = "json"
         else:
-            body, language = json.dumps(raw, indent=2, default=str), "json"
+            body = json.dumps(raw, indent=2, default=str, ensure_ascii=False)
+            language = "json"
     except Exception:
         try:
             body, language = str(raw), "text"
