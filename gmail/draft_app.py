@@ -32,6 +32,12 @@ the same lossless MIME surgery as header edits — the block structure never
 leaves the server, so the layout physically cannot change. Drafts without an
 embedded spec simply don't get the section.
 
+Caveat: opening a composed draft in Gmail's own composer rewrites the body on
+autosave/send — Gmail strips every HTML comment (the embedded spec included),
+plus ``<style>`` and MSO conditionals. The card then degrades to header-only
+editing, and the email loses MJML fidelity. Keep the edit → send flow in the
+card; treat a Gmail-UI open as forking the draft away from editability.
+
 Requires ``fastmcp[apps]`` (prefab-ui) and a client that advertises the
 ``io.modelcontextprotocol/ui`` extension (Claude Desktop, MCP Inspector).
 """
