@@ -614,6 +614,7 @@ _EDITABLE_FIELDS: dict[str, dict[str, str]] = {
     },
     "text": {"text": "Paragraph"},
     "button": {"text": "Button text", "url": "Button URL"},
+    "image": {"src": "Image URL", "alt": "Image alt text", "href": "Image link"},
     "header": {"title": "Header title"},
     "footer": {"text": "Footer text"},
 }
@@ -737,7 +738,8 @@ Render a Gmail draft as an interactive card in the chat with Send, Save and
 Discard buttons, a live preview of the fully rendered email, and editable
 To/Cc/Bcc fields. Drafts composed by ``compose_dynamic_email`` also get an
 "Edit content" section: the user can rewrite each section's text (hero title,
-paragraphs, button labels/URLs) in place while the layout stays locked.
+paragraphs, button labels/URLs, image URLs) in place while the layout stays
+locked.
 
 Call this after creating a draft (pass the ``draft_id`` returned by
 ``draft_gmail_message`` / ``draft_gmail_reply`` / ``draft_gmail_forward``), or

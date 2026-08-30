@@ -584,6 +584,30 @@ def test_content_fields_cover_prose_and_links_in_document_order():
     assert by_path["blocks.0.title"]["value"] == "Big News"
 
 
+def test_content_fields_cover_image_urls():
+    """Swapping an image is a value edit — src/alt/href must surface."""
+    from gmail.email_templates import embed_email_spec
+    from gmail.mjml_types import EmailSpec, ImageBlock
+
+    spec = EmailSpec(
+        subject="Pics",
+        blocks=[
+            ImageBlock(src="https://example.com/a.png", href="https://example.com"),
+        ],
+    )
+    snapshot = _make_draft(html=embed_email_spec(MJML_HTML, spec))
+    fields = _content_fields(_embedded_spec(snapshot))
+    assert [(f["path"], f["label"], f["value"]) for f in fields] == [
+        ("blocks.0.src", "Image URL", "https://example.com/a.png"),
+        # alt defaults to "" — still editable so alt text can be added
+        ("blocks.0.alt", "Image alt text", ""),
+        ("blocks.0.href", "Image link", "https://example.com"),
+    ]
+    spec_data = _embedded_spec(snapshot)
+    assert _apply_content_edits(spec_data, {"blocks.0.src": "https://x.com/b.webp"})
+    assert spec_data["blocks"][0]["src"] == "https://x.com/b.webp"
+
+
 def test_apply_content_edits_patches_leaf_values():
     from gmail.mjml_types import EmailSpec
 
