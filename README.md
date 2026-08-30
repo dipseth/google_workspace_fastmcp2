@@ -529,6 +529,28 @@ GoogleUnlimited includes a built-in **Tool Management Dashboard** served via the
 
 The dashboard is automatically wired to all list tools via `wire_dashboard_to_list_tools()` — no per-tool configuration needed.
 
+### 📊 Data Dashboards & Result Cards
+
+Under Code Mode, a list tool called inside `execute` draws a **data dashboard**
+card: a searchable, sortable, paginated table. Gmail label colours render as
+the chips Gmail itself draws; nested values (filter criteria, actions) flatten
+to readable text.
+
+![Gmail Labels dashboard card — filter box, sortable columns, colour chips](documentation/dashboard_card_gmail_labels.png)
+
+**The rows never enter the model's context.** Hosts hand a tool result's
+`structuredContent` to the model as well as to the renderer, so a table
+embedded in the card cost ~80 tokens a row on every call — about 5k tokens for
+65 labels. The card now ships as an empty shell (~375 tokens whatever the row
+count) and fetches its rows itself once drawn, through a UI-only
+`dashboard_rows` app tool keyed by an unguessable per-result token. The text
+content the model reads is unchanged.
+
+Every `execute` block also ends in a **result card** showing the block's own
+return value — JSON printed one key per line, with a **Copy** button.
+
+![Execute result card — pretty-printed JSON with a Copy button](documentation/execute_result_card.png)
+
 ### 📧 Gmail Draft Preview Card
 
 `preview_gmail_draft` returns a second MCP App: an interactive card showing a
