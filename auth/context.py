@@ -1184,11 +1184,22 @@ def persist_session_tool_states() -> bool:
 
     try:
         with _store_lock:
+            live_sessions = len(_session_store)
             # Collect all session tool states
             persisted_states = {}
             for session_id, session_data in _session_store.items():
                 disabled_tools = session_data.get("session_disabled_tools", set())
-                if disabled_tools or session_data.get("minimal_startup_applied"):
+                # A session with nothing disabled is still worth recording — it
+                # is the only evidence that a tool was re-enabled. Skipping it
+                # left the file describing *dirty* sessions exclusively, so the
+                # most recent predecessor found at reconnect was always one with
+                # the tool still disabled. An enable could clear the live
+                # session but never outlive it.
+                if (
+                    disabled_tools
+                    or session_data.get("minimal_startup_applied")
+                    or session_data.get("user_email")
+                ):
                     persisted_states[session_id] = {
                         "disabled_tools": (
                             list(disabled_tools) if disabled_tools else []
@@ -1202,11 +1213,17 @@ def persist_session_tool_states() -> bool:
                         "user_email": session_data.get("user_email"),
                     }
 
-        if not persisted_states:
+        if not persisted_states and not live_sessions:
+            # Nothing live to describe. Leave whatever is on disk alone rather
+            # than erasing a file we have no state to replace it with.
             logger.debug("No session tool states to persist")
             return True
 
-        # Write to file
+        # Write even when the result is empty: `{}` is the only way this file
+        # can say "nothing is disabled any more". Returning early on an empty
+        # result left the last dirty state on disk to be re-inherited by the
+        # next session, which is why a re-enabled tool kept coming back after
+        # every restart.
         state_file.parent.mkdir(parents=True, exist_ok=True)
         with open(state_file, "w") as f:
             json.dump(persisted_states, f, indent=2)
