@@ -15,6 +15,7 @@ cache via :func:`get_cached_result`.
 """
 
 import json
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set
@@ -54,6 +55,82 @@ _watched_tools: Set[str] = set()
 
 # Tracks the most recently called dashboard tool (used by _latest resource)
 _last_dashboard_tool: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Rows stash — what a dashboard card fetches for itself after it is drawn
+# ---------------------------------------------------------------------------
+#
+# Hosts hand structuredContent to the model as well as to the iframe, so a
+# table embedded in the card costs the model ~80 tokens a row on every call.
+# Instead the card ships empty and, on mount, calls the DashboardRows app tool
+# with a key minted here; that UI-initiated result reaches only the iframe.
+#
+# Keys are unguessable and per result, not per tool: `_result_cache` is shared
+# across users (last result per tool name), which is fine for a card built
+# from the result it is attached to, and not fine for anything a browser can
+# ask for by name. In-memory only — a card's fetch lands on the replica that
+# drew it in every deployment this ships to (one container).
+
+_ROWS_STASH_TTL = 900  # seconds a drawn card can still fetch its rows
+_ROWS_STASH_MAX = 64  # cards in flight at once, oldest evicted first
+
+
+@dataclass
+class _StashedResult:
+    tool_name: str
+    data: dict
+    timestamp: float
+
+
+_rows_stash: Dict[str, _StashedResult] = {}
+
+# Wire name of the DashboardRows tool; None until the app is mounted, and
+# the middleware embeds rows inline until then.
+_rows_tool: Optional[str] = None
+
+
+def set_rows_tool(name: Optional[str]) -> None:
+    """Record the wire name of the tool a card calls to fetch its rows."""
+    global _rows_tool
+    _rows_tool = name
+    if name:
+        logger.info(f"Dashboard cache: cards fetch rows via {name}")
+
+
+def get_rows_tool() -> Optional[str]:
+    """Wire name of the rows tool, or ``None`` when rows embed inline."""
+    return _rows_tool
+
+
+def _evict_stash(now: float) -> None:
+    for key in [
+        k for k, e in _rows_stash.items() if now - e.timestamp > _ROWS_STASH_TTL
+    ]:
+        _rows_stash.pop(key, None)
+    while len(_rows_stash) >= _ROWS_STASH_MAX:
+        oldest = min(_rows_stash, key=lambda k: _rows_stash[k].timestamp)
+        _rows_stash.pop(oldest, None)
+
+
+def stash_dashboard_data(tool_name: str, data: dict) -> str:
+    """Keep *data* for the card about to be drawn; return the key it fetches by."""
+    now = time.time()
+    _evict_stash(now)
+    key = secrets.token_urlsafe(24)
+    _rows_stash[key] = _StashedResult(tool_name=tool_name, data=data, timestamp=now)
+    return key
+
+
+def get_stashed_dashboard(key: str) -> Optional[tuple[str, dict]]:
+    """``(tool_name, data)`` for a live key, or ``None`` if unknown or expired."""
+    entry = _rows_stash.get(key)
+    if entry is None:
+        return None
+    if time.time() - entry.timestamp > _ROWS_STASH_TTL:
+        _rows_stash.pop(key, None)
+        return None
+    return entry.tool_name, entry.data
 
 
 def set_redis_store(store: Any) -> None:
@@ -119,6 +196,7 @@ def clear_dashboard_cache() -> int:
     """Clear the in-memory dashboard cache. Returns number of entries cleared."""
     count = len(_result_cache)
     _result_cache.clear()
+    _rows_stash.clear()
     if count:
         logger.info(f"Dashboard cache: cleared {count} in-memory entries")
     return count
@@ -209,19 +287,34 @@ class DashboardCacheMiddleware(Middleware):
     ) -> None:
         """Best-effort: build a Prefab DataTable and set it as structured_content.
 
-        This embeds the dashboard directly in the ToolResult so VS Code
+        This embeds the dashboard directly in the ToolResult so the host
         renders it inline alongside the text content.  The text content
-        (JSON) is kept for the LLM; the structured_content is rendered
-        by VS Code's Prefab renderer.
+        (JSON) is kept for the LLM; the structured_content is drawn by the
+        host's Prefab renderer.
+
+        When the DashboardRows app is mounted the card is an empty shell that
+        fetches its rows on mount by the key stashed here — see the rows
+        stash above for why. Otherwise the rows are embedded inline.
         """
         try:
             from tools.ui_apps import (
                 _build_prefab_data_dashboard,
+                _dashboard_items,
                 get_data_dashboard_config,
             )
 
             config = get_data_dashboard_config(tool_name)
-            prefab = _build_prefab_data_dashboard(tool_name, data, config)
+            rows_tool = _rows_tool
+            # Nothing to fetch for an empty result — the builder draws it
+            # inline, so don't mint a key nobody will use.
+            rows_key = (
+                stash_dashboard_data(tool_name, data)
+                if rows_tool and _dashboard_items(data, config)
+                else None
+            )
+            prefab = _build_prefab_data_dashboard(
+                tool_name, data, config, rows_tool=rows_tool, rows_key=rows_key
+            )
             if prefab is not None:
                 response.structured_content = prefab.to_json()
         except Exception as exc:

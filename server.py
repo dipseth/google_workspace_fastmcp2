@@ -533,6 +533,15 @@ if settings.enable_app_providers:
         mcp.add_provider(gmail_draft_app)
         logger.info("✅ Gmail draft preview app registered")
 
+    # Dashboard cards fetch their rows through this after they are drawn, so
+    # the table never rides in structuredContent for the model to pay for.
+    from tools.ui_apps import create_dashboard_rows_app
+
+    dashboard_rows_app = create_dashboard_rows_app()
+    if dashboard_rows_app is not None:
+        mcp.add_provider(dashboard_rows_app)
+        logger.info("✅ Dashboard rows app registered")
+
     logger.info("✅ App providers registered (Approval, Choice)")
 else:
     logger.info(

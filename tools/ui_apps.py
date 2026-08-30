@@ -1147,12 +1147,72 @@ def _cell_value(value, col_type: str | None = None):
     return _scalarize_cell(value, col_type)
 
 
-def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict):
+def _dashboard_items(cached_data: dict, config: dict) -> list:
+    """The list a dashboard draws, pulled from the tool result by ``itemsField``."""
+    items_field = config.get("itemsField", "items")
+    items = cached_data.get(items_field, []) if cached_data else []
+    return items if isinstance(items, list) else []
+
+
+def _dashboard_rows(items: list, columns_config: list) -> list:
+    """Project *items* onto the configured columns, flattening non-scalar cells.
+
+    The renderer prints every cell with String(value), so a dict cell arrives
+    as the literal "[object Object]" — which is what a Gmail label's
+    {textColor, backgroundColor} and a filter's criteria/action did. The
+    column "type" in _DASHBOARD_CONFIGS is only understood by our own HTML
+    dashboard, so flatten here instead. Projecting also drops the keys the
+    table never draws — id, threadsUnread, messageListVisibility — so they
+    stop riding along in structuredContent.
+    """
+    if not columns_config:
+        return list(items)
+    keys = [(c["key"], c.get("type")) for c in columns_config]
+    return [
+        {key: _cell_value(item.get(key), col_type) for key, col_type in keys}
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def serialize_dashboard_rows(tool_name: str, cached_data: dict, config: dict) -> list:
+    """The rows a dashboard card fetches for itself once it is drawn.
+
+    Same projection as the inline table, serialized the way ``DataTable``
+    serializes its own rows: a component cell (the colour swatch) becomes a
+    component node, everything else passes through.
+    """
+    rows = _dashboard_rows(
+        _dashboard_items(cached_data, config), config.get("columns", [])
+    )
+    return [
+        {k: (v.to_json() if hasattr(v, "to_json") else v) for k, v in row.items()}
+        for row in rows
+    ]
+
+
+def _build_prefab_data_dashboard(
+    tool_name: str,
+    cached_data: dict,
+    config: dict,
+    *,
+    rows_tool: str | None = None,
+    rows_key: str | None = None,
+):
     """Build a Prefab DataTable dashboard from cached tool data.
 
     Returns a :class:`PrefabApp` with a searchable, sortable, paginated
-    ``DataTable`` populated from the dashboard cache.  Falls back to
-    ``None`` if ``prefab-ui`` is not installed.
+    ``DataTable``. Falls back to ``None`` if ``prefab-ui`` is not installed.
+
+    With *rows_tool* and *rows_key* the table ships **empty** and fetches its
+    rows itself once drawn: an ``on_mount`` ``CallTool`` to *rows_tool* with
+    the key. Hosts hand ``structuredContent`` to the model as well as to the
+    iframe, so an inline table costs the model ~80 tokens a row on every call
+    — 5k for 65 Gmail labels, most of it the colour swatches — while the
+    shell costs a few hundred whatever the row count, and a UI-initiated tool
+    result reaches only the iframe. Without those arguments the rows are
+    embedded inline, which is also the fallback when the rows app is not
+    mounted or the config declares no columns.
     """
     try:
         from prefab_ui.app import PrefabApp
@@ -1160,29 +1220,11 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     except ImportError:
         return None
 
-    items_field = config.get("itemsField", "items")
-    items = cached_data.get(items_field, []) if cached_data else []
+    items = _dashboard_items(cached_data, config)
     title = config.get("title", tool_name.replace("_", " ").title())
     icon = config.get("icon", "")
     columns_config = config.get("columns", [])
-
-    # Built before the `with` block below on purpose: a component created while
-    # a container is open auto-attaches to it, so a swatch would render twice.
-    #
-    # The renderer prints every cell with String(value), so a dict cell arrives
-    # as the literal "[object Object]" — which is what a Gmail label's
-    # {textColor, backgroundColor} and a filter's criteria/action did. The
-    # column "type" in _DASHBOARD_CONFIGS is only understood by our own HTML
-    # dashboard, so flatten here instead.
-    if columns_config:
-        keys = [(c["key"], c.get("type")) for c in columns_config]
-        rows = [
-            {key: _cell_value(item.get(key), col_type) for key, col_type in keys}
-            for item in items
-            if isinstance(item, dict)
-        ]
-    else:
-        rows = items
+    heading = f"{icon} {title}" if icon else title
 
     # Map _DASHBOARD_CONFIGS column specs to DataTableColumn. A component cell
     # is an object to the table, so it can be neither sorted nor searched —
@@ -1200,8 +1242,53 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
         else None
     )  # None = auto-detect from data
 
+    # Lazy only when there is something to fetch: an empty result (a
+    # manage_tools enable/disable, say, which carries no toolList) draws the
+    # empty table inline rather than announcing "Loading 0 rows…" and paying
+    # a round trip to learn nothing.
+    if rows_tool and rows_key and dt_columns and items:
+        from prefab_ui.actions import SetState
+        from prefab_ui.actions.mcp import CallTool
+        from prefab_ui.components import If, Muted
+        from prefab_ui.rx import ERROR, RESULT, STATE
+
+        with Column(gap=4, css_class="p-6") as view:
+            Heading(heading)
+            with If(STATE.loading):
+                Muted(f"Loading {len(items)} rows…")
+            with If(STATE.error):
+                Muted("Couldn't load this table: {{ error }}")
+            DataTable(
+                rows="{{ rows }}",
+                columns=dt_columns,
+                search=True,
+                paginated=True,
+                page_size=20,
+            )
+        return PrefabApp(
+            view=view,
+            state={"rows": [], "loading": True, "error": ""},
+            on_mount=CallTool(
+                rows_tool,
+                arguments={"key": rows_key},
+                # Only on_error touches `error`: reading RESULT.error on
+                # success left the literal "{{ $result.error }}" in state
+                # when the key was absent, and a non-empty string is truthy —
+                # so every successful load also printed an error line.
+                on_success=[
+                    SetState("rows", RESULT.rows),
+                    SetState("loading", False),
+                ],
+                on_error=[SetState("error", ERROR), SetState("loading", False)],
+            ),
+        )
+
+    # Built before the `with` block below on purpose: a component created while
+    # a container is open auto-attaches to it, so a swatch would render twice.
+    rows = _dashboard_rows(items, columns_config)
+
     with Column(gap=4, css_class="p-6") as view:
-        Heading(f"{icon} {title}" if icon else title)
+        Heading(heading)
         DataTable(
             rows=rows,
             columns=dt_columns,
@@ -1211,6 +1298,56 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
         )
 
     return PrefabApp(view=view)
+
+
+DASHBOARD_ROWS_APP = "DashboardRows"
+
+
+def create_dashboard_rows_app():
+    """Backend for the dashboard card: the tool a card calls, once drawn, to
+    fetch the rows the middleware kept out of ``structuredContent``.
+
+    UI-only. The tool reaches the wire under a hashed name and is hidden from
+    the model's tool list, and a UI-initiated tool result reaches only the
+    iframe. Its one argument is an unguessable key minted per tool result, so
+    a card reads exactly the result it was drawn for and nothing else — the
+    dashboard cache proper is keyed by tool name and shared across users.
+
+    Returns ``None`` when ``prefab-ui`` is not installed, in which case the
+    middleware embeds rows inline as before.
+    """
+    try:
+        import prefab_ui  # noqa: F401 — no renderer, no card to feed
+        from fastmcp import FastMCPApp
+        from fastmcp.exceptions import ToolError
+        from fastmcp.server.providers.addressing import hashed_backend_name
+    except ImportError:
+        logger.debug("prefab-ui not installed, dashboards embed rows inline")
+        return None
+
+    from middleware.dashboard_cache_middleware import (
+        get_stashed_dashboard,
+        set_rows_tool,
+    )
+
+    app = FastMCPApp(DASHBOARD_ROWS_APP)
+
+    @app.tool()
+    async def dashboard_rows(key: str) -> dict:
+        """Rows for a dashboard card, by the key minted when the card was built."""
+        stashed = get_stashed_dashboard(key)
+        if stashed is None:
+            # An error result, not a payload with an error field: the card's
+            # on_error branch is what shows the message.
+            raise ToolError("this card has expired — run the tool again")
+        tool_name, data = stashed
+        rows = serialize_dashboard_rows(
+            tool_name, data, get_data_dashboard_config(tool_name)
+        )
+        return {"rows": rows, "count": len(rows)}
+
+    set_rows_tool(hashed_backend_name(DASHBOARD_ROWS_APP, "dashboard_rows"))
+    return app
 
 
 def build_data_dashboard_for_tool(tool_name: str, tool_result: dict) -> str:
