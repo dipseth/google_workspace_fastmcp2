@@ -448,11 +448,30 @@ def setup_all_middleware(
                     cache_storage=_namespaced_store,
                     call_tool_settings={"enabled": False},
                     read_resource_settings={"enabled": False},
+                    # Every unset op defaults to ON with a 5-minute TTL, keyed
+                    # by _get_auth_partition_key() — a hash of the access token
+                    # and nothing else. No session, no client. That partitioning
+                    # is designed for per-component *authorization*, so it is
+                    # correct for responses that vary by user and wrong for
+                    # responses that vary by session.
+                    #
+                    # SessionToolFilteringMiddleware makes list_tools vary by
+                    # session: one session disabling tools would have its
+                    # filtered list served to every other session on the same
+                    # token for five minutes — persisted in Redis, so a restart
+                    # does not clear it. That is a tool list the user never
+                    # chose, appearing at random.
+                    list_tools_settings={"enabled": False},
+                    # Resources do not vary by session here, but the listing is
+                    # cheap to compute and a stale one is expensive to diagnose:
+                    # a cached empty or partial listing looks exactly like a
+                    # server that publishes no MCP Apps resources.
+                    list_resources_settings={"enabled": False},
                 )
             )
             _safe_url = _mask_redis_url(settings.redis_io_url_string)
             logger.info(
-                f"✅ Redis ResponseCachingMiddleware enabled ({_safe_url}, list ops only)"
+                f"✅ Redis ResponseCachingMiddleware enabled ({_safe_url}, list_prompts only)"
             )
 
             from middleware.dashboard_cache_middleware import set_redis_store

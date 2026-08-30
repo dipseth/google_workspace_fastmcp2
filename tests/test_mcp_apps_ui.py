@@ -113,3 +113,223 @@ async def test_resource_ui_meta(mcp_with_ui):
         assert dashboard.meta is not None
         ui = dashboard.meta.get("ui", {})
         assert ui.get("prefersBorder") is True
+
+
+class TestDashboardCellsAreScalar:
+    """The renderer draws each cell with String(value).
+
+    A dict cell therefore arrives as the literal "[object Object]" — which is
+    what Gmail label colours ({textColor, backgroundColor}) and Gmail filter
+    criteria/action did. The "type" in _DASHBOARD_CONFIGS is understood only by
+    our own HTML dashboard, so the Prefab path has to flatten these itself.
+    """
+
+    @staticmethod
+    def _rows(tool_name, data):
+        from tools.ui_apps import (
+            _build_prefab_data_dashboard,
+            get_data_dashboard_config,
+        )
+
+        app = _build_prefab_data_dashboard(
+            tool_name, data, get_data_dashboard_config(tool_name)
+        )
+        view = app.to_json()["view"]
+        return view["children"][0]["children"][1]["rows"]
+
+    def test_label_colour_is_drawn_not_described(self):
+        """A component-valued cell is rendered as a component, so show the colour."""
+        rows = self._rows(
+            "list_gmail_labels",
+            {
+                "labels": [
+                    {
+                        "name": "junk",
+                        "type": "user",
+                        "color": {
+                            "textColor": "#ffffff",
+                            "backgroundColor": "#ac2b16",
+                        },
+                        "messagesTotal": 118,
+                        "messagesUnread": 2,
+                        "threadsTotal": 117,
+                    }
+                ]
+            },
+        )
+        cell = rows[0]["color"]
+        assert cell["type"] == "Span", "must be a component node, not a string"
+        assert cell["style"] == {
+            "backgroundColor": "#ac2b16",
+            "color": "#ffffff",
+        }
+        assert cell["content"] == "#ac2b16", "the hex stays readable"
+
+    def test_a_colour_column_is_not_advertised_as_sortable(self):
+        """A component cell is an object to the table — sorting it does nothing."""
+        from tools.ui_apps import (
+            _build_prefab_data_dashboard,
+            get_data_dashboard_config,
+        )
+
+        app = _build_prefab_data_dashboard(
+            "list_gmail_labels",
+            {"labels": [{"name": "x", "color": None}]},
+            get_data_dashboard_config("list_gmail_labels"),
+        )
+        columns = app.to_json()["view"]["children"][0]["children"][1]["columns"]
+        by_key = {c["key"]: c.get("sortable") for c in columns}
+        assert by_key["color"] is False
+        assert by_key["name"] is True
+
+    def test_a_colourless_swatch_falls_back_to_text(self):
+        from tools.ui_apps import _cell_value
+
+        assert _cell_value({}, "color") is None
+        assert _cell_value({"backgroundColor": "#fff"}, "color").type == "Span"
+
+    def test_a_missing_colour_stays_empty(self):
+        rows = self._rows(
+            "list_gmail_labels",
+            {"labels": [{"name": "CHAT", "type": "system", "color": None}]},
+        )
+        assert rows[0]["color"] is None
+
+    def test_nested_filter_fields_are_flattened(self):
+        rows = self._rows(
+            "list_gmail_filters",
+            {
+                "filters": [
+                    {
+                        "id": "f1",
+                        "criteria": {"from": "a@b.com"},
+                        "action": {"addLabelIds": ["Label_1"]},
+                    }
+                ]
+            },
+        )
+        assert rows[0]["criteria"] == "from: a@b.com"
+        assert "Label_1" in rows[0]["action"]
+
+    def test_rows_carry_only_the_displayed_columns(self):
+        """Undisplayed keys ride to the model in structuredContent for nothing."""
+        rows = self._rows(
+            "list_gmail_labels",
+            {
+                "labels": [
+                    {
+                        "name": "CHAT",
+                        "type": "system",
+                        "id": "CHAT",
+                        "threadsUnread": 0,
+                        "messageListVisibility": "hide",
+                    }
+                ]
+            },
+        )
+        assert set(rows[0]) == {
+            "name",
+            "type",
+            "messagesTotal",
+            "messagesUnread",
+            "threadsTotal",
+            "color",
+        }
+
+    def test_every_cell_is_renderable(self):
+        from tools.ui_apps import _scalarize_cell
+
+        for value in ({"a": 1}, ["x", "y"], ("x",), {"a": None}):
+            out = _scalarize_cell(value)
+            assert out is None or isinstance(out, str), value
+
+
+class TestManageToolsDashboard:
+    """manage_tools gets a Prefab card without losing its HTML one.
+
+    Under Code Mode the host only ever sees `execute`, whose meta.ui points at
+    the Prefab renderer — so manage_tools could never pull its own
+    ui://manage-tools-dashboard resource and degraded to raw JSON. Caching its
+    result lets Code Mode draw a card, while a direct caller keeps the page.
+    """
+
+    class _Component:
+        def __init__(self, name, meta=None):
+            self.name = name
+            self.meta = meta
+
+    class _Provider:
+        def __init__(self, components):
+            self._components = components
+
+    class _MCP:
+        def __init__(self, components):
+            self.local_provider = TestManageToolsDashboard._Provider(components)
+
+    def _wire(self, components):
+        from tools.ui_apps import wire_dashboard_to_list_tools
+
+        return wire_dashboard_to_list_tools(self._MCP(components))
+
+    def test_a_tool_with_its_own_renderer_is_left_alone(self):
+        own = {"ui": {"resourceUri": "ui://manage-tools-dashboard"}}
+        comp = self._Component("manage_tools", meta=dict(own))
+        self._wire({"tool:manage_tools": comp})
+
+        assert comp.meta["ui"]["resourceUri"] == "ui://manage-tools-dashboard"
+
+    def test_a_plain_list_tool_still_gets_patched(self):
+        comp = self._Component("list_gmail_labels")
+        patched = self._wire({"tool:list_gmail_labels": comp})
+
+        assert patched == 1
+        assert "data-dashboard/list_gmail_labels" in str(comp.meta["ui"])
+
+    def test_manage_tools_results_are_cached_for_code_mode(self):
+        from middleware.dashboard_cache_middleware import _watched_tools
+
+        self._wire({"tool:manage_tools": self._Component("manage_tools")})
+        assert "manage_tools" in _watched_tools
+
+    def test_session_disabled_reaches_the_card(self):
+        """`enabled` is global — a blocked tool must not read as available."""
+        from tools.ui_apps import (
+            _build_prefab_data_dashboard,
+            get_data_dashboard_config,
+        )
+
+        app = _build_prefab_data_dashboard(
+            "manage_tools",
+            {
+                "toolList": [
+                    {
+                        "name": "list_gmail_labels",
+                        "service": "gmail",
+                        "enabled": True,
+                        "sessionDisabled": True,
+                        "description": "List labels",
+                    }
+                ]
+            },
+            get_data_dashboard_config("manage_tools"),
+        )
+        row = app.to_json()["view"]["children"][0]["children"][1]["rows"][0]
+        assert row["enabled"] == "Yes"
+        assert row["sessionDisabled"] == "Yes"
+
+    def test_booleans_read_as_answers_not_python(self):
+        from tools.ui_apps import _scalarize_cell
+
+        assert _scalarize_cell(True) == "Yes"
+        assert _scalarize_cell(False) == "No"
+        assert _scalarize_cell(0) == 0, "a real number must survive"
+        assert _scalarize_cell(1) == 1
+
+
+class TestToolInfoReportsSessionState:
+    def test_session_disabled_defaults_off(self):
+        from tools.server_types import ToolInfo
+
+        info = ToolInfo(name="x", enabled=True, isProtected=False)
+        assert info.sessionDisabled is False
+        assert info.service is None

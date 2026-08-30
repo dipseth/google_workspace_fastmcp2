@@ -786,9 +786,9 @@ class ModuleWrapper(
 
     def _load_existing_components(self, collection_name: str):
         """Load components from an existing named-vectors collection."""
-        from adapters.module_wrapper.indexing_mixin import IndexingMixin
+        # Same scroll-based loading — and the same batch size — as IndexingMixin
+        from adapters.module_wrapper.indexing_mixin import COMPONENT_SCROLL_BATCH
 
-        # Use the same scroll-based loading as IndexingMixin
         logger.info(f"Loading components from collection {collection_name}...")
 
         all_points = []
@@ -797,7 +797,7 @@ class ModuleWrapper(
         while True:
             results = self.client.scroll(
                 collection_name=collection_name,
-                limit=100,
+                limit=COMPONENT_SCROLL_BATCH,
                 offset=offset,
                 with_payload=True,
                 with_vectors=False,

@@ -124,6 +124,44 @@ def _parse_json_dict(value: Any, field_name: str) -> Optional[dict]:
 _SCALAR_CELL_TYPES = (str, int, float, bool, type(None))
 
 
+def _parse_str_list(value: Any, field_name: str) -> Optional[List[str]]:
+    """
+    Like _parse_json_list, but a bare (non-JSON) string is treated as a single item.
+
+    MCP clients send list parameters three ways: a real list, a JSON-encoded list,
+    or — for a single value — just the bare string. All three are accepted here.
+
+    Accepts: None | list[str] | '["A", "B"]' | '"A"' | 'A'  ->  None | list[str]
+
+    Raises:
+        ValueError: If the value is not a string/list, or any item is not a string.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = [value]
+        else:
+            if isinstance(parsed, str):
+                parsed = [parsed]
+            elif not isinstance(parsed, list):
+                # A bare name that happens to be valid JSON ("2024", "true")
+                # is still a name, not a number or a boolean.
+                parsed = [value]
+        value = parsed
+
+    if not isinstance(value, list):
+        raise ValueError(
+            f"Invalid type for {field_name}: expected string or list of strings, got {type(value).__name__}"
+        )
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError(f"All {field_name} must be strings.")
+    return value
+
+
 def _validate_2d_values(parsed_values: List[Any]) -> Optional[str]:
     """
     Validate a parsed values payload is a 2D array of scalar cells.
@@ -812,7 +850,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
             Optional[Union[str, List[str]]],
             Field(
                 default=None,
-                description='List of sheet names to create. Can be Python list ["Sheet1", "Sheet2"] or JSON string \'["Sheet1", "Sheet2"]\'. If not provided, creates one sheet with default name.',
+                description='Sheet names to create. Accepts a list ["Sheet1", "Sheet2"], a JSON string \'["Sheet1", "Sheet2"]\', or a single name "Sheet1". If not provided, creates one sheet with default name.',
             ),
         ] = None,
     ) -> CreateSpreadsheetResponse:
@@ -822,7 +860,7 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         Args:
             title (str): The title of the new spreadsheet. Required.
             user_google_email (str): The user's Google email address. Auto-injected by middleware if not provided.
-            sheet_names (Optional[Union[str, List[str]]]): List of sheet names to create. Can be Python list or JSON string. If not provided, creates one sheet with default name.
+            sheet_names (Optional[Union[str, List[str]]]): Sheet names to create. A list, a JSON-encoded list, or a single name as a plain string. If not provided, creates one sheet with default name.
 
         Returns:
             CreateSpreadsheetResponse: Structured response with information about the newly created spreadsheet.
@@ -836,33 +874,21 @@ def setup_sheets_tools(mcp: FastMCP) -> None:
         try:
             sheets_service = await _get_sheets_service_with_fallback(user_google_email)
 
-            # Parse sheet_names parameter to handle JSON strings from MCP clients
-            if sheet_names is not None:
-                try:
-                    parsed_sheet_names = _parse_json_list(sheet_names, "sheet_names")
-                    # Validate that all items are strings
-                    if parsed_sheet_names and not all(
-                        isinstance(name, str) for name in parsed_sheet_names
-                    ):
-                        return CreateSpreadsheetResponse(
-                            spreadsheetId="",
-                            spreadsheetUrl="",
-                            title=title,
-                            sheets=sheet_names,
-                            success=False,
-                            message="",
-                            error="All sheet names must be strings.",
-                        )
-                except ValueError as e:
-                    return CreateSpreadsheetResponse(
-                        spreadsheetId="",
-                        spreadsheetUrl="",
-                        title=title,
-                        sheets=sheet_names,
-                        success=False,
-                        message="",
-                        error=str(e),
-                    )
+            # Accept a list, a JSON-encoded list, or a single bare sheet name.
+            # Never echo the raw input into `sheets` — the response model
+            # requires a list, and a stray string there used to crash the tool.
+            try:
+                parsed_sheet_names = _parse_str_list(sheet_names, "sheet_names")
+            except ValueError as e:
+                return CreateSpreadsheetResponse(
+                    spreadsheetId="",
+                    spreadsheetUrl="",
+                    title=title,
+                    sheets=None,
+                    success=False,
+                    message="",
+                    error=str(e),
+                )
 
             spreadsheet_body = {"properties": {"title": title}}
 

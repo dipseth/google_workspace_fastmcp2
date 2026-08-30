@@ -10,6 +10,7 @@ using ``DataTable``, ``PrefabApp``, and ``FastMCPApp`` providers.
 
 import json
 import logging
+import uuid
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
@@ -481,7 +482,7 @@ def setup_ui_apps(mcp: FastMCP) -> None:
             ),
         )
         def code_mode_prefab_renderer() -> str:
-            return _get_renderer_html()
+            return code_mode_renderer_html()
     except ImportError:  # pragma: no cover - prefab-ui not installed
         logger.info("⏭️ Code Mode Prefab renderer unavailable (prefab-ui missing)")
 
@@ -539,6 +540,18 @@ _DASHBOARD_CONFIGS: dict = {
             {"key": "messagesUnread", "label": "Unread", "type": "numeric"},
             {"key": "threadsTotal", "label": "Threads", "type": "numeric"},
             {"key": "color", "label": "Color", "type": "color"},
+        ],
+    },
+    "manage_tools": {
+        "itemsField": "toolList",
+        "title": "Tool Management",
+        "icon": "\U0001f527",
+        "columns": [
+            {"key": "name", "label": "Tool", "type": "primary"},
+            {"key": "service", "label": "Service", "type": "badge"},
+            {"key": "enabled", "label": "Enabled", "type": "boolean"},
+            {"key": "sessionDisabled", "label": "Session-off", "type": "boolean"},
+            {"key": "description", "label": "Description", "type": "text"},
         ],
     },
     "list_gmail_filters": {
@@ -1068,12 +1081,139 @@ def get_data_dashboard_config(tool_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict):
+def _scalarize_cell(value, col_type: str | None = None):
+    """Flatten a cell value the Prefab renderer would otherwise mangle.
+
+    Cells are drawn with ``String(value)``, so anything that is not already a
+    string or a number renders as ``[object Object]``. Gmail label colours are
+    ``{textColor, backgroundColor}`` and Gmail filters carry nested
+    ``criteria``/``action`` dicts, so this is not an edge case.
+    """
+    if isinstance(value, bool):
+        # Ahead of the int check — bool is an int, and "True"/"False" reads
+        # worse in a table than a plain answer to the column's question.
+        return "Yes" if value else "No"
+    if value is None or isinstance(value, (str, int, float)):
+        return value
+    if isinstance(value, dict):
+        if col_type == "color":
+            return value.get("backgroundColor") or value.get("textColor") or None
+        parts = [f"{k}: {v}" for k, v in value.items() if v is not None]
+        return ", ".join(parts) or None
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value) or None
+    return str(value)
+
+
+def _color_swatch(value: dict):
+    """Draw a Gmail label colour as the chip Gmail itself draws.
+
+    A cell whose value serializes to a component node is rendered as a
+    component rather than stringified, so the colour can be *shown* instead of
+    described. The chip carries the label's real background and text colours
+    and prints the background hex, so the preview and the value are both there.
+
+    Returns ``None`` when there is no colour to draw, leaving the caller's
+    text fallback in place.
+    """
+    try:
+        from prefab_ui.components import Span
+    except ImportError:
+        return None
+
+    background = value.get("backgroundColor")
+    foreground = value.get("textColor")
+    if not background and not foreground:
+        return None
+
+    style = {}
+    if background:
+        style["backgroundColor"] = background
+    if foreground:
+        style["color"] = foreground
+
+    return Span(
+        background or foreground,
+        css_class="inline-block rounded px-2 py-0.5 text-xs font-medium",
+        style=style,
+    )
+
+
+def _cell_value(value, col_type: str | None = None):
+    """Return what a cell should render as — a component, or plain text."""
+    if col_type == "color" and isinstance(value, dict):
+        swatch = _color_swatch(value)
+        if swatch is not None:
+            return swatch
+    return _scalarize_cell(value, col_type)
+
+
+def _dashboard_items(cached_data: dict, config: dict) -> list:
+    """The list a dashboard draws, pulled from the tool result by ``itemsField``."""
+    items_field = config.get("itemsField", "items")
+    items = cached_data.get(items_field, []) if cached_data else []
+    return items if isinstance(items, list) else []
+
+
+def _dashboard_rows(items: list, columns_config: list) -> list:
+    """Project *items* onto the configured columns, flattening non-scalar cells.
+
+    The renderer prints every cell with String(value), so a dict cell arrives
+    as the literal "[object Object]" — which is what a Gmail label's
+    {textColor, backgroundColor} and a filter's criteria/action did. The
+    column "type" in _DASHBOARD_CONFIGS is only understood by our own HTML
+    dashboard, so flatten here instead. Projecting also drops the keys the
+    table never draws — id, threadsUnread, messageListVisibility — so they
+    stop riding along in structuredContent.
+    """
+    if not columns_config:
+        return list(items)
+    keys = [(c["key"], c.get("type")) for c in columns_config]
+    return [
+        {key: _cell_value(item.get(key), col_type) for key, col_type in keys}
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
+def serialize_dashboard_rows(tool_name: str, cached_data: dict, config: dict) -> list:
+    """The rows a dashboard card fetches for itself once it is drawn.
+
+    Same projection as the inline table, serialized the way ``DataTable``
+    serializes its own rows: a component cell (the colour swatch) becomes a
+    component node, everything else passes through.
+    """
+    rows = _dashboard_rows(
+        _dashboard_items(cached_data, config), config.get("columns", [])
+    )
+    return [
+        {k: (v.to_json() if hasattr(v, "to_json") else v) for k, v in row.items()}
+        for row in rows
+    ]
+
+
+def _build_prefab_data_dashboard(
+    tool_name: str,
+    cached_data: dict,
+    config: dict,
+    *,
+    rows_tool: str | None = None,
+    rows_key: str | None = None,
+):
     """Build a Prefab DataTable dashboard from cached tool data.
 
     Returns a :class:`PrefabApp` with a searchable, sortable, paginated
-    ``DataTable`` populated from the dashboard cache.  Falls back to
-    ``None`` if ``prefab-ui`` is not installed.
+    ``DataTable``. Falls back to ``None`` if ``prefab-ui`` is not installed.
+
+    With *rows_tool* and *rows_key* the table ships **empty** and fetches its
+    rows itself once drawn: an ``on_mount`` ``CallTool`` to *rows_tool* with
+    the key. Hosts hand ``structuredContent`` to the model as well as to the
+    iframe, so an inline table costs the model ~80 tokens a row on every call
+    — 5k for 65 Gmail labels, most of it the colour swatches — while the
+    shell costs a few hundred whatever the row count, and a UI-initiated tool
+    result reaches only the iframe. Without those arguments the rows are
+    embedded inline, which is also the fallback when the rows app is not
+    mounted or the config declares no columns.
     """
     try:
         from prefab_ui.app import PrefabApp
@@ -1081,26 +1221,77 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
     except ImportError:
         return None
 
-    items_field = config.get("itemsField", "items")
-    items = cached_data.get(items_field, []) if cached_data else []
+    items = _dashboard_items(cached_data, config)
     title = config.get("title", tool_name.replace("_", " ").title())
     icon = config.get("icon", "")
     columns_config = config.get("columns", [])
+    heading = f"{icon} {title}" if icon else title
 
-    # Map _DASHBOARD_CONFIGS column specs to DataTableColumn
+    # Map _DASHBOARD_CONFIGS column specs to DataTableColumn. A component cell
+    # is an object to the table, so it can be neither sorted nor searched —
+    # advertising it as sortable would only render a control that does nothing.
     dt_columns = (
         [
-            DataTableColumn(key=c["key"], header=c["label"], sortable=True)
+            DataTableColumn(
+                key=c["key"],
+                header=c["label"],
+                sortable=c.get("type") != "color",
+            )
             for c in columns_config
         ]
         if columns_config
         else None
     )  # None = auto-detect from data
 
+    # Lazy only when there is something to fetch: an empty result (a
+    # manage_tools enable/disable, say, which carries no toolList) draws the
+    # empty table inline rather than announcing "Loading 0 rows…" and paying
+    # a round trip to learn nothing.
+    if rows_tool and rows_key and dt_columns and items:
+        from prefab_ui.actions import SetState
+        from prefab_ui.actions.mcp import CallTool
+        from prefab_ui.components import If, Muted
+        from prefab_ui.rx import ERROR, RESULT, STATE
+
+        with Column(gap=4, css_class="p-6") as view:
+            Heading(heading)
+            with If(STATE.loading):
+                Muted(f"Loading {len(items)} rows…")
+            with If(STATE.error):
+                Muted("Couldn't load this table: {{ error }}")
+            DataTable(
+                rows="{{ rows }}",
+                columns=dt_columns,
+                search=True,
+                paginated=True,
+                page_size=20,
+            )
+        return PrefabApp(
+            view=view,
+            state={"rows": [], "loading": True, "error": ""},
+            on_mount=CallTool(
+                rows_tool,
+                arguments={"key": rows_key},
+                # Only on_error touches `error`: reading RESULT.error on
+                # success left the literal "{{ $result.error }}" in state
+                # when the key was absent, and a non-empty string is truthy —
+                # so every successful load also printed an error line.
+                on_success=[
+                    SetState("rows", RESULT.rows),
+                    SetState("loading", False),
+                ],
+                on_error=[SetState("error", ERROR), SetState("loading", False)],
+            ),
+        )
+
+    # Built before the `with` block below on purpose: a component created while
+    # a container is open auto-attaches to it, so a swatch would render twice.
+    rows = _dashboard_rows(items, columns_config)
+
     with Column(gap=4, css_class="p-6") as view:
-        Heading(f"{icon} {title}" if icon else title)
+        Heading(heading)
         DataTable(
-            rows=items,
+            rows=rows,
             columns=dt_columns,
             search=True,
             paginated=True,
@@ -1108,6 +1299,56 @@ def _build_prefab_data_dashboard(tool_name: str, cached_data: dict, config: dict
         )
 
     return PrefabApp(view=view)
+
+
+DASHBOARD_ROWS_APP = "DashboardRows"
+
+
+def create_dashboard_rows_app():
+    """Backend for the dashboard card: the tool a card calls, once drawn, to
+    fetch the rows the middleware kept out of ``structuredContent``.
+
+    UI-only. The tool reaches the wire under a hashed name and is hidden from
+    the model's tool list, and a UI-initiated tool result reaches only the
+    iframe. Its one argument is an unguessable key minted per tool result, so
+    a card reads exactly the result it was drawn for and nothing else — the
+    dashboard cache proper is keyed by tool name and shared across users.
+
+    Returns ``None`` when ``prefab-ui`` is not installed, in which case the
+    middleware embeds rows inline as before.
+    """
+    try:
+        import prefab_ui  # noqa: F401 — no renderer, no card to feed
+        from fastmcp import FastMCPApp
+        from fastmcp.exceptions import ToolError
+        from fastmcp.server.providers.addressing import hashed_backend_name
+    except ImportError:
+        logger.debug("prefab-ui not installed, dashboards embed rows inline")
+        return None
+
+    from middleware.dashboard_cache_middleware import (
+        get_stashed_dashboard,
+        set_rows_tool,
+    )
+
+    app = FastMCPApp(DASHBOARD_ROWS_APP)
+
+    @app.tool()
+    async def dashboard_rows(key: str) -> dict:
+        """Rows for a dashboard card, by the key minted when the card was built."""
+        stashed = get_stashed_dashboard(key)
+        if stashed is None:
+            # An error result, not a payload with an error field: the card's
+            # on_error branch is what shows the message.
+            raise ToolError("this card has expired — run the tool again")
+        tool_name, data = stashed
+        rows = serialize_dashboard_rows(
+            tool_name, data, get_data_dashboard_config(tool_name)
+        )
+        return {"rows": rows, "count": len(rows)}
+
+    set_rows_tool(hashed_backend_name(DASHBOARD_ROWS_APP, "dashboard_rows"))
+    return app
 
 
 def build_data_dashboard_for_tool(tool_name: str, tool_result: dict) -> str:
@@ -1153,6 +1394,12 @@ def wire_dashboard_to_list_tools(mcp: FastMCP) -> int:
         if tool_name not in _DASHBOARD_CONFIGS:
             continue
         component.meta = component.meta or {}
+        if "ui" in component.meta:
+            # The tool already points at a renderer of its own — manage_tools
+            # has a purpose-built HTML dashboard. Registering it above still
+            # gets its result cached, so Code Mode can draw the Prefab card,
+            # but a direct caller keeps the richer page.
+            continue
         component.meta["ui"] = app_config_to_meta_dict(
             AppConfig(resource_uri=f"ui://data-dashboard/{tool_name}")
         )
@@ -1311,24 +1558,118 @@ def create_tool_management_app(mcp: FastMCP):
 #: full result in the ToolResult content, this only bounds what we draw.
 _CODE_MODE_VIEW_MAX_CHARS = 20_000
 
+# Above this, the Copy button does not carry the text itself: the card's
+# structuredContent reaches the model, and the body is already in it once.
+_COPY_INLINE_MAX_CHARS = 2_000
 
-def build_default_execute_view(raw, tool_names: list[str] | None = None):
-    """Render an ordinary ``execute`` result as a Prefab card.
+# Prefab's CallHandler action looks up ``globalThis.__prefab_handlers.actions``
+# — a developer registry the renderer itself never populates. We serve the Code
+# Mode renderer from a URI we own, so we can register handlers ahead of it.
+# ``copy`` puts the result card's text on the clipboard: the text is passed
+# inline when small, else read back out of the card's own <pre> by id, else
+# found by walking up from the clicked button. execCommand runs first because
+# it works inside a sandboxed iframe under a click; the async Clipboard API is
+# tried as well where the host grants it.
+_RENDERER_HANDLERS_SCRIPT = """<script>
+(function () {
+  var reg = (globalThis.__prefab_handlers = globalThis.__prefab_handlers || {});
+  reg.actions = reg.actions || {};
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+  function nearestCode(node) {
+    while (node) {
+      var pre = node.querySelector && node.querySelector("pre, code");
+      if (pre) return pre;
+      node = node.parentElement;
+    }
+    return null;
+  }
+  reg.actions.copy = function (ctx) {
+    var args = (ctx && ctx.arguments) || {};
+    var text = args.text;
+    if (text == null && args.target) {
+      var el = document.getElementById(args.target);
+      if (el) text = el.innerText;
+    }
+    if (text == null) {
+      var btn = document.activeElement;
+      var pre = btn && nearestCode(btn.parentElement);
+      if (pre) text = pre.innerText;
+    }
+    if (text == null) throw new Error("Nothing to copy");
+    text = String(text);
+    var ok = legacyCopy(text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {});
+      ok = true;
+    }
+    if (!ok) throw new Error("Clipboard unavailable");
+  };
+})();
+</script>
+"""
 
-    Under Code Mode every tool call is funnelled through ``execute``, whose
-    ``meta.ui.resourceUri`` points at the Code Mode renderer. That makes the
-    host draw *something* for every call, so plain results need a view of their
-    own — otherwise they render as an empty panel.
 
-    Returns ``None`` when prefab-ui is unavailable or the result cannot be
-    represented, in which case the caller should return the raw result
-    unchanged.
+def code_mode_renderer_html() -> str:
+    """The Prefab renderer HTML with our CallHandler registry in front of it."""
+    from prefab_ui.renderer import get_renderer_html
+
+    html = get_renderer_html()
+    i = html.find("<script")
+    if i < 0:
+        return html + _RENDERER_HANDLERS_SCRIPT
+    return html[:i] + _RENDERER_HANDLERS_SCRIPT + html[i:]
+
+
+def _parse_json_data(text: str):
+    """The dict or list *text* encodes, or ``None`` when it is not JSON data.
+
+    Scalars ("42", "true", a quoted string) are left alone: they read fine as
+    text and re-encoding them would only add quotes.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _build_result_card(
+    raw,
+    tool_names: list[str] | None = None,
+    *,
+    heading: str = "Result",
+    css_class: str = "max-w-3xl",
+):
+    """Build the card that shows an ``execute`` block's return value.
+
+    Returns the card component, or ``None`` when prefab-ui is unavailable or
+    the value cannot be rendered.
     """
     try:
-        from prefab_ui.app import PrefabApp
+        from prefab_ui.actions import ShowToast
+        from prefab_ui.actions.custom import CallHandler
         from prefab_ui.components import (
             H3,
             Badge,
+            Button,
             Card,
             CardContent,
             CardHeader,
@@ -1344,8 +1685,17 @@ def build_default_execute_view(raw, tool_names: list[str] | None = None):
     try:
         if isinstance(raw, str):
             body, language = raw, "text"
+            # The sandbox hands a block's return value back already
+            # serialized, so a dict reaches this card as one long line of
+            # compact JSON that has to be scrolled sideways to read. Anything
+            # that parses as JSON data is re-rendered one key per line.
+            parsed = _parse_json_data(raw)
+            if parsed is not None:
+                body = json.dumps(parsed, indent=2, default=str, ensure_ascii=False)
+                language = "json"
         else:
-            body, language = json.dumps(raw, indent=2, default=str), "json"
+            body = json.dumps(raw, indent=2, default=str, ensure_ascii=False)
+            language = "json"
     except Exception:
         try:
             body, language = str(raw), "text"
@@ -1358,21 +1708,90 @@ def build_default_execute_view(raw, tool_names: list[str] | None = None):
 
     called = [t for t in (tool_names or []) if t]
 
+    code_id = f"result-{uuid.uuid4().hex[:8]}"
+    copy_args: dict[str, str] = {"target": code_id}
+    if len(body) <= _COPY_INLINE_MAX_CHARS:
+        copy_args["text"] = body
+
     try:
-        with Card(css_class="max-w-3xl") as view:
+        with Card(css_class=css_class) as view:
             with CardHeader(), Row(gap=2, css_class="items-center justify-between"):
-                H3("Result")
-                Badge(language.upper(), variant="secondary")
+                H3(heading)
+                with Row(gap=2, css_class="items-center"):
+                    Badge(language.upper(), variant="secondary")
+                    Button(
+                        "Copy",
+                        variant="ghost",
+                        size="xs",
+                        on_click=CallHandler(
+                            "copy",
+                            arguments=copy_args,
+                            on_success=ShowToast(
+                                "Copied to clipboard", variant="success"
+                            ),
+                            on_error=ShowToast("Copy failed", variant="error"),
+                        ),
+                    )
             with CardContent(), Column(gap=2):
                 if called:
                     Muted("Called: " + ", ".join(called))
-                Code(body, language=language)
+                Code(body, language=language, id=code_id)
                 if truncated:
                     Text(
                         "Output truncated for display — the full result was "
                         "returned to the model.",
                         css_class="text-xs",
                     )
+        return view
+    except Exception:
+        return None
+
+
+def build_default_execute_view(raw, tool_names: list[str] | None = None):
+    """Render an ordinary ``execute`` result as a Prefab card.
+
+    Under Code Mode every tool call is funnelled through ``execute``, whose
+    ``meta.ui.resourceUri`` points at the Code Mode renderer. That makes the
+    host draw *something* for every call, so plain results need a view of their
+    own — otherwise they render as an empty panel.
+
+    Returns ``None`` when prefab-ui is unavailable or the result cannot be
+    represented, in which case the caller should return the raw result
+    unchanged.
+    """
+    try:
+        from prefab_ui.app import PrefabApp
+    except ImportError:
+        return None
+
+    view = _build_result_card(raw, tool_names)
+    if view is None:
+        return None
+    try:
         return PrefabApp(view=view)
+    except Exception:
+        return None
+
+
+def build_block_output_node(raw, tool_names: list[str] | None = None):
+    """Serialize a block's return value as a card node, ready to append.
+
+    Unlike :func:`build_default_execute_view` this returns the bare serialized
+    component rather than a ``PrefabApp`` — the caller splices it into a view
+    that already exists, so a second app root would only nest one theme
+    container inside another.
+
+    Returns ``None`` when the value cannot be rendered.
+    """
+    card = _build_result_card(
+        raw,
+        tool_names,
+        heading="Block result",
+        css_class="max-w-3xl mt-4",
+    )
+    if card is None:
+        return None
+    try:
+        return card.to_json()
     except Exception:
         return None

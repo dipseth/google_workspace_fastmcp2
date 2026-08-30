@@ -367,7 +367,7 @@ def _prefab_plain_text(value: Any) -> str | None:
     Returns ``None`` when *value* is not a view spec, so any tool result can
     be passed through and only view specs are rewritten.
     """
-    if not isinstance(value, dict) or "$prefab" not in value or "view" not in value:
+    if not _is_prefab_view(value):
         return None
 
     lines: list[str] = []
@@ -388,6 +388,96 @@ def _prefab_plain_text(value: Any) -> str | None:
 
     _walk(value.get("view"))
     return "\n".join(lines) or None
+
+
+def _is_prefab_view(value: Any) -> bool:
+    """True when *value* is a serialized Prefab view rather than tool data."""
+    return isinstance(value, dict) and "$prefab" in value and "view" in value
+
+
+def _dashboard_injected(tool_name: str) -> bool:
+    """True when ``DashboardCacheMiddleware`` rewrites this tool's result."""
+    try:
+        from middleware.dashboard_cache_middleware import is_watched_tool
+
+        return is_watched_tool(tool_name)
+    except Exception:
+        return False
+
+
+def _unwrap_for_sandbox(result: ToolResult, unwrap: Any, tool_name: str) -> Any:
+    """Unwrap a ToolResult for code running inside the sandbox.
+
+    ``DashboardCacheMiddleware`` replaces a watched tool's structured_content
+    with a Prefab view so hosts draw the dashboard inline, keeping the real
+    payload only in the text content. The default unwrap prefers
+    structured_content, so a block that calls one of those tools and reads a
+    field off the result gets the view spec — and ``None`` for every key it
+    asks for, silently, as if the server had returned nothing. Prefer the text
+    content for those tools.
+
+    Only for those tools. An MCP App entry tool *legitimately* returns a view,
+    and FastMCP fills its text content with a ``[Rendered Prefab UI]``
+    placeholder rather than data — falling back there hands the block a
+    placeholder string and loses the card. So the fallback is gated on the
+    middleware actually being involved, and again on the text parsing as JSON.
+
+    The view is still captured for rendering either way: that reads
+    structured_content off the ToolResult, which this leaves untouched.
+    """
+    if not _is_prefab_view(getattr(result, "structured_content", None)):
+        return unwrap(result)
+    if not _dashboard_injected(tool_name):
+        return unwrap(result)
+
+    for content in getattr(result, "content", None) or []:
+        text = getattr(content, "text", None)
+        if not text:
+            continue
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, (dict, list)):
+            return _strip_template_envelope(parsed)
+    return unwrap(result)
+
+
+def _fold_block_output_into_card(
+    card_spec: dict[str, Any],
+    own_output: Any,
+    called_tools: list[str] | None = None,
+) -> dict[str, Any]:
+    """Draw the block's own return value below the card it rendered.
+
+    When a tool called mid-block returns a Prefab app, ``execute`` sends the
+    card in ``structuredContent`` and the block's output as the result text.
+    A host that draws the card shows *only* the card — Claude Desktop does —
+    so the value the code actually computed reaches the model and never the
+    person watching. Append it as a second section so both see the same thing.
+
+    Returns *card_spec* unchanged when there is nothing to add or the view
+    cannot take another child.
+    """
+    if own_output in (None, ""):
+        return card_spec
+
+    view = card_spec.get("view")
+    if not isinstance(view, dict) or not isinstance(view.get("children"), list):
+        return card_spec
+
+    try:
+        from tools.ui_apps import build_block_output_node
+
+        node = build_block_output_node(own_output, called_tools or [])
+    except Exception:
+        node = None
+    if node is None:
+        return card_spec
+
+    # Copy rather than mutate: *card_spec* is the called tool's own
+    # structured_content, which it is free to cache and hand out again.
+    return {**card_spec, "view": {**view, "children": [*view["children"], node]}}
 
 
 def _strip_template_envelope(value: Any) -> Any:
@@ -1041,14 +1131,16 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 try:
                     result = await ctx.fastmcp.call_tool(tool.name, params)
                     _capture_prefab(result, tool_name)
-                    return _unwrap_tool_result(result)
+                    return _unwrap_for_sandbox(result, _unwrap_tool_result, tool_name)
                 except _VE as ve:
                     # Attempt argument recovery via LLM
                     corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
                         result = await ctx.fastmcp.call_tool(tool.name, corrected)
                         _capture_prefab(result, tool_name)
-                        return _unwrap_tool_result(result)
+                        return _unwrap_for_sandbox(
+                            result, _unwrap_tool_result, tool_name
+                        )
                     raise  # re-raise if recovery failed
 
             # Clear stale dashboard-tool tracker so a *previous*
@@ -1076,8 +1168,15 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 # ...except when the raw result *is* a view spec, which is
                 # exactly what an app entry tool returns. Dumping that JSON
                 # would flood the model with layout nobody will draw, so send
-                # the text the card would have shown instead.
-                return _prefab_plain_text(raw) or raw
+                # the text the card would have shown instead — and when the
+                # card carries no literal text, say so rather than falling
+                # back to the very JSON this branch exists to suppress.
+                if _is_prefab_view(raw):
+                    return _prefab_plain_text(raw) or (
+                        "Rendered an app card with no text content; "
+                        "this client cannot draw it."
+                    )
+                return raw
 
             # A tool that returned its own Prefab app wins over a synthesized
             # dashboard — it is a purpose-built UI, not a generic table.
@@ -1099,9 +1198,20 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 # own result. Keep it unless it is itself the view spec,
                 # which is the single-call `return await call_tool(...)` case
                 # the summary exists for.
-                own_output = None if _prefab_plain_text(raw) is not None else raw
+                # Ask "is this the view itself?", not "did it flatten to text?".
+                # A card built entirely from inputs, bindings and labels — the
+                # draft preview is one — holds no literal text, so flattening
+                # returns None for it exactly as it does for ordinary data.
+                # Reading that as "not a view" pastes the layout JSON into the
+                # block-output node underneath the card the user is looking at.
+                own_output = None if _is_prefab_view(raw) else raw
                 content = summary if own_output in (None, "") else own_output
-                return _ToolResult(content=content, structured_content=prefab_result)
+                return _ToolResult(
+                    content=content,
+                    structured_content=_fold_block_output_into_card(
+                        prefab_result, own_output, called_tools
+                    ),
+                )
 
             def _default_view() -> Any:
                 """Fall back to a generic result card.

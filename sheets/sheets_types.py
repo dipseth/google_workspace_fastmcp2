@@ -5,7 +5,7 @@ These Pydantic BaseModel classes define the structure of data returned by Sheets
 enabling FastMCP to automatically generate JSON schemas for better MCP client integration.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Any, List, Optional
 
 
@@ -110,6 +110,18 @@ class CreateSpreadsheetResponse(BaseModel):
     success: bool = Field(..., description="Whether the creation succeeded")
     message: str = Field(..., description="Success or error message")
     error: Optional[str] = Field(None, description="Error message if operation failed")
+
+    @field_validator("sheets", mode="before")
+    @classmethod
+    def _coerce_single_sheet_name(cls, value):
+        """A lone sheet name is a one-item list, never a validation error.
+
+        Callers echo the tool's ``sheet_names`` input here, and MCP clients
+        legitimately send a single name as a bare string.
+        """
+        if isinstance(value, str):
+            return [value]
+        return value
 
 
 class CreateSheetResponse(BaseModel):

@@ -17,6 +17,9 @@ Two layers of tests:
        serialises lambda objects to strings before passing them to the helper.
 """
 
+import copy
+import json
+
 import pytest
 import pytest_asyncio
 
@@ -840,10 +843,16 @@ class TestExecuteDoesNotReturnViewJSON:
     }
 
     @pytest.mark.asyncio
-    async def test_app_view_spec_is_flattened_for_a_non_ui_client(self):
+    async def test_app_view_spec_is_flattened_for_a_non_ui_client(self, monkeypatch):
         from fastmcp import Client, FastMCP
 
+        from config.settings import settings
         from tools.code_mode import setup_code_mode
+
+        # Pin the gate on: a developer .env carrying
+        # DRAFT_PREVIEW_UI_GATING=false otherwise switches off the very path
+        # under test, and the failure reads as a regression in the flattening.
+        monkeypatch.setattr(settings, "draft_preview_ui_gating", True)
 
         mcp = FastMCP("test-server")
 
@@ -982,3 +991,220 @@ class TestExecuteKeepsItsOwnResult:
             "r = await call_tool('fake_card', {})\nraise ValueError('boom')"
         )
         assert "boom" in text
+
+    @pytest.mark.asyncio
+    async def test_block_result_is_drawn_below_the_card(self):
+        """A host that draws only the card must still show the block's output.
+
+        Keeping the value in the result text is enough for the model and
+        invisible to the user, so it has to reach the view as well.
+        """
+        _, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn {'my': 'value', 'n': 42}"
+        )
+        children = structured["view"]["children"]
+        assert len(children) == 2, "card's own children plus the block result"
+        assert children[0] == self.CARD["view"]["children"][0], "card left intact"
+        assert "42" in json.dumps(children[1])
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_appended_when_the_block_returns_the_card(self):
+        _, structured = await self._run(
+            "r = await call_tool('fake_card', {})\nreturn r"
+        )
+        assert structured["view"]["children"] == self.CARD["view"]["children"]
+
+    def test_folding_does_not_mutate_the_tools_own_spec(self):
+        from tools.code_mode import _fold_block_output_into_card
+
+        spec = copy.deepcopy(self.CARD)
+        folded = _fold_block_output_into_card(spec, {"n": 1}, ["fake_card"])
+
+        assert spec == self.CARD, "the called tool may cache and reuse this"
+        assert len(folded["view"]["children"]) == 2
+
+    def test_a_view_that_cannot_take_a_child_is_left_alone(self):
+        from tools.code_mode import _fold_block_output_into_card
+
+        spec = {"$prefab": {"version": "0.2"}, "view": {"type": "H3"}}
+        assert _fold_block_output_into_card(spec, {"n": 1}) == spec
+
+
+class TestSandboxUnwrapPrefersData:
+    """A dashboard tool's data must survive the card the middleware injects.
+
+    DashboardCacheMiddleware overwrites a watched tool's structured_content
+    with a Prefab view and leaves the real payload in the text content. The
+    default unwrap prefers structured_content, so code calling one of those 13
+    tools read fields off a view spec and got None for every one — silently,
+    which is how `manage_tools` appeared to report a null clientSupportsUI.
+    """
+
+    class _Text:
+        def __init__(self, text):
+            self.text = text
+
+    class _Result:
+        def __init__(self, structured_content, content):
+            self.structured_content = structured_content
+            self.content = content
+
+    VIEW = {"$prefab": {"version": "0.3"}, "view": {"type": "Div", "children": []}}
+
+    def _unwrap(self, result, tool_name="manage_tools"):
+        from tools.code_mode import _unwrap_for_sandbox
+
+        return _unwrap_for_sandbox(
+            result,
+            lambda r: r.structured_content or "fallback-not-used",
+            tool_name,
+        )
+
+    @pytest.fixture(autouse=True)
+    def _watched(self, monkeypatch):
+        """manage_tools is only watched once the server has registered it."""
+        from middleware import dashboard_cache_middleware as dc
+
+        monkeypatch.setattr(dc, "_watched_tools", {"manage_tools"})
+
+    def test_injected_view_falls_back_to_the_text_payload(self):
+        result = self._Result(
+            self.VIEW,
+            [self._Text('{"totalTools": 100, "clientName": "claude-code"}')],
+        )
+        assert self._unwrap(result) == {"totalTools": 100, "clientName": "claude-code"}
+
+    def test_template_envelope_is_peeled_off_the_fallback(self):
+        result = self._Result(
+            self.VIEW,
+            [self._Text('{"jinjaTemplateApplied": false, "result": {"n": 3}}')],
+        )
+        assert self._unwrap(result) == {"n": 3}
+
+    def test_non_json_text_is_not_mistaken_for_the_payload(self):
+        """Text that isn't JSON isn't the payload the middleware displaced."""
+        result = self._Result(self.VIEW, [self._Text("plain words")])
+        assert self._unwrap(result) == self.VIEW
+
+    def test_view_with_no_text_content_keeps_the_default_unwrap(self):
+        result = self._Result(self.VIEW, [])
+        assert self._unwrap(result) == self.VIEW
+
+    def test_ordinary_structured_content_is_untouched(self):
+        """Only a view spec triggers the fallback; real data passes straight."""
+        payload = {"totalTools": 100}
+        result = self._Result(payload, [self._Text('{"stale": true}')])
+        assert self._unwrap(result) == payload
+
+    def test_an_app_tools_own_view_is_not_traded_for_the_placeholder(self):
+        """The regression: preview_gmail_draft rendered "[Rendered Prefab UI]".
+
+        An MCP App entry tool returns its view legitimately, and FastMCP puts a
+        placeholder in the text content rather than data. Falling back there
+        hands the block the placeholder and loses the card.
+        """
+        result = self._Result(
+            self.VIEW,
+            [self._Text("[Rendered Prefab UI]")],
+        )
+        assert self._unwrap(result, tool_name="preview_gmail_draft") == self.VIEW
+
+    def test_placeholder_text_is_ignored_even_for_a_watched_tool(self):
+        """Second guard: only JSON is treated as a recoverable payload."""
+        result = self._Result(self.VIEW, [self._Text("[Rendered Prefab UI]")])
+        assert self._unwrap(result) == self.VIEW
+
+
+class TestTextlessCardIsNotDumpedAsJSON:
+    """A card with no literal text must not degrade to its own layout JSON.
+
+    The draft preview is built from inputs, comboboxes and an iframe — every
+    string is a label, placeholder or binding, so flattening it yields nothing.
+    Both branches used "did it flatten to text?" as a proxy for "is this a
+    view?", which is false for exactly this card: the block-output node under
+    the rendered card filled with {"$prefab": ...}, and the downgrade path
+    returned the same JSON it exists to suppress.
+    """
+
+    TEXTLESS = {
+        "$prefab": {"version": "0.3"},
+        "view": {
+            "type": "Div",
+            "children": [
+                {"type": "Input", "placeholder": "Subject"},
+                {"type": "Button", "label": "Send"},
+            ],
+        },
+    }
+
+    def test_flattening_a_textless_card_still_yields_nothing(self):
+        from tools.code_mode import _prefab_plain_text
+
+        assert _prefab_plain_text(self.TEXTLESS) is None
+
+    def test_but_it_is_still_recognised_as_a_view(self):
+        from tools.code_mode import _is_prefab_view
+
+        assert _is_prefab_view(self.TEXTLESS) is True
+
+    def test_ordinary_data_is_not_a_view(self):
+        from tools.code_mode import _is_prefab_view
+
+        assert _is_prefab_view({"totalTools": 100}) is False
+        assert _is_prefab_view("some text") is False
+
+
+class TestCardPathDoesNotFoldTheViewIntoItself:
+    """The card path's counterpart to TestExecuteDoesNotReturnViewJSON.
+
+    When the client CAN draw the card, execute sends the view as
+    structured_content and the block's own output as the text. A single-call
+    `return await call_tool(app_tool, ...)` has no output of its own — the view
+    IS the return value — so the text must be the summary and the card must go
+    out unmodified. Keying that decision off "did the view flatten to text?"
+    broke for a card with no literal text: the layout JSON got pasted into a
+    block-output node underneath the card.
+    """
+
+    TEXTLESS_CARD = {
+        "$prefab": {"version": "0.3"},
+        "view": {
+            "type": "Div",
+            "children": [
+                {"type": "Input", "placeholder": "Subject"},
+                {"type": "Button", "label": "Send"},
+            ],
+        },
+    }
+
+    @pytest.mark.asyncio
+    async def test_textless_card_is_returned_whole_with_a_summary(self, monkeypatch):
+        from fastmcp import Client, FastMCP
+
+        from config.settings import settings
+        from tools.code_mode import setup_code_mode
+
+        # Gating off => client_renders_ui() is True => card path.
+        monkeypatch.setattr(settings, "draft_preview_ui_gating", False)
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        def textless_card() -> dict:
+            """An app entry tool whose card carries no literal text."""
+            return TestCardPathDoesNotFoldTheViewIntoItself.TEXTLESS_CARD
+
+        setup_code_mode(mcp)
+
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "execute",
+                {"code": "r = await call_tool('textless_card', {})\nreturn r"},
+            )
+
+        text = result.content[0].text if result.content else ""
+        assert text == "Rendered the textless_card app card for the user."
+        assert "$prefab" not in text
+
+        # The card goes out untouched — no block-output node appended.
+        assert result.structured_content == self.TEXTLESS_CARD

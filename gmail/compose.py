@@ -1085,7 +1085,8 @@ async def send_gmail_message(
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text email (backward compatible)
             - "html": HTML email - put HTML content in 'body' parameter
-            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default)
+            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default).
+              Without html_body this behaves as "plain".
         html_body: HTML content when content_type="mixed". Ignored for other content types.
         cc: Optional CC recipient(s) - can be a single string or list of strings
         bcc: Optional BCC recipient(s) - can be a single string or list of strings
@@ -1164,22 +1165,15 @@ async def send_gmail_message(
         )
 
     if content_type == "mixed" and not html_body:
-        error_msg = (
-            "❌ **Missing HTML Content for content_type='mixed'**\n\n"
-            "When using content_type='mixed', you must provide:\n"
-            "• Plain text in 'body' parameter\n"
-            "• HTML content in 'html_body' parameter"
+        # "mixed" is the default, so a caller who only wrote a plain body and
+        # never thought about content types lands here. Refusing turned every
+        # first plain-text send into a validation error; the message they
+        # described is a plain-text one, so send that.
+        logger.info(
+            "[send_gmail_message] content_type='mixed' without html_body — "
+            "sending as plain text"
         )
-        return SendGmailMessageResponse(
-            success=False,
-            message=error_msg,
-            messageId=None,
-            threadId=None,
-            recipientCount=0,
-            contentType=content_type,
-            templateApplied=False,
-            error="Parameter validation error: missing html_body for mixed content",
-        )
+        content_type = "plain"
 
     # Format recipients for logging using shared utility function
     to_count = count_recipients(to)
@@ -1631,7 +1625,8 @@ async def draft_gmail_message(
         content_type: Content type - controls how body and html_body are used:
             - "plain": Plain text draft (backward compatible)
             - "html": HTML draft - put HTML content in 'body' parameter
-            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default)
+            - "mixed": Dual content - plain text in 'body', HTML in 'html_body' (default).
+              Without html_body this behaves as "plain".
         html_body: HTML content when content_type="mixed". Ignored for other content types.
         cc: Optional CC recipient(s) - can be a single string or list of strings
         bcc: Optional BCC recipient(s) - can be a single string or list of strings
@@ -1713,21 +1708,13 @@ async def draft_gmail_message(
         )
 
     if content_type == "mixed" and not html_body:
-        error_msg = (
-            "❌ **Missing HTML Content for content_type='mixed'**\n\n"
-            "When using content_type='mixed', you must provide:\n"
-            "• Plain text in 'body' parameter\n"
-            "• HTML content in 'html_body' parameter"
+        # Same downgrade as send_gmail_message: the default content type must
+        # not make a plain-text draft an error.
+        logger.info(
+            "[draft_gmail_message] content_type='mixed' without html_body — "
+            "drafting as plain text"
         )
-        return DraftGmailMessageResponse(
-            success=False,
-            subject=subject,
-            content_type=content_type,
-            has_recipients=bool(to),
-            recipient_count=0,
-            userEmail=user_google_email or "",
-            error="Parameter validation error: missing html_body for mixed content",
-        )
+        content_type = "plain"
 
     # Format recipients for logging using shared utility function
     to_count = count_recipients(to) if to else 0
@@ -3287,7 +3274,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         content_type: Annotated[
             Literal["plain", "html", "mixed"],
             Field(
-                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)"
+                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body; without html_body behaves as 'plain')"
             ),
         ] = "mixed",
         html_body: Annotated[
@@ -3375,7 +3362,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         content_type: Annotated[
             Literal["plain", "html", "mixed"],
             Field(
-                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body)"
+                description="Content type: 'plain' (text only), 'html' (HTML in body param), 'mixed' (text in body, HTML in html_body; without html_body behaves as 'plain')"
             ),
         ] = "mixed",
         html_body: Annotated[
@@ -3442,6 +3429,65 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             email_spec=email_spec,
             draft_id=draft_id,
         )
+
+    @mcp.tool(
+        name="delete_gmail_draft",
+        description=(
+            "Permanently delete a Gmail draft by its draft_id.\n"
+            "Use when: discarding a draft you no longer want — including one "
+            "created by preview_gmail_draft. To update a draft instead of "
+            "deleting it, pass its draft_id to draft_gmail_message; to find a "
+            "draft_id, use search_gmail_messages with 'in:draft'.\n"
+            "Behavior: DESTRUCTIVE and immediate — the draft is removed with no "
+            "undo and does not go to Trash. Deleting a draft never sends it.\n"
+            "Returns: the deleted draft_id and a success flag. Errors: unknown "
+            "or already-deleted draft_id; Gmail auth failure (run start_google_auth)."
+        ),
+        tags={"gmail", "draft", "delete", "discard", "email"},
+        annotations={
+            "title": "Delete Gmail Draft",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def delete_gmail_draft(
+        draft_id: Annotated[
+            str,
+            Field(description="The draft ID to delete permanently (e.g. 'r-123...')"),
+        ],
+        user_google_email: UserGoogleEmail = None,
+    ) -> dict:
+        """Delete a draft.
+
+        The draft app has its own ``gmail_draft_discard``, but that is an
+        ``@app.tool()`` on the GmailDraft provider: it reaches the wire under a
+        hashed name and is callable only from the card's Discard button. Under
+        Code Mode a client with no renderer can create a draft through
+        ``preview_gmail_draft`` and then have no way to remove it — the hashed
+        name is rejected by ``execute`` as unknown. This is the same operation,
+        reachable by name.
+        """
+        try:
+            service = await _get_gmail_service_with_fallback(user_google_email)
+            await asyncio.to_thread(
+                service.users().drafts().delete(userId="me", id=draft_id).execute
+            )
+            logger.info(f"[delete_gmail_draft] Deleted draft {draft_id}")
+            return {
+                "success": True,
+                "draftId": draft_id,
+                "message": f"Draft {draft_id} deleted.",
+            }
+        except Exception as exc:
+            logger.error(f"[delete_gmail_draft] {exc}", exc_info=True)
+            return {
+                "success": False,
+                "draftId": draft_id,
+                "message": f"Delete failed: {exc}",
+                "error": str(exc),
+            }
 
     @mcp.tool(
         name="reply_to_gmail_message",

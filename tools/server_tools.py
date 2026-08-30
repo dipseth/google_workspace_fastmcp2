@@ -931,6 +931,8 @@ def setup_server_tools(mcp: FastMCP) -> None:
             session_state = _get_session_state()
             session_disabled = set(session_state.sessionDisabledTools)
 
+            from middleware.qdrant_core import extract_service_from_tool
+
             for name, tool in sorted(registry.items()):
                 if not include_internal and name.startswith("_"):
                     continue
@@ -941,6 +943,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         name=name,
                         enabled=enabled,
                         isProtected=is_protected,
+                        # `enabled` is global state. Without this a tool the
+                        # session filter will refuse to run still reports
+                        # enabled=True, which is the opposite of what someone
+                        # calling this to diagnose a block needs to see.
+                        sessionDisabled=name in session_disabled,
+                        service=extract_service_from_tool(name),
                         description=getattr(tool, "description", None),
                     )
                 )
