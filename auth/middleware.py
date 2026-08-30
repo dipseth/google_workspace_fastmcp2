@@ -2990,6 +2990,21 @@ class AuthMiddleware(Middleware):
             server = getattr(fastmcp_context, "fastmcp", None)
             if server is not None:
                 tool = await server.get_tool(tool_name)
+                if tool is None:
+                    # An MCP App's backend tool reaches the wire as
+                    # ``<hash>_<local_name>``; get_tool() does not resolve
+                    # that form, and a None here used to fall through to the
+                    # "cannot read schema" default — injecting the email into
+                    # a tool that never declared it, and killing every
+                    # UI-initiated call to it with "Unexpected keyword
+                    # argument". Resolve it the way the dispatcher does.
+                    from fastmcp.server.providers.addressing import (
+                        parse_hashed_backend_name,
+                    )
+
+                    hashed = parse_hashed_backend_name(tool_name)
+                    if hashed is not None:
+                        tool = await server.get_tool_by_hash(*hashed)
                 schema = getattr(tool, "parameters", None) or {}
                 properties = schema.get("properties")
                 if isinstance(properties, dict):
