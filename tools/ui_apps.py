@@ -10,6 +10,7 @@ using ``DataTable``, ``PrefabApp``, and ``FastMCPApp`` providers.
 
 import json
 import logging
+import uuid
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
@@ -481,7 +482,7 @@ def setup_ui_apps(mcp: FastMCP) -> None:
             ),
         )
         def code_mode_prefab_renderer() -> str:
-            return _get_renderer_html()
+            return code_mode_renderer_html()
     except ImportError:  # pragma: no cover - prefab-ui not installed
         logger.info("⏭️ Code Mode Prefab renderer unavailable (prefab-ui missing)")
 
@@ -1557,6 +1558,82 @@ def create_tool_management_app(mcp: FastMCP):
 #: full result in the ToolResult content, this only bounds what we draw.
 _CODE_MODE_VIEW_MAX_CHARS = 20_000
 
+# Above this, the Copy button does not carry the text itself: the card's
+# structuredContent reaches the model, and the body is already in it once.
+_COPY_INLINE_MAX_CHARS = 2_000
+
+# Prefab's CallHandler action looks up ``globalThis.__prefab_handlers.actions``
+# — a developer registry the renderer itself never populates. We serve the Code
+# Mode renderer from a URI we own, so we can register handlers ahead of it.
+# ``copy`` puts the result card's text on the clipboard: the text is passed
+# inline when small, else read back out of the card's own <pre> by id, else
+# found by walking up from the clicked button. execCommand runs first because
+# it works inside a sandboxed iframe under a click; the async Clipboard API is
+# tried as well where the host grants it.
+_RENDERER_HANDLERS_SCRIPT = """<script>
+(function () {
+  var reg = (globalThis.__prefab_handlers = globalThis.__prefab_handlers || {});
+  reg.actions = reg.actions || {};
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+  function nearestCode(node) {
+    while (node) {
+      var pre = node.querySelector && node.querySelector("pre, code");
+      if (pre) return pre;
+      node = node.parentElement;
+    }
+    return null;
+  }
+  reg.actions.copy = function (ctx) {
+    var args = (ctx && ctx.arguments) || {};
+    var text = args.text;
+    if (text == null && args.target) {
+      var el = document.getElementById(args.target);
+      if (el) text = el.innerText;
+    }
+    if (text == null) {
+      var btn = document.activeElement;
+      var pre = btn && nearestCode(btn.parentElement);
+      if (pre) text = pre.innerText;
+    }
+    if (text == null) throw new Error("Nothing to copy");
+    text = String(text);
+    var ok = legacyCopy(text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {});
+      ok = true;
+    }
+    if (!ok) throw new Error("Clipboard unavailable");
+  };
+})();
+</script>
+"""
+
+
+def code_mode_renderer_html() -> str:
+    """The Prefab renderer HTML with our CallHandler registry in front of it."""
+    from prefab_ui.renderer import get_renderer_html
+
+    html = get_renderer_html()
+    i = html.find("<script")
+    if i < 0:
+        return html + _RENDERER_HANDLERS_SCRIPT
+    return html[:i] + _RENDERER_HANDLERS_SCRIPT + html[i:]
+
 
 def _parse_json_data(text: str):
     """The dict or list *text* encodes, or ``None`` when it is not JSON data.
@@ -1587,9 +1664,12 @@ def _build_result_card(
     the value cannot be rendered.
     """
     try:
+        from prefab_ui.actions import ShowToast
+        from prefab_ui.actions.custom import CallHandler
         from prefab_ui.components import (
             H3,
             Badge,
+            Button,
             Card,
             CardContent,
             CardHeader,
@@ -1628,15 +1708,34 @@ def _build_result_card(
 
     called = [t for t in (tool_names or []) if t]
 
+    code_id = f"result-{uuid.uuid4().hex[:8]}"
+    copy_args: dict[str, str] = {"target": code_id}
+    if len(body) <= _COPY_INLINE_MAX_CHARS:
+        copy_args["text"] = body
+
     try:
         with Card(css_class=css_class) as view:
             with CardHeader(), Row(gap=2, css_class="items-center justify-between"):
                 H3(heading)
-                Badge(language.upper(), variant="secondary")
+                with Row(gap=2, css_class="items-center"):
+                    Badge(language.upper(), variant="secondary")
+                    Button(
+                        "Copy",
+                        variant="ghost",
+                        size="xs",
+                        on_click=CallHandler(
+                            "copy",
+                            arguments=copy_args,
+                            on_success=ShowToast(
+                                "Copied to clipboard", variant="success"
+                            ),
+                            on_error=ShowToast("Copy failed", variant="error"),
+                        ),
+                    )
             with CardContent(), Column(gap=2):
                 if called:
                     Muted("Called: " + ", ".join(called))
-                Code(body, language=language)
+                Code(body, language=language, id=code_id)
                 if truncated:
                     Text(
                         "Output truncated for display — the full result was "

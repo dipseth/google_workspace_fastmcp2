@@ -73,3 +73,44 @@ class TestResultCard:
     def test_unicode_survives(self):
         code, _ = _card('{"label": "Café — été"}')
         assert "Café — été" in code["content"]
+
+
+def _first(x):
+    return x[0] if isinstance(x, list) else x
+
+
+class TestCopyButton:
+    def _click(self, raw):
+        spec = _build_result_card(raw, []).to_json()
+        btn = _find(spec, "Button")
+        assert btn["label"] == "Copy"
+        click = _first(btn["onClick"])
+        assert click["action"] == "callHandler" and click["handler"] == "copy"
+        return spec, click
+
+    def test_small_result_carries_its_text_and_targets_its_code_block(self):
+        spec, click = self._click('{"a": 1}')
+        assert click["arguments"]["text"] == '{\n  "a": 1\n}'
+        assert _find(spec, "Code")["id"] == click["arguments"]["target"]
+        assert _first(click["onSuccess"])["action"] == "showToast"
+        assert _first(click["onError"])["action"] == "showToast"
+
+    def test_large_result_is_not_duplicated_into_the_button(self):
+        """The card reaches the model; the body is already in it once."""
+        from tools.ui_apps import _COPY_INLINE_MAX_CHARS
+
+        big = json.dumps({"k": "x" * (_COPY_INLINE_MAX_CHARS + 10)})
+        spec, click = self._click(big)
+        assert "text" not in click["arguments"]
+        assert click["arguments"]["target"] == _find(spec, "Code")["id"]
+
+
+class TestRendererHandlers:
+    def test_copy_handler_is_registered_before_the_renderer_loads(self):
+        from tools.ui_apps import code_mode_renderer_html
+
+        html = code_mode_renderer_html()
+        assert "__prefab_handlers" in html
+        assert "reg.actions.copy" in html
+        assert html.index("__prefab_handlers") < html.index('type="module"')
+        assert html.count('<div id="root">') == 1, "the page itself is intact"
