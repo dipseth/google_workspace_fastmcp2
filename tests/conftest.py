@@ -12,6 +12,31 @@ import os
 import pytest
 
 # ---------------------------------------------------------------------------
+# Keep test runs out of the developer's credentials/ directory.
+#
+# Anything that toggles per-session tool state (manage_tools, the session
+# filtering middleware, AuthMiddleware shutdown) calls
+# auth.context.persist_session_tool_states(), which writes to
+# settings.session_tool_state_path — by default
+# credentials/session_tool_states.json, the same file the *live* local server
+# reads at startup to restore a returning session's tools. Left unredirected,
+# a test run overwrote that file with throwaway test sessions, so the next real
+# server start inherited test state (or lost the real state).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _session_tool_state_in_tmp(tmp_path_factory):
+    """Redirect session-tool-state persistence to a per-run temp file."""
+    import auth.context as ctx
+
+    path = tmp_path_factory.mktemp("session-state") / "session_tool_states.json"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ctx, "_get_session_tool_state_path", lambda: path)
+        yield path
+
+
+# ---------------------------------------------------------------------------
 # Env-var detection helpers
 # ---------------------------------------------------------------------------
 
