@@ -142,6 +142,23 @@ def test_client_identity_is_logged_once_per_session(connect, caplog):
     assert "claude-ai" in lines[0].getMessage()
 
 
+def test_identity_is_logged_even_with_gating_disabled(connect, caplog, monkeypatch):
+    """Turning the gate off must not take the telemetry with it.
+
+    The allowlist is populated from this log line, so a run with gating off —
+    the state you switch to *because* a client was wrongly downgraded — is the
+    one that most needs to report what the client calls itself.
+    """
+    connect(name="some-unknown-host", advertises=False, session_id="sess-off")
+    monkeypatch.setattr(settings, "draft_preview_ui_gating", False)
+    with caplog.at_level(logging.INFO, logger=cc.__name__):
+        assert cc.client_renders_ui() is True
+    lines = [r.getMessage() for r in caplog.records if "[ui-gating]" in r.getMessage()]
+    assert len(lines) == 1
+    assert "some-unknown-host" in lines[0]
+    assert "gating=False" in lines[0]
+
+
 def test_logged_session_cache_stays_bounded(connect, caplog):
     cc._logged_sessions.update(str(i) for i in range(cc._LOGGED_SESSIONS_CAP))
     connect(name="claude-ai", advertises=False, session_id="fresh")

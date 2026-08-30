@@ -102,25 +102,32 @@ def detect_ui_support() -> UISupport:
     info = getattr(params, "clientInfo", None)
     name = getattr(info, "name", None)
     version = getattr(info, "version", None)
-    return UISupport(
+    support = UISupport(
         name=name,
         version=version,
         advertises_extension=_advertises_ui_extension(),
         name_allowlisted=_name_allowlisted(name),
         handshake_seen=True,
     )
+    # Report here rather than from the gate. Switching the gate off is exactly
+    # when you need to know what a client calls itself — that is how you get a
+    # name for the allowlist — and gating off used to short-circuit before the
+    # log line ever ran, leaving no way to find the name but a shell on the
+    # server.
+    _log_identity_once(support)
+    return support
 
 
 def client_renders_ui() -> bool:
     """True when the connected client should be handed a full app card."""
+    # Detect before consulting the flag so the identity is observed either way.
+    support = detect_ui_support()
+
     if not settings.draft_preview_ui_gating:
         return True
-
-    support = detect_ui_support()
     if not support.handshake_seen:
         return True
 
-    _log_identity_once(support)
     return support.renders
 
 
@@ -144,11 +151,14 @@ def _log_identity_once(support: UISupport) -> None:
             _logged_sessions.clear()
         _logged_sessions.add(session_id)
 
+    gating = settings.draft_preview_ui_gating
     logger.info(
-        "[ui-gating] client=%s version=%s advertises_extension=%s allowlisted=%s -> %s",
+        "[ui-gating] client=%s version=%s advertises_extension=%s allowlisted=%s "
+        "gating=%s -> %s",
         support.name or "(unnamed)",
         support.version or "(unknown)",
         support.advertises_extension,
         support.name_allowlisted,
-        "card" if support.renders else "text-only",
+        gating,
+        "card" if (support.renders or not gating) else "text-only",
     )

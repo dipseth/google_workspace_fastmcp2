@@ -68,6 +68,16 @@ def register_watched_tools(tool_names: set) -> None:
     _watched_tools.update(tool_names)
 
 
+def is_watched_tool(tool_name: str) -> bool:
+    """True when this tool's structured_content gets a dashboard injected.
+
+    Callers downstream need to distinguish a view this middleware put there
+    (over a payload that still exists in the text content) from one a tool
+    genuinely returned.
+    """
+    return tool_name in _watched_tools
+
+
 def get_cached_result(tool_name: str) -> Optional[dict]:
     """Return the last cached result for *tool_name*, or ``None``.
 
