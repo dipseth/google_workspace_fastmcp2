@@ -3444,6 +3444,65 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool(
+        name="delete_gmail_draft",
+        description=(
+            "Permanently delete a Gmail draft by its draft_id.\n"
+            "Use when: discarding a draft you no longer want — including one "
+            "created by preview_gmail_draft. To update a draft instead of "
+            "deleting it, pass its draft_id to draft_gmail_message; to find a "
+            "draft_id, use search_gmail_messages with 'in:draft'.\n"
+            "Behavior: DESTRUCTIVE and immediate — the draft is removed with no "
+            "undo and does not go to Trash. Deleting a draft never sends it.\n"
+            "Returns: the deleted draft_id and a success flag. Errors: unknown "
+            "or already-deleted draft_id; Gmail auth failure (run start_google_auth)."
+        ),
+        tags={"gmail", "draft", "delete", "discard", "email"},
+        annotations={
+            "title": "Delete Gmail Draft",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def delete_gmail_draft(
+        draft_id: Annotated[
+            str,
+            Field(description="The draft ID to delete permanently (e.g. 'r-123...')"),
+        ],
+        user_google_email: UserGoogleEmail = None,
+    ) -> dict:
+        """Delete a draft.
+
+        The draft app has its own ``gmail_draft_discard``, but that is an
+        ``@app.tool()`` on the GmailDraft provider: it reaches the wire under a
+        hashed name and is callable only from the card's Discard button. Under
+        Code Mode a client with no renderer can create a draft through
+        ``preview_gmail_draft`` and then have no way to remove it — the hashed
+        name is rejected by ``execute`` as unknown. This is the same operation,
+        reachable by name.
+        """
+        try:
+            service = await _get_gmail_service_with_fallback(user_google_email)
+            await asyncio.to_thread(
+                service.users().drafts().delete(userId="me", id=draft_id).execute
+            )
+            logger.info(f"[delete_gmail_draft] Deleted draft {draft_id}")
+            return {
+                "success": True,
+                "draftId": draft_id,
+                "message": f"Draft {draft_id} deleted.",
+            }
+        except Exception as exc:
+            logger.error(f"[delete_gmail_draft] {exc}", exc_info=True)
+            return {
+                "success": False,
+                "draftId": draft_id,
+                "message": f"Delete failed: {exc}",
+                "error": str(exc),
+            }
+
+    @mcp.tool(
         name="reply_to_gmail_message",
         description="Send a reply to a specific Gmail message with proper threading and HTML support",
         tags={"gmail", "reply", "send", "thread", "email", "html", "conversation"},
