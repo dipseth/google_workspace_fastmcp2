@@ -3986,11 +3986,9 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         "Behavior: action='draft' (default) only creates a draft; action='send' delivers immediately to to/cc/bcc with no confirmation step. Not idempotent — repeated sends deliver duplicates.\n"
         "reply_to_message_id threads the email as a reply to that Gmail message (recipients derived from the original; the reply subject overrides the DSL subject). "
         "draft_id updates an existing draft in place instead of creating a new one (action='draft' only).\n"
-        "Templates: template=<name> composes from a saved email template (see manage_email_templates) — "
-        "email_description becomes optional, template_values fills its [[placeholders]] "
-        '(e.g. {"recipient_name": "Sam"}), and email_params deep-merges over the template\'s params '
-        "(patch one block's text, swap a color) for block templates. Unfilled placeholders block "
-        "action='send'; a draft is still created with a warning so you can fix it in place.\n"
+        "Templates: template=<name> composes from a saved template (see manage_email_templates); "
+        "template_values fills its [[placeholders]], email_params deep-merges over its params. "
+        "Unfilled placeholders block send; drafts get a warning instead.\n"
         "Returns: message/draft id and delivery status. Errors: missing DSL notation in email_description fails before any send; invalid recipients or Gmail auth failures are reported per attempt."
     )
 
