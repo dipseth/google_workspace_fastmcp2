@@ -22,6 +22,16 @@ parsed MIME message and re-upload via ``drafts().update``. The body,
 attachments, transfer encodings and ``threadId`` survive untouched — no
 re-render, no lossy round-trip.
 
+**Content edits (values only, layout locked).** Drafts composed by
+``compose_dynamic_email`` embed their authored EmailSpec in the HTML (see
+``email_templates.embed_email_spec``); for those the card grows an "Edit
+content" section with one input per content field (hero title, each
+paragraph, button label/URL, …). Applying edits patches the leaf values into
+the recovered spec, re-renders it server-side, and swaps the body parts with
+the same lossless MIME surgery as header edits — the block structure never
+leaves the server, so the layout physically cannot change. Drafts without an
+embedded spec simply don't get the section.
+
 Requires ``fastmcp[apps]`` (prefab-ui) and a client that advertises the
 ``io.modelcontextprotocol/ui`` extension (Claude Desktop, MCP Inspector).
 """
@@ -509,6 +519,20 @@ async def _load_draft(gmail_service: Any, draft_id: str) -> DraftSnapshot:
     return DraftSnapshot(draft_id, draft, _parse_raw_message(raw))
 
 
+async def _upload_draft(gmail_service: Any, snapshot: DraftSnapshot) -> None:
+    """Re-upload the (mutated) MIME message as the same draft."""
+    body: dict[str, Any] = {"message": {"raw": _serialize(snapshot.msg)}}
+    if snapshot.thread_id:
+        body["message"]["threadId"] = snapshot.thread_id
+
+    await asyncio.to_thread(
+        gmail_service.users()
+        .drafts()
+        .update(userId="me", id=snapshot.draft_id, body=body)
+        .execute
+    )
+
+
 async def _update_draft_headers(
     gmail_service: Any,
     snapshot: DraftSnapshot,
@@ -523,17 +547,40 @@ async def _update_draft_headers(
     _set_header(snapshot.msg, "Bcc", ", ".join(bcc))
     if subject is not None:
         _set_header(snapshot.msg, "Subject", subject)
+    await _upload_draft(gmail_service, snapshot)
 
-    body: dict[str, Any] = {"message": {"raw": _serialize(snapshot.msg)}}
-    if snapshot.thread_id:
-        body["message"]["threadId"] = snapshot.thread_id
 
-    await asyncio.to_thread(
-        gmail_service.users()
-        .drafts()
-        .update(userId="me", id=snapshot.draft_id, body=body)
-        .execute
-    )
+def _set_text_payload(part: Message, text: str) -> None:
+    """Replace a text part's payload, re-encoding cleanly.
+
+    The old Content-Transfer-Encoding must be deleted first: ``set_payload``
+    with a charset only encodes the body when it adds the CTE header itself,
+    so a stale quoted-printable/base64 header would mislabel the new payload.
+    """
+    del part["Content-Transfer-Encoding"]
+    part.set_payload(text, charset="utf-8")
+
+
+async def _update_draft_body(
+    gmail_service: Any,
+    snapshot: DraftSnapshot,
+    html: str,
+    plain: Optional[str] = None,
+) -> None:
+    """Swap the ``text/html`` (and ``text/plain`` sibling) payloads in place.
+
+    Same lossless surgery as :func:`_update_draft_headers`: attachments,
+    inline images, recipients and ``threadId`` survive untouched.
+    """
+    html_part = _find_body_part(snapshot.msg, "html")
+    if html_part is None:
+        raise ValueError("Draft has no text/html body part to update.")
+    _set_text_payload(html_part, html)
+    if plain is not None:
+        plain_part = _find_body_part(snapshot.msg, "plain")
+        if plain_part is not None:
+            _set_text_payload(plain_part, plain)
+    await _upload_draft(gmail_service, snapshot)
 
 
 async def _check_allow_list(
@@ -551,6 +598,135 @@ async def _check_allow_list(
 
 
 # ---------------------------------------------------------------------------
+# Content editing (embedded EmailSpec)
+# ---------------------------------------------------------------------------
+
+# Content fields the editor exposes, keyed by ``block_type``. Prose and link
+# targets only — styling fields never reach the UI, and the block structure
+# never leaves the server, so the layout physically cannot change. Superset
+# of ``email_templates._AUTO_PLACEHOLDER_FIELDS`` (adds header/footer text).
+_EDITABLE_FIELDS: dict[str, dict[str, str]] = {
+    "hero": {
+        "title": "Hero title",
+        "subtitle": "Hero subtitle",
+        "cta_text": "Hero button text",
+        "cta_url": "Hero button URL",
+    },
+    "text": {"text": "Paragraph"},
+    "button": {"text": "Button text", "url": "Button URL"},
+    "header": {"title": "Header title"},
+    "footer": {"text": "Footer text"},
+}
+
+# (block_type, field) pairs rendered as a multi-line textarea.
+_MULTILINE_FIELDS = {("text", "text")}
+
+
+def _embedded_spec(snapshot: DraftSnapshot) -> Optional[dict]:
+    """Recover the EmailSpec dict embedded in the draft's HTML body, if any.
+
+    Every email rendered by ``compose_dynamic_email`` carries its authored
+    spec in an invisible HTML comment (see ``email_templates.embed_email_spec``).
+    Drafts written in the Gmail UI or as plain text return ``None`` and the
+    card degrades to the header-only editor.
+    """
+    from gmail.email_templates import extract_embedded_spec
+
+    msg = getattr(snapshot, "msg", None)
+    if msg is None:
+        return None
+    html_part = _find_body_part(msg, "html")
+    if html_part is None:
+        return None
+    return extract_embedded_spec(_decode_part_text(html_part))
+
+
+def _content_fields(spec_data: dict) -> list[dict]:
+    """Derive the editable content fields from an embedded EmailSpec dict.
+
+    Returns ``[{"path", "label", "value", "multiline"}]`` in document order.
+    ``path`` addresses the leaf in the spec dict (``blocks.2.title``,
+    ``blocks.4.columns.0.blocks.1.text``) and is the only handle the UI gets —
+    :func:`_apply_content_edits` re-validates every path server-side.
+    """
+    fields: list[dict] = []
+
+    def _visit(block: Any, path: str) -> None:
+        if not isinstance(block, dict):
+            return
+        block_type = block.get("block_type")
+        if block_type == "columns":
+            for c_idx, column in enumerate(block.get("columns") or []):
+                if not isinstance(column, dict):
+                    continue
+                for b_idx, inner in enumerate(column.get("blocks") or []):
+                    _visit(inner, f"{path}.columns.{c_idx}.blocks.{b_idx}")
+            return
+        for field_name, label in _EDITABLE_FIELDS.get(block_type or "", {}).items():
+            value = block.get(field_name)
+            if not isinstance(value, str):
+                continue
+            fields.append(
+                {
+                    "path": f"{path}.{field_name}",
+                    "label": label,
+                    "value": value,
+                    "multiline": (block_type, field_name) in _MULTILINE_FIELDS,
+                }
+            )
+
+    for idx, block in enumerate(spec_data.get("blocks") or []):
+        _visit(block, f"blocks.{idx}")
+
+    # Number repeated labels ("Paragraph 1", "Paragraph 2") so the card stays
+    # unambiguous; labels that occur once keep their plain name.
+    counts: dict[str, int] = {}
+    for item in fields:
+        counts[item["label"]] = counts.get(item["label"], 0) + 1
+    seen: dict[str, int] = {}
+    for item in fields:
+        if counts[item["label"]] > 1:
+            seen[item["label"]] = seen.get(item["label"], 0) + 1
+            item["label"] = f"{item['label']} {seen[item['label']]}"
+    return fields
+
+
+def _apply_content_edits(spec_data: dict, fields: dict) -> int:
+    """Patch ``{path: value}`` leaf edits into the spec dict, in place.
+
+    Only paths :func:`_content_fields` could have produced are accepted:
+    every step is a structural key (``blocks``/``columns``) or a list index,
+    and the leaf must be an existing string field allowed for its block type.
+    Anything else raises ``ValueError`` — the UI only submits derived paths,
+    so a mismatch means the draft changed under the card. Returns the number
+    of fields whose value actually changed.
+    """
+    changed = 0
+    for path, value in (fields or {}).items():
+        if not isinstance(value, str):
+            raise ValueError(f"Field {path!r}: values must be strings.")
+        tokens = str(path).split(".")
+        node: Any = spec_data
+        for token in tokens[:-1]:
+            if token.isdigit() and isinstance(node, list) and int(token) < len(node):
+                node = node[int(token)]
+            elif token in ("blocks", "columns") and isinstance(node, dict):
+                node = node.get(token)
+            else:
+                raise ValueError(f"Field {path!r} does not match this draft.")
+        leaf = tokens[-1]
+        if not isinstance(node, dict):
+            raise ValueError(f"Field {path!r} does not match this draft.")
+        allowed = _EDITABLE_FIELDS.get(node.get("block_type") or "", {})
+        if leaf not in allowed or not isinstance(node.get(leaf), str):
+            raise ValueError(f"Field {path!r} is not an editable content field.")
+        if node[leaf] != value:
+            node[leaf] = value
+            changed += 1
+    return changed
+
+
+# ---------------------------------------------------------------------------
 # MCP App — interactive draft card
 # ---------------------------------------------------------------------------
 
@@ -559,7 +735,9 @@ _ENTRY_TOOL_NAME = "preview_gmail_draft"
 _ENTRY_DESCRIPTION = """\
 Render a Gmail draft as an interactive card in the chat with Send, Save and
 Discard buttons, a live preview of the fully rendered email, and editable
-To/Cc/Bcc fields.
+To/Cc/Bcc fields. Drafts composed by ``compose_dynamic_email`` also get an
+"Edit content" section: the user can rewrite each section's text (hero title,
+paragraphs, button labels/URLs) in place while the layout stays locked.
 
 Call this after creating a draft (pass the ``draft_id`` returned by
 ``draft_gmail_message`` / ``draft_gmail_reply`` / ``draft_gmail_forward``), or
@@ -700,11 +878,15 @@ def _build_draft_view(
         Row,
         Separator,
         Text,
+        Textarea,
     )
     from prefab_ui.components.embed import Embed
     from prefab_ui.rx import ERROR, RESULT, STATE
 
     preview_html, warning = preview if preview is not None else snapshot.preview_html()
+
+    spec_data = _embedded_spec(snapshot)
+    edit_fields = _content_fields(spec_data) if spec_data else []
 
     to_value = ", ".join(snapshot.to)
     cc_value = ", ".join(snapshot.cc)
@@ -769,16 +951,70 @@ def _build_draft_view(
                     size="xs",
                     on_click=ToggleState("show_cc"),
                 )
+                if edit_fields:
+                    Button(
+                        "Edit content",
+                        variant="ghost",
+                        size="xs",
+                        on_click=ToggleState("show_edit"),
+                    )
             with If(STATE.show_cc), Column(gap=1):
                 Label("Cc")
                 Input(name="cc", value=cc_value, placeholder="Cc (optional)")
                 Label("Bcc")
                 Input(name="bcc", value=bcc_value, placeholder="Bcc (optional)")
 
+            if edit_fields:
+                with If(STATE.show_edit), Column(gap=1):
+                    Muted(
+                        "Edit the text of each section — layout and styling "
+                        "stay as composed."
+                    )
+                    apply_args: dict[str, Any] = {}
+                    for idx, item in enumerate(edit_fields):
+                        key = f"edit_{idx}"
+                        Label(item["label"])
+                        if item["multiline"]:
+                            Textarea(name=key, value=item["value"], rows=3)
+                        else:
+                            Input(name=key, value=item["value"])
+                        apply_args[item["path"]] = getattr(STATE, key)
+                    Button(
+                        "Apply changes",
+                        variant="outline",
+                        size="sm",
+                        disabled=STATE.done,
+                        on_click=[
+                            SetState("status", "Applying content edits…"),
+                            CallTool(
+                                "gmail_draft_apply_edits",
+                                arguments={
+                                    "draft_id": snapshot.draft_id,
+                                    "fields": apply_args,
+                                },
+                                on_success=[
+                                    # Empty preview (error / no-op result)
+                                    # keeps the current document instead of
+                                    # blanking the iframe.
+                                    SetState(
+                                        "preview_doc",
+                                        "{{ $result.preview || preview_doc }}",
+                                    ),
+                                    SetState("status", RESULT.message),
+                                    UpdateContext(content=RESULT.message),
+                                ],
+                                on_error=[SetState("status", ERROR)],
+                            ),
+                        ],
+                    )
+
             Separator()
 
+            # With an embedded spec the iframe document lives in state so
+            # gmail_draft_apply_edits can refresh it in place; otherwise the
+            # static document is inlined exactly as before.
             Embed(
-                html=preview_html,
+                html=str(STATE.preview_doc) if edit_fields else preview_html,
                 width="100%",
                 height="520px",
                 sandbox=_PREVIEW_SANDBOX,
@@ -888,21 +1124,28 @@ def _build_draft_view(
                     ),
                 )
 
-    return PrefabApp(
-        view=view,
-        state={
-            "subject": snapshot.subject,
-            "to": to_value,
-            "cc": cc_value,
-            "bcc": bcc_value,
-            "contact_pick": "",
-            "show_cc": bool(cc_value or bcc_value),
-            "confirm_discard": False,
-            "needs_confirm": False,
-            "done": False,
-            "status": "",
-        },
-    )
+    state: dict[str, Any] = {
+        "subject": snapshot.subject,
+        "to": to_value,
+        "cc": cc_value,
+        "bcc": bcc_value,
+        "contact_pick": "",
+        "show_cc": bool(cc_value or bcc_value),
+        "confirm_discard": False,
+        "needs_confirm": False,
+        "done": False,
+        "status": "",
+    }
+    if edit_fields:
+        state["show_edit"] = False
+        state["preview_doc"] = preview_html
+        # Seed every field: CallTool interpolates {{ edit_N }} from state, so
+        # an unseeded key would submit the literal template string for any
+        # field the user never touched.
+        for idx, item in enumerate(edit_fields):
+            state[f"edit_{idx}"] = item["value"]
+
+    return PrefabApp(view=view, state=state)
 
 
 def create_gmail_draft_app(mcp: Any = None):
@@ -1043,6 +1286,65 @@ def create_gmail_draft_app(mcp: Any = None):
                 "ok": False,
                 "draft_id": draft_id,
                 "message": f"Save failed: {exc}",
+            }
+
+    @app.tool()
+    async def gmail_draft_apply_edits(
+        draft_id: str,
+        fields: dict,
+        user_google_email: UserGoogleEmail = None,
+    ) -> dict:
+        """Patch content-field values into the draft's embedded EmailSpec.
+
+        ``fields`` maps spec paths (``blocks.0.title``) to new string values.
+        The spec is re-rendered and the draft body swapped losslessly; the
+        result carries the refreshed preview document so the card can update
+        its iframe in place. Layout cannot change — only leaf values that
+        ``_apply_content_edits`` allows are ever written.
+        """
+        from gmail.compose import _render_email_spec
+        from gmail.service import _get_gmail_service_with_fallback
+        from gmail.utils import _html_to_plain_text
+
+        try:
+            service = await _get_gmail_service_with_fallback(user_google_email)
+            snapshot = await _load_draft(service, draft_id)
+            spec_data = _embedded_spec(snapshot)
+            if spec_data is None:
+                return {
+                    "ok": False,
+                    "preview": "",
+                    "message": (
+                        "This draft carries no embedded email spec, so its "
+                        "content can't be edited here. Compose it with "
+                        "compose_dynamic_email to get an editable draft."
+                    ),
+                }
+            changed = _apply_content_edits(spec_data, fields)
+            if not changed:
+                return {
+                    "ok": True,
+                    "preview": "",
+                    "message": "No content changes to apply.",
+                }
+            # Re-render first — a validation/render failure must leave the
+            # draft untouched. The rendered HTML re-embeds the updated spec,
+            # so subsequent edits round-trip.
+            _, html = _render_email_spec(spec_data)
+            await _update_draft_body(service, snapshot, html, _html_to_plain_text(html))
+            preview, _preview_warning = await snapshot.preview_document()
+            noun = "section" if changed == 1 else "sections"
+            return {
+                "ok": True,
+                "preview": preview,
+                "message": f"Updated {changed} {noun} — draft saved.",
+            }
+        except Exception as exc:
+            logger.error(f"[gmail_draft_apply_edits] {exc}", exc_info=True)
+            return {
+                "ok": False,
+                "preview": "",
+                "message": f"Content update failed: {exc}",
             }
 
     @app.tool()
