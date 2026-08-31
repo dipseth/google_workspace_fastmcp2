@@ -5,6 +5,7 @@ Provides filters for extracting properties, safely accessing data, and mapping
 lists/attributes in template processing.
 """
 
+import re
 from typing import Any, List
 
 from config.enhanced_logging import setup_logger
@@ -155,3 +156,79 @@ def _extract_property(data: Any, property_path: str) -> Any:
             return None
 
     return current
+
+
+# =============================================================================
+# Structural merge / placeholder filters (used by saved email templates)
+# =============================================================================
+
+PLACEHOLDER_PATTERN = re.compile(r"\[\[\s*([A-Za-z_][A-Za-z0-9_]*)\s*\]\]")
+
+
+def deep_merge(base, override):
+    """Recursively merge ``override`` into ``base`` without mutating either.
+
+    - dict + dict → keys merged recursively
+    - list + list → merged index-wise (extra override items appended), so a
+      template's ``_items`` list can be patched one entry at a time
+    - anything else → the override value wins
+    - ``override`` of ``None`` → ``base`` returned unchanged
+    """
+    if override is None:
+        return base
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = dict(base)
+        for key, value in override.items():
+            merged[key] = deep_merge(base.get(key), value) if key in base else value
+        return merged
+    if isinstance(base, list) and isinstance(override, list):
+        merged = [deep_merge(b, o) for b, o in zip(base, override)]  # index-wise patch
+        merged.extend(override[len(base) :])
+        merged.extend(base[len(override) :])
+        return merged
+    return override
+
+
+def find_placeholders(value) -> list:
+    """Return the distinct ``[[placeholder]]`` names found anywhere in ``value``."""
+    found: list = []
+
+    def _walk(node):
+        if isinstance(node, str):
+            for match in PLACEHOLDER_PATTERN.finditer(node):
+                name = match.group(1)
+                if name not in found:
+                    found.append(name)
+        elif isinstance(node, dict):
+            for item in node.values():
+                _walk(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                _walk(item)
+
+    _walk(value)
+    return found
+
+
+def fill_placeholders(value, values=None):
+    """Substitute ``[[name]]`` markers in ``value`` (str/dict/list, recursively).
+
+    Unknown names are left untouched so the caller can report them via
+    :func:`find_placeholders`. Non-string replacement values are stringified.
+    """
+    if not values:
+        return value
+    if isinstance(value, str):
+
+        def _sub(match):
+            name = match.group(1)
+            if name in values and values[name] is not None:
+                return str(values[name])
+            return match.group(0)
+
+        return PLACEHOLDER_PATTERN.sub(_sub, value)
+    if isinstance(value, dict):
+        return {k: fill_placeholders(v, values) for k, v in value.items()}
+    if isinstance(value, list):
+        return [fill_placeholders(v, values) for v in value]
+    return value

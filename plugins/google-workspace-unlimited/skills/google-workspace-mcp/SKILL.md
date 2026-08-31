@@ -121,6 +121,37 @@ The plain-HTML tools follow the same pattern: `draft_gmail_message` and
 `draft_gmail_reply` accept the same `draft_id` for in-place updates, and
 `draft_gmail_reply` accepts `email_spec` for MJML reply drafts.
 
+**Reusable email templates (`manage_email_templates`):**
+
+Gmail's own Templates menu has no API (web-UI only), so templates live server-side
+as persisted Jinja macros — visible under `template://macros` and callable from
+any templated parameter, e.g. `{{ welcome(email_symbols, mode='params',
+values={'recipient_name': 'Sam'}) }}`.
+
+- **Save** from any of three sources — the compose inputs
+  (`email_description` + `email_params`), a `draft_id`, or a `message_id` of a
+  sent email. Emails composed by `compose_dynamic_email` embed their EmailSpec
+  in an invisible HTML comment, so drafts/sent mail round-trip into *block*
+  templates (DSL + params, fully re-parametrisable). Other emails become *html*
+  templates (body verbatim, placeholders only).
+- **Placeholders** are `[[snake_case]]` markers (never `{{ }}`, so the template
+  middleware leaves them alone). Pass `placeholders={"Sam": "recipient_name",
+  "Tue 3pm": "meeting_time"}` on save to swap literal text for descriptive
+  names; `auto_placeholders=true` also parametrises every hero title/subtitle/CTA,
+  paragraph and button (`hero_title`, `paragraph`, `button_url`…; numbered
+  `paragraph_1`, `paragraph_2`… only when a block class repeats). Unmapped text
+  stays as fixed boilerplate (footer, signature, brand header), and feedback
+  widgets injected by `ENABLE_EMAIL_FEEDBACK` are stripped from saved templates.
+- **Use** with `compose_dynamic_email(template="welcome",
+  template_values={"recipient_name": "Sam"}, to=..., action="draft")`.
+  `email_params` deep-merges over the template's params (patch one paragraph,
+  swap a color); plain text in `email_description` overrides the subject.
+  Unfilled placeholders block `action="send"`; a draft is still created with a
+  `warning` so you can fill them in place via `draft_id`.
+- **Bridge to Gmail's native Templates**: draft it with `compose_dynamic_email`,
+  open the draft in Gmail web, ⋮ → Templates → *Save draft as template*. Manual,
+  one click; not automatable.
+
 **Example — patch one block of an existing draft (code mode):**
 ```python
 drafts = await call_tool("search_gmail_messages", {"query": "in:draft", "page_size": 5})
@@ -460,7 +491,7 @@ Use `manage_tools(action="list")` or `manage_tools(action="list", service_filter
 | **Photos** | `list_photos_albums`, `search_photos`, `upload_photos`, `upload_folder_photos`, `photos_smart_search`, `photos_batch_details`, `create_photos_album`, `get_photo_details` |
 | **People** | `list_people_contact_labels`, `get_people_contact_group_members`, `manage_people_contact_labels` |
 | **Qdrant** | `qdrant_search`, `search_tool_history`, `get_tool_analytics`, `fetch`, `get_response_details`, `cleanup_qdrant_data` |
-| **Email Templates** | `create_email_template`, `list_email_templates`, `preview_email_template`, `intelligent_email_composer`, `send_smart_email` |
+| **Email Templates** | `manage_email_templates` (save/list/get/delete), `compose_dynamic_email(template=…)` |
 | **Module Wrappers** | `list_wrapped_modules`, `wrap_module`, `search_module`, `list_module_components`, `get_module_component` |
 | **Server** | `health_check`, `manage_credentials`, `manage_tools`, `create_template_macro` |
 | **Code Mode** | `tags`, `search`, `get_schema`, `semantic_search`, `fetch_document`, `tool_activity`, `execute` |

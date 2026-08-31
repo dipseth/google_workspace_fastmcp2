@@ -559,6 +559,11 @@ def _render_email_spec(
     if isinstance(email_spec, dict):
         email_spec = EmailSpec(**email_spec)
 
+    # The spec as authored — _maybe_append_feedback_blocks mutates blocks in
+    # place, so a deep copy (not an alias) is required or templates recovered
+    # from sent mail inherit the feedback widget (and re-inject cumulatively).
+    authored_spec = email_spec.model_copy(deep=True)
+
     # Optionally append feedback blocks before rendering
     email_spec = _maybe_append_feedback_blocks(email_spec, email_id)
 
@@ -567,7 +572,15 @@ def _render_email_spec(
         diag_msgs = "; ".join(d.message for d in result.diagnostics)
         raise ValueError(f"EmailSpec rendering failed: {diag_msgs}")
 
-    return email_spec.subject, result.html
+    html_out = result.html
+    if getattr(settings, "gmail_embed_email_spec", True):
+        # Invisible comment carrying the EmailSpec, so this draft/sent message
+        # can later be saved as a block template (manage_email_templates).
+        from gmail.email_templates import embed_email_spec
+
+        html_out = embed_email_spec(html_out, authored_spec)
+
+    return email_spec.subject, html_out
 
 
 # =============================================================================
@@ -591,6 +604,9 @@ _CLASS_TO_BLOCK_TYPE = {
     "CarouselBlock": "carousel",
 }
 
+
+# block_type literals ("hero", "text", …) accepted as email_params keys.
+_BLOCK_TYPE_MAP_KEYS = set(_CLASS_TO_BLOCK_TYPE.values())
 
 # Where rerouted text lands when a block class has no plain "text" field.
 _PRIMARY_TEXT_FIELD = {
@@ -3245,6 +3261,58 @@ async def draft_gmail_forward(
         )
 
 
+async def _deliver_html_template(
+    ctx: Context,
+    *,
+    subject: str,
+    html_body: str,
+    action: str,
+    to,
+    cc,
+    bcc,
+    user_google_email: UserGoogleEmail,
+    reply_to_message_id: Optional[str],
+    draft_id: Optional[str],
+):
+    """Send/draft an html-kind template body through the existing Gmail paths."""
+    if reply_to_message_id:
+        if action == "send":
+            return await reply_to_gmail_message(
+                message_id=reply_to_message_id,
+                body=html_body,
+                user_google_email=user_google_email,
+                content_type="html",
+            )
+        return await draft_gmail_reply(
+            message_id=reply_to_message_id,
+            body=html_body,
+            user_google_email=user_google_email,
+            content_type="html",
+            draft_id=draft_id,
+        )
+    if action == "send":
+        return await send_gmail_message(
+            ctx,
+            subject=subject,
+            body=html_body,
+            to=to,
+            user_google_email=user_google_email,
+            content_type="html",
+            cc=cc,
+            bcc=bcc,
+        )
+    return await draft_gmail_message(
+        subject=subject,
+        body=html_body,
+        user_google_email=user_google_email,
+        to=to,
+        content_type="html",
+        cc=cc,
+        bcc=bcc,
+        draft_id=draft_id,
+    )
+
+
 def setup_compose_tools(mcp: FastMCP) -> None:
     """Register Gmail composition tools with the FastMCP server."""
 
@@ -3918,6 +3986,9 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         "Behavior: action='draft' (default) only creates a draft; action='send' delivers immediately to to/cc/bcc with no confirmation step. Not idempotent — repeated sends deliver duplicates.\n"
         "reply_to_message_id threads the email as a reply to that Gmail message (recipients derived from the original; the reply subject overrides the DSL subject). "
         "draft_id updates an existing draft in place instead of creating a new one (action='draft' only).\n"
+        "Templates: template=<name> composes from a saved template (see manage_email_templates); "
+        "template_values fills its [[placeholders]], email_params deep-merges over its params. "
+        "Unfilled placeholders block send; drafts get a warning instead.\n"
         "Returns: message/draft id and delivery status. Errors: missing DSL notation in email_description fails before any send; invalid recipients or Gmail auth failures are reported per attempt."
     )
 
@@ -3949,9 +4020,14 @@ def setup_compose_tools(mcp: FastMCP) -> None:
     async def compose_dynamic_email(
         ctx: Context,
         email_description: Annotated[
-            str,
-            Field(description=email_description_help),
-        ],
+            Optional[str],
+            Field(
+                default=None,
+                description=email_description_help
+                + " Optional when template= is given (then any text here without DSL "
+                "overrides the template's subject).",
+            ),
+        ] = None,
         email_params: Annotated[
             Optional[Union[dict, str]],
             Field(
@@ -3990,6 +4066,22 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 "email instead of creating a new draft. Only valid with action='draft'."
             ),
         ] = None,
+        template: Annotated[
+            Optional[str],
+            Field(
+                description="Name of a saved email template (manage_email_templates action='list'). "
+                "Block templates supply the DSL + params; html templates supply the body. "
+                "Combine with template_values and optional email_params overrides."
+            ),
+        ] = None,
+        template_values: Annotated[
+            Optional[Union[dict, str]],
+            Field(
+                description="Values for the template's [[placeholders]], keyed by placeholder "
+                'name, e.g. {"recipient_name": "Sam", "meeting_time": "Tue 3pm"}. '
+                "Inline HTML is allowed in values."
+            ),
+        ] = None,
     ):
         """Compose responsive HTML email via DSL notation, then send or draft.
 
@@ -4005,12 +4097,185 @@ def setup_compose_tools(mcp: FastMCP) -> None:
             parse_email_dsl,
         )
 
+        def _coerce_param_dict(value, label):
+            """Coerce a JSON (or Python-literal) string to dict.
+
+            Returns (dict_or_None, error_message_or_None). Some client bridges
+            stringify nested params — a parse failure must not be silent, or
+            overrides/values get dropped without a trace.
+            """
+            if value is None or isinstance(value, dict):
+                return value, None
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return None, None
+                try:
+                    parsed = _json.loads(text)
+                except (ValueError, TypeError):
+                    try:
+                        import ast as _ast
+
+                        parsed = _ast.literal_eval(text)
+                    except (ValueError, SyntaxError):
+                        return None, (
+                            f"{label} was a string that is neither valid JSON nor a "
+                            f"Python literal dict: {text[:120]!r}"
+                        )
+                if isinstance(parsed, dict):
+                    return parsed, None
+                return (
+                    None,
+                    f"{label} must be a JSON object, got {type(parsed).__name__}",
+                )
+            return None, f"{label} must be a JSON object, got {type(value).__name__}"
+
         # MCP clients / Jinja macros may send email_params as a JSON string; coerce to dict.
-        if isinstance(email_params, str):
+        email_params, email_params_error = _coerce_param_dict(
+            email_params, "email_params"
+        )
+        template_values, template_values_error = _coerce_param_dict(
+            template_values, "template_values"
+        )
+        if email_params_error:
+            logger.warning(f"[compose_dynamic_email] {email_params_error}")
+
+        email_description = email_description or ""
+        template_warning: Optional[str] = None
+        template_info: Optional[dict] = None
+
+        # 0. Saved template → DSL/params (block kind) or HTML body (html kind)
+        if template:
+            from gmail.email_templates import (
+                EmailTemplateError,
+                fill_email_template,
+                load_email_template,
+            )
+
+            # In template mode a dropped override/values dict silently produces
+            # the un-patched template — fail loudly instead.
+            coerce_error = email_params_error or template_values_error
+            if coerce_error:
+                return SendGmailMessageResponse(
+                    success=False,
+                    message=coerce_error,
+                    messageId=None,
+                    threadId=None,
+                    recipientCount=0,
+                    contentType="html",
+                    templateApplied=False,
+                    error=coerce_error,
+                )
+
             try:
-                email_params = _json.loads(email_params)
-            except (ValueError, TypeError):
-                email_params = None
+                loaded = load_email_template(template)
+            except EmailTemplateError as e:
+                return SendGmailMessageResponse(
+                    success=False,
+                    message=str(e),
+                    messageId=None,
+                    threadId=None,
+                    recipientCount=0,
+                    contentType="html",
+                    templateApplied=False,
+                    error=str(e),
+                )
+
+            # email_description: DSL in it overrides the template's DSL (block
+            # templates only); plain text is a subject override.
+            desc_dsl = extract_email_dsl_from_description(email_description)
+            subject_override = None
+            if email_description and not desc_dsl:
+                subject_override = email_description.strip()
+
+            filled = fill_email_template(
+                loaded,
+                values=template_values if isinstance(template_values, dict) else None,
+                overrides=email_params if isinstance(email_params, dict) else None,
+                subject_override=subject_override,
+            )
+            # Echo diagnostics. Clients sometimes stuff envelope fields
+            # (to/from/body/subject) into email_params — those merge harmlessly
+            # but are not block overrides, so report them separately instead of
+            # letting them masquerade as applied patches.
+            from gmail.email_wrapper_api import get_email_symbols as _get_syms
+
+            _known_override_keys = (
+                set(_CLASS_TO_BLOCK_TYPE)
+                | set(_BLOCK_TYPE_MAP_KEYS)
+                | set(_get_syms().values())
+                | {"Column", "subject", "preheader"}
+            )
+            _override_keys = (
+                sorted(email_params) if isinstance(email_params, dict) else []
+            )
+            template_info = {
+                "template": loaded.name,
+                "kind": loaded.kind,
+                "values_applied": sorted(template_values)
+                if isinstance(template_values, dict)
+                else [],
+                "override_keys_applied": [
+                    k for k in _override_keys if k in _known_override_keys
+                ],
+                "override_keys_ignored": [
+                    k for k in _override_keys if k not in _known_override_keys
+                ],
+                "unfilled_placeholders": list(filled.missing),
+            }
+            if filled.missing:
+                unfilled = ", ".join(f"[[{m}]]" for m in filled.missing)
+                if action == "send":
+                    msg = (
+                        f"Template '{loaded.name}' has unfilled placeholders: {unfilled}. "
+                        "Pass them in template_values (or draft instead of send)."
+                    )
+                    return SendGmailMessageResponse(
+                        success=False,
+                        message=msg,
+                        messageId=None,
+                        threadId=None,
+                        recipientCount=0,
+                        contentType="html",
+                        templateApplied=True,
+                        error=msg,
+                    )
+                template_warning = (
+                    f"Unfilled placeholders left in draft: {unfilled} — re-call with "
+                    "draft_id and template_values to fill them."
+                )
+
+            if filled.kind == "html":
+                result = await _deliver_html_template(
+                    ctx,
+                    subject=filled.subject,
+                    html_body=filled.html or "",
+                    action=action,
+                    to=to,
+                    cc=cc,
+                    bcc=bcc,
+                    user_google_email=user_google_email,
+                    reply_to_message_id=reply_to_message_id,
+                    draft_id=draft_id,
+                )
+                if isinstance(result, dict):
+                    result["template_info"] = template_info
+                    if template_warning:
+                        result["warning"] = template_warning
+                return result
+
+            # Block template: continue through the normal DSL path.
+            if desc_dsl and email_description:
+                dsl_source = email_description
+            else:
+                dsl_source = f"{filled.dsl} {filled.subject}".strip()
+            email_description = dsl_source
+            email_params = {**filled.params, "subject": filled.subject}
+            logger.info(
+                f"[compose_dynamic_email] Using template '{loaded.name}' "
+                f"({len(loaded.placeholders)} placeholders, "
+                f"{len(filled.missing)} unfilled)"
+            )
 
         # 1. Extract DSL from description
         dsl_string = extract_email_dsl_from_description(email_description)
@@ -4095,7 +4360,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 email_spec=email_spec,
             )
         else:
-            return await draft_gmail_message(
+            result = await draft_gmail_message(
                 subject=email_spec.subject,
                 body="",
                 user_google_email=user_google_email,
@@ -4105,3 +4370,9 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 email_spec=email_spec,
                 draft_id=draft_id,
             )
+            if isinstance(result, dict):
+                if template_info:
+                    result["template_info"] = template_info
+                if template_warning:
+                    result["warning"] = template_warning
+            return result

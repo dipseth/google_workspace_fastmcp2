@@ -74,8 +74,13 @@ class MacroManager:
         if not self.templates_dir or not self.templates_dir.exists():
             return
 
-        # Find all .j2 template files
+        # Find all .j2 template files. Persisted dynamic macros (saved via
+        # create_template_macro / manage_email_templates) live in dynamic/ and
+        # must be registered too, or they vanish from template://macros — and
+        # become un-removable — after a restart.
         template_files = list(self.templates_dir.glob("*.j2"))
+        dynamic_files = sorted(self.templates_dir.glob("dynamic/*.j2"))
+        template_files.extend(dynamic_files)
 
         if self.enable_debug_logging:
             logger.debug(f"🔍 Scanning {len(template_files)} template files for macros")
@@ -112,9 +117,11 @@ class MacroManager:
                             full_usage = template_content[usage_start : usage_end + 3]
                             usage_examples[usage_match] = full_usage.strip()
 
+                is_dynamic = template_file.parent.name == "dynamic"
+
                 # Register each macro found
                 for macro_name in macro_matches:
-                    self._macro_registry[macro_name] = {
+                    macro_info = {
                         "name": macro_name,
                         "template_file": template_name,
                         "template_path": str(
@@ -126,6 +133,15 @@ class MacroManager:
                         "description": f"Macro from {template_name}",
                         "discovered_at": datetime.now().isoformat(),
                     }
+                    if is_dynamic:
+                        macro_info.update(
+                            {
+                                "source": "dynamic",
+                                "persisted": True,
+                                "content": template_content,
+                            }
+                        )
+                    self._macro_registry[macro_name] = macro_info
 
                     if self.enable_debug_logging:
                         logger.debug(

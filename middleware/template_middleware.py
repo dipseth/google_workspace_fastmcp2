@@ -684,6 +684,10 @@ def setup_enhanced_template_middleware(
     )
 
     mcp.add_middleware(middleware)
+    # Publish the instance immediately so tools that need the macro manager
+    # (manage_email_templates, compose_dynamic_email(template=...)) can find it
+    # without waiting for a template-macro tool call to populate the registry.
+    _middleware_instance_registry["instance"] = middleware
     logger.info(
         "✅ Enhanced template middleware with modular architecture added to FastMCP server"
     )

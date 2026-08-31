@@ -10,7 +10,7 @@ field descriptions in JSON schemas. Other types use TypedDict for simplicity.
 """
 
 from pydantic import BaseModel, Field
-from typing_extensions import Dict, List, NotRequired, Optional, TypedDict, Union
+from typing_extensions import Any, Dict, List, NotRequired, Optional, TypedDict, Union
 
 
 class FilterCriteria(TypedDict):
@@ -147,26 +147,43 @@ class ManageAllowListResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message if operation failed")
 
 
-class EmailTemplateInfo(TypedDict):
-    """Structure for a single email template entry."""
+class EmailTemplatePlaceholder(TypedDict):
+    """One ``[[placeholder]]`` in a saved email template."""
 
-    id: str
     name: str
+    example: str  # the literal text it replaced (truncated), for guidance
+
+
+class EmailTemplateInfo(TypedDict, total=False):
+    """Metadata for one saved email template (a persisted Jinja macro)."""
+
+    name: str
+    kind: str  # "blocks" (DSL + params) | "html" (rendered body)
     description: str
-    placeholders: List[str]
-    tags: List[str]
+    subject: str
+    dsl: Optional[str]
+    block_counts: Dict[str, int]
+    placeholders: List[EmailTemplatePlaceholder]
+    source: Dict[str, Any]
     created_at: str
-    assigned_users: List[str]
+    usage: str  # compose_dynamic_email(template=...) call to use it
+    macro_usage: str  # Jinja macro form for templated tool params
+    params: Dict[str, Any]  # blocks kind, on get/save
+    html: str  # html kind, on get
+    html_preview: str  # html kind, on save
+    persisted: bool
 
 
-class EmailTemplatesResponse(TypedDict):
-    """Response structure for list_email_templates tool."""
+class ManageEmailTemplatesResponse(TypedDict):
+    """Response structure for the manage_email_templates tool."""
 
+    success: bool
+    action: str
     templates: List[EmailTemplateInfo]
     count: int
-    userEmail: str
-    search_query: Optional[str]
-    error: NotRequired[Optional[str]]  # Optional error message for error responses
+    template: NotRequired[Optional[EmailTemplateInfo]]
+    message: str
+    error: NotRequired[Optional[str]]
 
 
 class GmailLabelInfo(TypedDict):
@@ -446,6 +463,7 @@ class DraftGmailMessageResponse(TypedDict):
     recipient_count: int
     userEmail: str
     error: NotRequired[Optional[str]]
+    warning: NotRequired[Optional[str]]  # e.g. unfilled template placeholders
 
 
 class ReplyGmailMessageResponse(TypedDict):
@@ -486,6 +504,7 @@ class DraftGmailReplyResponse(TypedDict):
     bcc_recipients: NotRequired[List[str]]  # List of BCC recipients
     userEmail: str
     error: NotRequired[Optional[str]]
+    warning: NotRequired[Optional[str]]  # e.g. unfilled template placeholders
 
 
 class ForwardGmailMessageResponse(TypedDict):
