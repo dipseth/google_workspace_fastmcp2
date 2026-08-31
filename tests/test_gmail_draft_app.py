@@ -7,6 +7,7 @@ test builds a real MIME message locally.
 
 import json
 from email.message import EmailMessage
+from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client, FastMCP
@@ -16,13 +17,19 @@ from gmail.draft_app import (
     _REMOTE_ATTR_RE,
     _REMOTE_CSS_URL_RE,
     DraftSnapshot,
+    _apply_content_edits,
     _b64url_decode,
     _build_draft_view,
+    _content_fields,
+    _decode_part_text,
+    _embedded_spec,
     _ensure_html_document,
+    _find_body_part,
     _parse_raw_message,
     _serialize,
     _set_header,
     _split_recipients,
+    _update_draft_body,
     create_gmail_draft_app,
 )
 
@@ -254,6 +261,7 @@ def test_backend_tools_are_app_scoped(draft_app_server):
     assert backend == {
         "gmail_draft_send": ["app"],
         "gmail_draft_save": ["app"],
+        "gmail_draft_apply_edits": ["app"],
         "gmail_draft_discard": ["app"],
     }
 
@@ -503,3 +511,244 @@ class TestContactPickerScope:
         assert called == [], "no People API call for a draft that has recipients"
         assert "ComboboxOption" not in card
         assert "already@there.com" in card
+
+
+# ── Content editing (embedded EmailSpec) ────────────────────────────
+
+
+def _make_spec_draft(**kwargs):
+    """A draft whose HTML carries an embedded EmailSpec, plus that spec."""
+    from gmail.email_templates import embed_email_spec
+    from gmail.mjml_types import (
+        ButtonBlock,
+        Column,
+        ColumnsBlock,
+        EmailSpec,
+        HeroBlock,
+        TextBlock,
+    )
+
+    spec = EmailSpec(
+        subject="Quarterly ✨ Update",
+        blocks=[
+            HeroBlock(
+                title="Big News",
+                subtitle="From the team",
+                cta_text="Read more",
+                cta_url="https://example.com/a",
+            ),
+            TextBlock(text="First paragraph"),
+            TextBlock(text="Second paragraph"),
+            ColumnsBlock(
+                columns=[
+                    Column(blocks=[TextBlock(text="Left cell")]),
+                    Column(
+                        blocks=[ButtonBlock(text="Go", url="https://example.com/b")]
+                    ),
+                ]
+            ),
+        ],
+    )
+    return _make_draft(html=embed_email_spec(MJML_HTML, spec), **kwargs), spec
+
+
+def test_embedded_spec_roundtrips_through_mime():
+    snapshot, _ = _make_spec_draft()
+    spec_data = _embedded_spec(snapshot)
+    assert spec_data is not None
+    assert len(spec_data["blocks"]) == 4
+
+
+def test_embedded_spec_absent_for_plain_drafts():
+    assert _embedded_spec(_make_draft()) is None
+    assert _embedded_spec(_make_draft(html=None)) is None
+
+
+def test_content_fields_cover_prose_and_links_in_document_order():
+    snapshot, _ = _make_spec_draft()
+    fields = _content_fields(_embedded_spec(snapshot))
+    assert [(f["path"], f["label"]) for f in fields] == [
+        ("blocks.0.title", "Hero title"),
+        ("blocks.0.subtitle", "Hero subtitle"),
+        ("blocks.0.cta_text", "Hero button text"),
+        ("blocks.0.cta_url", "Hero button URL"),
+        ("blocks.1.text", "Paragraph 1"),
+        ("blocks.2.text", "Paragraph 2"),
+        ("blocks.3.columns.0.blocks.0.text", "Paragraph 3"),
+        ("blocks.3.columns.1.blocks.0.text", "Button text"),
+        ("blocks.3.columns.1.blocks.0.url", "Button URL"),
+    ]
+    by_path = {f["path"]: f for f in fields}
+    assert by_path["blocks.1.text"]["multiline"] is True
+    assert by_path["blocks.0.title"]["multiline"] is False
+    assert by_path["blocks.0.title"]["value"] == "Big News"
+
+
+def test_content_fields_cover_image_urls():
+    """Swapping an image is a value edit — src/alt/href must surface."""
+    from gmail.email_templates import embed_email_spec
+    from gmail.mjml_types import EmailSpec, ImageBlock
+
+    spec = EmailSpec(
+        subject="Pics",
+        blocks=[
+            ImageBlock(src="https://example.com/a.png", href="https://example.com"),
+        ],
+    )
+    snapshot = _make_draft(html=embed_email_spec(MJML_HTML, spec))
+    fields = _content_fields(_embedded_spec(snapshot))
+    assert [(f["path"], f["label"], f["value"]) for f in fields] == [
+        ("blocks.0.src", "Image URL", "https://example.com/a.png"),
+        # alt defaults to "" — still editable so alt text can be added
+        ("blocks.0.alt", "Image alt text", ""),
+        ("blocks.0.href", "Image link", "https://example.com"),
+    ]
+    spec_data = _embedded_spec(snapshot)
+    assert _apply_content_edits(spec_data, {"blocks.0.src": "https://x.com/b.webp"})
+    assert spec_data["blocks"][0]["src"] == "https://x.com/b.webp"
+
+
+def test_apply_content_edits_patches_leaf_values():
+    from gmail.mjml_types import EmailSpec
+
+    snapshot, _ = _make_spec_draft()
+    spec_data = _embedded_spec(snapshot)
+    changed = _apply_content_edits(
+        spec_data,
+        {
+            "blocks.0.title": "Bigger News",
+            "blocks.3.columns.1.blocks.0.url": "https://example.com/c",
+            "blocks.1.text": "First paragraph",  # unchanged — not counted
+        },
+    )
+    assert changed == 2
+    assert spec_data["blocks"][0]["title"] == "Bigger News"
+    assert (
+        spec_data["blocks"][3]["columns"][1]["blocks"][0]["url"]
+        == "https://example.com/c"
+    )
+    EmailSpec(**spec_data)  # patched dict still validates
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "blocks.0.block_type",  # structure
+        "blocks.0.title_size",  # styling
+        "blocks",  # container, not a leaf
+        "theme",  # not under blocks
+        "blocks.99.title",  # out of range
+        "blocks.0.nope",  # unknown field
+        "blocks.3.columns.0.width",  # column layout
+        "blocks.3.columns.0.blocks.0.padding",  # block styling
+    ],
+)
+def test_apply_content_edits_rejects_non_content_paths(path):
+    snapshot, _ = _make_spec_draft()
+    spec_data = _embedded_spec(snapshot)
+    with pytest.raises(ValueError):
+        _apply_content_edits(spec_data, {path: "x"})
+
+
+def test_apply_content_edits_rejects_non_string_values():
+    snapshot, _ = _make_spec_draft()
+    with pytest.raises(ValueError):
+        _apply_content_edits(_embedded_spec(snapshot), {"blocks.0.title": 5})
+
+
+def test_view_spec_draft_gets_the_content_editor():
+    snapshot, _ = _make_spec_draft()
+    app = _build_draft_view(snapshot, "me@example.com")
+    data = app.to_json()
+    payload = json.dumps(data)
+
+    assert "gmail_draft_apply_edits" in payload
+    # Inputs interpolate live state, keyed by index, mapped back to spec paths.
+    assert '"blocks.0.title": "{{ edit_0 }}"' in payload
+    assert '"blocks.3.columns.1.blocks.0.url": "{{ edit_8 }}"' in payload
+    # Every field is seeded so untouched inputs never submit a raw template.
+    assert data["state"]["edit_0"] == "Big News"
+    assert data["state"]["edit_8"] == "https://example.com/b"
+    assert data["state"]["show_edit"] is False
+    # Paragraphs get a textarea, single-line prose an input.
+    textarea_names = {t.get("name") for t in _components(app, "Textarea")}
+    assert textarea_names == {"edit_4", "edit_5", "edit_6"}
+
+
+def test_view_spec_draft_preview_is_reactive():
+    snapshot, _ = _make_spec_draft()
+    data = _build_draft_view(snapshot, "me@example.com").to_json()
+    embeds = [n for n in _walk(data, []) if n.get("type") == "Embed"]
+    assert embeds[0]["html"] == "{{ preview_doc }}"
+    assert data["state"]["preview_doc"].lstrip().lower().startswith("<!doctype")
+    # An empty preview in the result (error / no-op) must not blank the iframe.
+    assert "{{ $result.preview || preview_doc }}" in json.dumps(data)
+
+
+def test_view_without_spec_keeps_the_static_preview():
+    data = _build_draft_view(_make_draft(), "me@example.com").to_json()
+    payload = json.dumps(data)
+    assert "gmail_draft_apply_edits" not in payload
+    assert "preview_doc" not in data["state"]
+    embeds = [n for n in _walk(data, []) if n.get("type") == "Embed"]
+    assert embeds[0]["html"].lstrip().lower().startswith("<!doctype")
+
+
+class _FakeGmailService:
+    """Just enough of the Gmail client to capture ``drafts().update`` calls."""
+
+    def __init__(self):
+        self.updated: list[tuple[str, dict]] = []
+
+    def users(self):
+        return self
+
+    def drafts(self):
+        return self
+
+    def update(self, userId, id, body):
+        self.updated.append((id, body))
+        return SimpleNamespace(execute=lambda: {})
+
+
+@pytest.mark.asyncio
+async def test_update_draft_body_swaps_bodies_losslessly():
+    """New html/plain payloads; headers, attachments and images survive."""
+    snapshot, _ = _make_spec_draft(with_attachment=True)
+    new_html = (
+        '<!doctype html><html><head><meta charset="utf-8"></head>'
+        "<body><h1>Rewritten ✨</h1><!--gws-email-spec:QUJD--></body></html>"
+    )
+    service = _FakeGmailService()
+    await _update_draft_body(service, snapshot, new_html, "Rewritten plain ✨")
+
+    ((draft_id, body),) = service.updated
+    assert draft_id == "r-test-1"
+    assert body["message"]["threadId"] == "t1"
+
+    msg = _parse_raw_message(_b64url_decode(body["message"]["raw"]))
+    html = _decode_part_text(_find_body_part(msg, "html"))
+    plain = _decode_part_text(_find_body_part(msg, "plain"))
+    assert html.rstrip("\r\n") == new_html
+    assert plain.rstrip("\r\n") == "Rewritten plain ✨"
+    assert str(msg["Subject"]) == "Quarterly ✨ Update"
+    assert str(msg["To"]) == "a@example.com, b@example.com"
+    filenames = [
+        part.get_filename()
+        for part in msg.walk()
+        if (part.get_content_disposition() or "") == "attachment"
+    ]
+    assert filenames == ["report.pdf"]
+    cids = [
+        part.get("Content-ID")
+        for part in msg.walk()
+        if part.get_content_type().startswith("image/")
+    ]
+    assert cids == ["<hero001>"]
+
+
+@pytest.mark.asyncio
+async def test_update_draft_body_requires_an_html_part():
+    snapshot = _make_draft(html=None)
+    with pytest.raises(ValueError):
+        await _update_draft_body(_FakeGmailService(), snapshot, "<html></html>")
