@@ -1,7 +1,7 @@
 """Run cross-model evals of dynamic MCP tools, logged as Langfuse dataset runs.
 
 For each model in evals/models.json a FastMCP client connects to the running
-server with that model as its client-side sampling handler and executes every
+server, routing the server's sampling to that model per request, and executes every
 dataset scenario (via code-mode `execute` when the server hides direct tools).
 Each (model, scenario) pair becomes a Langfuse experiment/dataset-run item with
 scores: success, latency, sampling calls, tokens, cost, and an LLM-judged
@@ -110,7 +110,6 @@ def make_task(model_cfg: dict, collector, rows_sink: list):
 
     async def task(*, item, **kwargs):
         from evals.harness import (
-            build_sampling_handler,
             make_client,
             result_to_text,
             summarize_usage,
@@ -122,8 +121,6 @@ def make_task(model_cfg: dict, collector, rows_sink: list):
         item_id = meta.get("item_id", tool)
         call_timeout = meta.get("timeout_s") or 240
 
-        handler = build_sampling_handler(model_cfg)
-
         ok, output_text, skipped = True, "", False
         latency_s = 0.0
         usage = summarize_usage({"calls": []})
@@ -132,7 +129,7 @@ def make_task(model_cfg: dict, collector, rows_sink: list):
             # session while still finishing a previous long-running tool call.
             client = None
             for attempt in (1, 2):
-                client = make_client(handler)
+                client = make_client(model_cfg)
                 try:
                     await client.__aenter__()
                     break

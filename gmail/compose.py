@@ -9,19 +9,24 @@ This module provides tools for:
 """
 
 import asyncio
+import copy
 import html
+import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from fastmcp import Context, FastMCP
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from mcp_types import InputRequiredResult
 from pydantic import Field
-from typing_extensions import Annotated, List, Literal, Optional, Union
+from typing_extensions import Annotated, Any, List, Literal, Optional, Union
 
 from auth.context import get_auth_middleware
 from config.enhanced_logging import setup_logger
 from config.settings import settings
 from tools.common_types import UserGoogleEmail
+from tools.elicitation import answered_prompt, prompt_for_form
 
 from .gmail_types import (
     DraftGmailForwardResponse,
@@ -53,6 +58,192 @@ logger = setup_logger()
 @dataclass
 class EmailAction:
     action: Literal["send", "save_draft", "cancel"]
+
+
+#: Key the send/forward confirmation travels under in ``inputRequests`` /
+#: ``inputResponses`` on 2026-07-28 connections. The client echoes it verbatim.
+GMAIL_CONFIRM_KEY = "gmail_confirm"
+
+#: ``EmailAction`` as the JSON Schema a form-mode elicitation carries.
+EMAIL_ACTION_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "title": "What should happen to this email?",
+            "enum": ["send", "save_draft", "cancel"],
+            "enumNames": ["Send now", "Save as draft", "Cancel"],
+        }
+    },
+    "required": ["action"],
+}
+
+
+#: Upper bound on the rendered HTML handed to a rich client for preview.
+_HTML_PREVIEW_LIMIT = 200_000
+
+
+def _preview_excerpt(body: str, content_type: str, limit: int = 300) -> str:
+    """A readable excerpt of an email body for a confirmation prompt.
+
+    HTML bodies (rendered MJML included) are reduced to their visible text so
+    the prompt shows what the recipient would read, not markup.
+    """
+    text = body
+    if content_type in ("html", "mixed") or body.lstrip().startswith("<"):
+        text = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S | re.I)
+        text = re.sub(r"<br\s*/?>|</(p|div|tr|li|h\d|td)>", "\n", text, flags=re.I)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = html.unescape(text)
+        text = re.sub(r"[ \t\r\f\v]+", " ", text)
+        text = re.sub(r"\s*\n\s*", "\n", text).strip()
+    return text[:limit] + ("... [truncated]" if len(text) > limit else "")
+
+
+def _confirmation_answer(answer: Any) -> Optional[Any]:
+    """Shape a re-run's ``ElicitResult`` like ``ctx.elicit``'s response.
+
+    ``accept`` carries the chosen ``action`` in ``content``; ``decline`` and
+    ``cancel`` carry nothing. None when there is no answer yet (first run), so
+    the caller knows to ask.
+    """
+    if answer is None:
+        return None
+    action = getattr(answer, "action", None) or "cancel"
+    content = getattr(answer, "content", None) or {}
+    choice = (
+        content.get("action")
+        if isinstance(content, dict)
+        else getattr(content, "action", None)
+    )
+    edits = (
+        {k: v for k, v in content.items() if k != "action"}
+        if isinstance(content, dict)
+        else {}
+    )
+    return SimpleNamespace(
+        action=action, data=SimpleNamespace(action=choice), edits=edits
+    )
+
+
+#: Cap on editable content fields offered in a confirmation form.
+_MAX_EDIT_FIELDS = 24
+
+
+def _spec_dict(email_spec: Any) -> Optional[dict]:
+    """The spec as a plain dict with ``block_type`` keys, or None."""
+    if email_spec is None:
+        return None
+    try:
+        spec = EmailSpec(**email_spec) if isinstance(email_spec, dict) else email_spec
+        # Column.blocks is typed as the base EmailBlock; a plain dump would keep
+        # only the base fields and the dict could never validate again.
+        return spec.model_dump(serialize_as_any=True)
+    except Exception as exc:
+        logger.debug(f"Confirmation: could not normalise email_spec: {exc}")
+        return None
+
+
+def _body_is_editable(content_type: str, html_body: Optional[str]) -> bool:
+    """True when ``body`` is the whole message and can be edited as one field.
+
+    An HTML body is markup, and a ``mixed`` email with an ``html_body`` has two
+    parts that would drift apart if only the text one were rewritten.
+    """
+    return content_type == "plain" or (content_type == "mixed" and not html_body)
+
+
+def _confirmation_schema(
+    subject: str,
+    body: str,
+    content_type: str,
+    email_spec: Any,
+    *,
+    html_body: Optional[str] = None,
+) -> dict:
+    """The confirmation form: editable content first, the decision last.
+
+    Mirrors the draft preview app — the subject and each text-bearing section
+    (hero title, paragraphs, button labels…) can be rewritten in place while
+    the layout stays locked. Plain emails expose the body instead. Every field
+    is pre-filled with the current value, so an untouched form changes
+    nothing.
+    """
+    props: dict[str, Any] = {
+        "subject": {"type": "string", "title": "Subject", "default": subject}
+    }
+    spec_data = _spec_dict(email_spec)
+    if spec_data is not None:
+        from gmail.draft_app import content_fields  # local: draft_app imports us
+
+        for field in content_fields(spec_data)[:_MAX_EDIT_FIELDS]:
+            prop: dict[str, Any] = {
+                "type": "string",
+                "title": field["label"],
+                "default": field["value"],
+            }
+            if field["multiline"]:
+                prop["maxLength"] = 20000
+            props[field["path"]] = prop
+    elif _body_is_editable(content_type, html_body):
+        props["body"] = {
+            "type": "string",
+            "title": "Body",
+            "default": body,
+            "maxLength": 50000,
+        }
+    props["action"] = dict(EMAIL_ACTION_SCHEMA["properties"]["action"])
+    return {"type": "object", "properties": props, "required": ["action"]}
+
+
+def _apply_confirmation_edits(
+    edits: dict,
+    subject: str,
+    body: str,
+    content_type: str,
+    email_spec: Any,
+    *,
+    html_body: Optional[str] = None,
+) -> tuple:
+    """Apply a confirmation form's edited fields.
+
+    Returns ``(subject, body, email_spec, changed)``. Section edits go through
+    the draft app's validated path patcher and the spec is re-rendered;
+    unknown or unchanged fields are ignored.
+    """
+    changed = 0
+    new_subject = edits.get("subject")
+    if isinstance(new_subject, str) and new_subject.strip() and new_subject != subject:
+        subject = new_subject
+        changed += 1
+
+    spec_data = _spec_dict(email_spec)
+    if spec_data is not None:
+        from gmail.draft_app import apply_content_edits  # local: see above
+
+        section_edits = {
+            k: v
+            for k, v in edits.items()
+            if k.startswith("blocks.") and isinstance(v, str)
+        }
+        applied = 0
+        if section_edits:
+            try:
+                applied = apply_content_edits(spec_data, section_edits)
+            except ValueError as exc:
+                logger.warning(f"Confirmation edits skipped: {exc}")
+        if applied or (changed and spec_data.get("subject") != subject):
+            spec_data["subject"] = subject
+            _, body = _render_email_spec(spec_data)
+            email_spec = spec_data
+            changed += applied
+    elif _body_is_editable(content_type, html_body):
+        new_body = edits.get("body")
+        if isinstance(new_body, str) and new_body != body:
+            body = new_body
+            changed += 1
+    return subject, body, email_spec, changed
 
 
 def _resolve_recipient_aliases(
@@ -967,6 +1158,53 @@ def _build_email_spec_from_dsl(
     )
 
 
+def _is_elicitation_unsupported(elicit_error: Exception) -> bool:
+    """True when ``elicit_error`` means elicitation cannot happen at all.
+
+    Three situations look identical to the user and all degrade to
+    ``gmail_elicitation_fallback``:
+
+    * the client never advertised the capability (the method-not-found family);
+    * the client advertised it but its implementation is broken;
+    * the connection negotiated MCP 2026-07-28, where SEP-2577 removed the
+      server-to-client back-channel entirely. FastMCP 4 detects that before
+      touching the wire and raises ``ToolError("elicitation via
+      server-initiated requests is unavailable on 2026-07-28 connections.")``.
+      Until the guard-tool port (return ``InputRequiredResult`` and read
+      ``ctx.input_responses`` on the re-run), modern clients belong here.
+
+    A genuine mid-elicitation failure does not, and is surfaced to the caller.
+    """
+    error_msg = str(elicit_error).lower()
+    error_type = type(elicit_error).__name__
+
+    return (
+        # Method/feature not found errors
+        "method not found" in error_msg
+        or "unknown method" in error_msg
+        or "unsupported method" in error_msg
+        or "not found" in error_msg  # Broader pattern
+        or "not supported" in error_msg  # Broader pattern
+        or "unsupported" in error_msg  # Broader pattern
+        or
+        # FastMCP/MCP-specific indicators
+        "elicit not supported" in error_msg
+        or "elicitation not supported" in error_msg
+        or "elicitation not available" in error_msg
+        or
+        # No back-channel on MCP 2026-07-28 (SEP-2577)
+        "unavailable on 2026-07-28" in error_msg
+        or "server-initiated requests is unavailable" in error_msg
+        or
+        # Exception types that commonly indicate missing functionality
+        error_type in ["AttributeError", "NotImplementedError", "TypeError"]
+        or
+        # Common client error patterns
+        "elicit" in error_msg
+        and ("error" in error_msg or "fail" in error_msg)
+    )
+
+
 async def _handle_elicitation_fallback(
     fallback_mode: str,
     to: Union[str, List[str]],
@@ -1081,7 +1319,7 @@ async def send_gmail_message(
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
     email_spec: Optional[Union[dict, EmailSpec]] = None,
-) -> SendGmailMessageResponse:
+) -> Union[SendGmailMessageResponse, InputRequiredResult]:
     """
     Sends an email using the user's Gmail account with support for HTML formatting and multiple recipients.
 
@@ -1129,6 +1367,11 @@ async def send_gmail_message(
             "subject": "Welcome!", "blocks": [{"type": "TextBlock", "text": "Hello!"}]
         })
     """
+    # The renderer appends feedback blocks to an EmailSpec object in place.
+    # Keep the spec as authored so the confirmation form edits, and re-renders,
+    # what the caller wrote rather than the widget.
+    authored_spec = copy.deepcopy(email_spec) if email_spec is not None else None
+
     # EmailSpec rendering — overrides content_type/body/html_body
     if email_spec is not None:
         try:
@@ -1272,8 +1515,8 @@ async def send_gmail_message(
                 else ""
             )
 
-            # Truncate body for preview if too long
-            body_preview = body[:300] + "... [truncated]" if len(body) > 300 else body
+            # Readable excerpt for the prompt; the rendered HTML is markup.
+            preview_section = f"```\n{_preview_excerpt(body, content_type)}\n```"
 
             elicitation_message = f"""📧 **Email Confirmation Required**
 
@@ -1287,9 +1530,7 @@ async def send_gmail_message(
    • Content Type: {content_type}
 
 📄 **Body Preview:**
-```
-{body_preview}
-```
+{preview_section}
 
 🔒 **Security Notice:** This recipient is not on your allow list.
 
@@ -1300,16 +1541,43 @@ async def send_gmail_message(
    
 ⏰ Auto-cancels in 300 seconds if no response"""
 
+            # 2026-07-28 clients have no back-channel: the confirmation is a
+            # returned InputRequiredResult. The client collects the answer and
+            # calls the tool again with the same arguments; that re-run finds
+            # it in ctx.input_responses. Handshake-era clients keep ctx.elicit.
+            # The form round trip reaches a client that can draw HTML (the
+            # native dialog), so it gets the rendered email itself, fenced as
+            # html. Pushed prompts keep the text excerpt.
+            rich_message = elicitation_message
+            if content_type == "html":
+                rich_message = elicitation_message.replace(
+                    preview_section, f"```html\n{body[:_HTML_PREVIEW_LIMIT]}\n```", 1
+                )
+            rich_message += (
+                "\n\n✏️ You can edit the subject or any section below before you choose."
+            )
+            response = _confirmation_answer(answered_prompt(GMAIL_CONFIRM_KEY))
+            if response is None:
+                prompt = prompt_for_form(
+                    GMAIL_CONFIRM_KEY,
+                    rich_message,
+                    _confirmation_schema(
+                        subject, body, content_type, authored_spec, html_body=html_body
+                    ),
+                    request_state=f"send_gmail_message:{user_google_email}",
+                )
+                if prompt.outcome == "suspended":
+                    return prompt.suspend
+
             # Trigger elicitation with graceful fallback for unsupported clients
             try:
-                # response = await ctx.elicit(
-                #         message=elicitation_message,
-                #         response_type=EmailAction
-                #     )
-                response = await asyncio.wait_for(
-                    ctx.elicit(message=elicitation_message, response_type=EmailAction),
-                    timeout=300.0,
-                )
+                if response is None:
+                    response = await asyncio.wait_for(
+                        ctx.elicit(
+                            message=elicitation_message, response_type=EmailAction
+                        ),
+                        timeout=300.0,
+                    )
             except asyncio.TimeoutError:
                 logger.info("Elicitation timed out after 300 seconds")
                 return SendGmailMessageResponse(
@@ -1325,37 +1593,12 @@ async def send_gmail_message(
                     recipientsNotAllowed=recipients_not_allowed,
                 )
             except Exception as elicit_error:
-                # Enhanced client support detection - broader patterns to catch more unsupported clients
-                error_msg = str(elicit_error).lower()
                 error_type = type(elicit_error).__name__
 
-                # Check for indicators that elicitation is not supported by the client
-                # Using broader patterns to catch various client implementations
-                is_unsupported_client = (
-                    # Method/feature not found errors
-                    "method not found" in error_msg
-                    or "unknown method" in error_msg
-                    or "unsupported method" in error_msg
-                    or "not found" in error_msg  # Broader pattern
-                    or "not supported" in error_msg  # Broader pattern
-                    or "unsupported" in error_msg  # Broader pattern
-                    or
-                    # FastMCP/MCP-specific indicators
-                    "elicit not supported" in error_msg
-                    or "elicitation not supported" in error_msg
-                    or "elicitation not available" in error_msg
-                    or
-                    # Exception types that commonly indicate missing functionality
-                    error_type in ["AttributeError", "NotImplementedError", "TypeError"]
-                    or
-                    # Common client error patterns
-                    "elicit" in error_msg
-                    and ("error" in error_msg or "fail" in error_msg)
-                )
-
-                if is_unsupported_client:
+                if _is_elicitation_unsupported(elicit_error):
                     logger.warning(
-                        f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}"
+                        f"Client cannot do elicitation ({error_type}: {elicit_error}) "
+                        f"- applying fallback: {settings.gmail_elicitation_fallback}"
                     )
                     fallback_result = await _handle_elicitation_fallback(
                         settings.gmail_elicitation_fallback,
@@ -1390,8 +1633,11 @@ async def send_gmail_message(
                         recipientsNotAllowed=recipients_not_allowed,
                     )
 
-            # Handle standard elicitation response structure
-            if response.action == "decline" or response.action == "cancel":
+            # Handle standard elicitation response structure. None means the
+            # "allow" fallback let the send proceed without a confirmation.
+            if response is None:
+                pass
+            elif response.action == "decline" or response.action == "cancel":
                 logger.info(f"User {response.action}d email operation")
                 return SendGmailMessageResponse(
                     success=False,
@@ -1414,6 +1660,20 @@ async def send_gmail_message(
             elif response.action == "accept":
                 # Get the user's choice from the data field
                 user_choice = response.data.action
+
+                # Edits made in the confirmation form travel with the answer.
+                edits = getattr(response, "edits", None) or {}
+                if edits and user_choice in ("send", "save_draft"):
+                    subject, body, authored_spec, applied = _apply_confirmation_edits(
+                        edits,
+                        subject,
+                        body,
+                        content_type,
+                        authored_spec,
+                        html_body=html_body,
+                    )
+                    if applied:
+                        logger.info(f"Confirmation edits applied: {applied} field(s)")
 
                 if user_choice == "cancel":
                     logger.info("User chose to cancel email operation")
@@ -2380,7 +2640,7 @@ async def forward_gmail_message(
     html_body: Optional[str] = None,
     cc: GmailRecipientsOptional = None,
     bcc: GmailRecipientsOptional = None,
-) -> ForwardGmailMessageResponse:
+) -> Union[ForwardGmailMessageResponse, InputRequiredResult]:
     """
     Forward a Gmail message to specified recipients with HTML formatting preservation and elicitation support.
 
@@ -2573,12 +2833,27 @@ async def forward_gmail_message(
    
 ⏰ Auto-cancels in 300 seconds if no response"""
 
+            # Same two-round shape as send_gmail_message for 2026-07-28 clients.
+            response = _confirmation_answer(answered_prompt(GMAIL_CONFIRM_KEY))
+            if response is None:
+                prompt = prompt_for_form(
+                    GMAIL_CONFIRM_KEY,
+                    elicitation_message,
+                    EMAIL_ACTION_SCHEMA,
+                    request_state=f"forward_gmail_message:{user_google_email}",
+                )
+                if prompt.outcome == "suspended":
+                    return prompt.suspend
+
             # Trigger elicitation with graceful fallback for unsupported clients
             try:
-                response = await asyncio.wait_for(
-                    ctx.elicit(message=elicitation_message, response_type=EmailAction),
-                    timeout=300.0,
-                )
+                if response is None:
+                    response = await asyncio.wait_for(
+                        ctx.elicit(
+                            message=elicitation_message, response_type=EmailAction
+                        ),
+                        timeout=300.0,
+                    )
             except asyncio.TimeoutError:
                 logger.info("Elicitation timed out after 300 seconds")
                 return ForwardGmailMessageResponse(
@@ -2598,37 +2873,12 @@ async def forward_gmail_message(
                     recipientsNotAllowed=recipients_not_allowed,
                 )
             except Exception as elicit_error:
-                # Enhanced client support detection - broader patterns to catch more unsupported clients
-                error_msg = str(elicit_error).lower()
                 error_type = type(elicit_error).__name__
 
-                # Check for indicators that elicitation is not supported by the client
-                # Using broader patterns to catch various client implementations
-                is_unsupported_client = (
-                    # Method/feature not found errors
-                    "method not found" in error_msg
-                    or "unknown method" in error_msg
-                    or "unsupported method" in error_msg
-                    or "not found" in error_msg  # Broader pattern
-                    or "not supported" in error_msg  # Broader pattern
-                    or "unsupported" in error_msg  # Broader pattern
-                    or
-                    # FastMCP/MCP-specific indicators
-                    "elicit not supported" in error_msg
-                    or "elicitation not supported" in error_msg
-                    or "elicitation not available" in error_msg
-                    or
-                    # Exception types that commonly indicate missing functionality
-                    error_type in ["AttributeError", "NotImplementedError", "TypeError"]
-                    or
-                    # Common client error patterns
-                    "elicit" in error_msg
-                    and ("error" in error_msg or "fail" in error_msg)
-                )
-
-                if is_unsupported_client:
+                if _is_elicitation_unsupported(elicit_error):
                     logger.warning(
-                        f"Client doesn't support elicitation (error: {error_type}: {error_msg}) - applying fallback: {settings.gmail_elicitation_fallback}"
+                        f"Client cannot do elicitation ({error_type}: {elicit_error}) "
+                        f"- applying fallback: {settings.gmail_elicitation_fallback}"
                     )
                     fallback_result = await _handle_elicitation_fallback(
                         settings.gmail_elicitation_fallback,
@@ -2714,8 +2964,11 @@ async def forward_gmail_message(
                         recipientsNotAllowed=recipients_not_allowed,
                     )
 
-            # Handle elicitation responses
-            if response.action == "decline" or response.action == "cancel":
+            # Handle elicitation responses. None means the "allow" fallback let
+            # the forward proceed without a confirmation.
+            if response is None:
+                pass
+            elif response.action == "decline" or response.action == "cancel":
                 logger.info(f"User {response.action}d forward operation")
                 return ForwardGmailMessageResponse(
                     success=False,
@@ -3361,7 +3614,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 'Example: {"subject": "Welcome!", "blocks": [{"title": "Hello", ...}]}'
             ),
         ] = None,
-    ) -> SendGmailMessageResponse:
+    ) -> Union[SendGmailMessageResponse, InputRequiredResult]:
         """
         Send Gmail message with structured output and elicitation support.
 
@@ -3803,7 +4056,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
         ] = None,
         cc: GmailRecipientsOptional = None,
         bcc: GmailRecipientsOptional = None,
-    ) -> ForwardGmailMessageResponse:
+    ) -> Union[ForwardGmailMessageResponse, InputRequiredResult]:
         """
         Forward Gmail message with structured output, HTML preservation, and elicitation support.
 
@@ -4082,7 +4335,7 @@ def setup_compose_tools(mcp: FastMCP) -> None:
                 "Inline HTML is allowed in values."
             ),
         ] = None,
-    ):
+    ) -> Union[SendGmailMessageResponse, InputRequiredResult, dict]:
         """Compose responsive HTML email via DSL notation, then send or draft.
 
         Supports iterative composition: draft_id re-renders into an existing

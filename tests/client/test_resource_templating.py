@@ -370,11 +370,13 @@ class TestEnhancedTools:
 
         if legacy_drive_tool:
             # Compare parameter counts (enhanced should have fewer)
-            legacy_params = len(legacy_drive_tool.inputSchema.get("properties", {}))
-            enhanced_params = len(enhanced_drive_tool.inputSchema.get("properties", {}))
+            legacy_params = len(legacy_drive_tool.input_schema.get("properties", {}))
+            enhanced_params = len(
+                enhanced_drive_tool.input_schema.get("properties", {})
+            )
 
             # Enhanced version should not have user_google_email parameter
-            assert "user_google_email" not in enhanced_drive_tool.inputSchema.get(
+            assert "user_google_email" not in enhanced_drive_tool.input_schema.get(
                 "properties", {}
             )
             logger.info(
@@ -382,7 +384,7 @@ class TestEnhancedTools:
             )
         else:
             # At least verify enhanced version doesn't have user_google_email
-            assert "user_google_email" not in enhanced_drive_tool.inputSchema.get(
+            assert "user_google_email" not in enhanced_drive_tool.input_schema.get(
                 "properties", {}
             )
             logger.info("✅ Enhanced tool correctly omits user_google_email parameter")

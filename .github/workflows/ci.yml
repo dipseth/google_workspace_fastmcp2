@@ -62,6 +62,10 @@ jobs:
 
       - name: Run unit tests
         shell: bash {0}
+        env:
+          # FastMCP 4 bridges camelCase MCP field reads with warnings; fail
+          # fast in CI so no snake_case leftovers slip through.
+          FASTMCP_MCP_CAMELCASE_COMPAT: "false"
         run: |
           # Some C++ extensions (qdrant-client, tokenizers) call terminate()
           # during interpreter shutdown, producing exit code 134 (SIGABRT)

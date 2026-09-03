@@ -38,8 +38,8 @@ class TestMetadataIntegration:
             )
 
             # Input schema should be properly structured
-            if hasattr(tool.inputSchema, "__dict__"):
-                schema = tool.inputSchema.__dict__
+            if hasattr(tool.input_schema, "__dict__"):
+                schema = tool.input_schema.__dict__
                 # Should have type field
                 if "type" in schema:
                     assert schema["type"] == "object", (
@@ -125,8 +125,8 @@ class TestMetadataIntegration:
             tool = next((t for t in tools if t.name == tool_name), None)
             if tool:
                 # Check parameter types in schema
-                if hasattr(tool.inputSchema, "properties"):
-                    schema_props = tool.inputSchema.properties
+                if hasattr(tool.input_schema, "properties"):
+                    schema_props = tool.input_schema.properties
                     for param_name, expected_type in expected_params.items():
                         # Verify parameter exists and has correct type
                         assert param_name in str(schema_props), (
@@ -151,8 +151,8 @@ class TestMetadataIntegration:
             tool = next((t for t in tools if t.name == tool_name), None)
             if tool:
                 # Check if schema has required field list
-                if hasattr(tool.inputSchema, "required"):
-                    schema_required = tool.inputSchema.required
+                if hasattr(tool.input_schema, "required"):
+                    schema_required = tool.input_schema.required
                     for field in required_fields:
                         if isinstance(schema_required, list):
                             # Some required fields should be marked
@@ -251,7 +251,7 @@ class TestMetadataSourceOfTruth:
             assert hasattr(tool, "inputSchema"), "Metadata should provide schema"
 
             # The schema should be the contract
-            if hasattr(tool.inputSchema, "properties"):
+            if hasattr(tool.input_schema, "properties"):
                 # Schema is the source of truth for parameters
                 print(f"✅ Tool '{tool.name}' uses metadata as source of truth")
 

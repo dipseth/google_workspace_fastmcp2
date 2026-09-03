@@ -233,6 +233,9 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `AUTH_SECURITY_LEVEL` | No | `standard` | `standard`, `high`, or `custom` |
 | `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
 | `GMAIL_ENABLE_ELICITATION` | No | `true` | Enable elicitation for untrusted recipients |
+| `SAMPLING_ALLOW_HEADER_OVERRIDE` | No | `false` | Honor `X-Sampling-Model` / `X-Sampling-Api-Base` / `X-Sampling-Api-Key` request headers as a per-request LLM override for server-side sampling (used by the evals harness) |
+| `FASTMCP_DOCKET_URL` | No | `memory://` | Background-tasks backend for `task=True` tools (`fastmcp-tasks`); use `redis://host:6379/0` when running replicas |
+| `FASTMCP_TASKS_ENCRYPTION_KEY` | No | unset | Encrypts background-task context snapshots (caller token + request headers) at rest; plaintext when unset. Set it (≥32 random chars, same on every worker) whenever the tasks backend is Redis |
 | `SAMPLING_TOOLS` | No | `false` | Enable sampling middleware tools |
 | `CHAT_SERVICE_ACCOUNT_FILE` | No | - | Path to Chat service account JSON |
 | `MCP_CHAT_WEBHOOK` | No | - | Default webhook URL for all Google Chat card tools |

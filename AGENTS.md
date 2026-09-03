@@ -103,7 +103,6 @@ return {"messages_found": len(messages), "event_created": event}
 | `trash_gmail_message` | Move message to trash |
 | `get_gmail_attachment` | Download an attachment |
 | `compose_dynamic_email` | Compose email using DSL notation with MJML templates |
-| `intelligent_email_composer` | AI-assisted email composition |
 | `send_smart_email` | Send with template rendering |
 
 ### Drive

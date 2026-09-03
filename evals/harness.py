@@ -1,11 +1,15 @@
-"""Client, sampling-handler, and usage-collection plumbing for cross-model evals.
+"""Client and usage-collection plumbing for cross-model evals.
 
-The eval runner connects to the running MCP server as a FastMCP client and
-attaches a *client-side* sampling handler per model config.  Every
-``ctx.sample()`` a dynamic tool makes on the server is fulfilled by the eval
-process with the model under test, so the model is the only variable between
-runs.  A LiteLLM ``CustomLogger`` records per-call token usage, latency, and
-cost while an eval item is active.
+FastMCP 4 has no client-fulfilled sampling: dynamic tools sample through the
+server's own handler (``middleware/sampling_runtime.py``). The eval runner
+therefore names the model under test *per request* with ``X-Sampling-Model`` /
+``X-Sampling-Api-Base`` / ``X-Sampling-Api-Key`` headers, which the server
+honors when started with ``SAMPLING_ALLOW_HEADER_OVERRIDE=true``. The model is
+still the only variable between runs.
+
+Token usage now accrues in the server process (LiteLLM → Langfuse generations,
+``middleware/payment/cost_tracker.py``); the in-process ``SamplingUsageCollector``
+only sees LLM calls made by this process (the quality judge).
 """
 
 from __future__ import annotations
@@ -14,7 +18,12 @@ import json
 import os
 from typing import Any, Optional
 
-import httpx
+# Importing fastmcp_tasks registers the client-side tasks extension, so a
+# modern-protocol connection negotiates background tasks (send_dynamic_card,
+# create_gmail_filter) exactly the way a production client does; call_tool then
+# polls the task to completion transparently.
+import fastmcp_tasks  # noqa: F401
+import httpx2
 from litellm.integrations.custom_logger import CustomLogger
 
 
@@ -97,18 +106,18 @@ def summarize_usage(bucket: dict) -> dict:
     }
 
 
-def build_sampling_handler(model_cfg: dict):
-    """Create a LiteLLMSamplingHandler for one model config from models.json."""
-    from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
-
-    api_key = None
+def sampling_override_headers(model_cfg: dict | None) -> dict[str, str]:
+    """Headers that route the server's sampling to one model config from models.json."""
+    if not model_cfg:
+        return {}
+    headers = {"X-Sampling-Model": model_cfg["model"]}
+    if model_cfg.get("api_base"):
+        headers["X-Sampling-Api-Base"] = model_cfg["api_base"]
     if model_cfg.get("api_key_env"):
-        api_key = os.getenv(model_cfg["api_key_env"]) or None
-    return LiteLLMSamplingHandler(
-        default_model=model_cfg["model"],
-        api_key=api_key,
-        api_base=model_cfg.get("api_base"),
-    )
+        api_key = os.getenv(model_cfg["api_key_env"]) or ""
+        if api_key:
+            headers["X-Sampling-Api-Key"] = api_key
+    return headers
 
 
 def server_url() -> str:
@@ -125,48 +134,34 @@ def auth_token() -> Optional[str]:
     return None
 
 
-def make_client(sampling_handler):
+def make_client(model_cfg: dict | None = None):
     """FastMCP client against the local server with TLS verify off (dev certs).
 
-    Advertises the sampling.tools capability — without it, structured-output
-    sampling (validation agents, draft variations) silently falls back to the
-    *server's* handler and the model under test never gets exercised.
+    The model under test rides on X-Sampling-* headers (see module docstring).
     """
-    import mcp.types as mcp_types
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
-    sampling_caps = mcp_types.SamplingCapability(
-        tools=mcp_types.SamplingToolsCapability()
-    )
+    headers = sampling_override_headers(model_cfg)
 
-    def _httpx_client_factory(**kwargs) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
+    def _httpx_client_factory(**kwargs) -> httpx2.AsyncClient:
+        merged = dict(kwargs.get("headers") or {})
+        merged.update(headers)
+        return httpx2.AsyncClient(
             verify=os.getenv("MCP_TEST_TLS_VERIFY", "false").lower() == "true",
-            headers=kwargs.get("headers"),
-            timeout=kwargs.get("timeout") or httpx.Timeout(120.0),
+            headers=merged,
+            timeout=kwargs.get("timeout") or httpx2.Timeout(120.0),
             auth=kwargs.get("auth"),
             follow_redirects=kwargs.get("follow_redirects", True),
         )
 
-    url = server_url()
-    if url.lower().startswith("https"):
-        transport = StreamableHttpTransport(
-            url, auth=auth_token(), httpx_client_factory=_httpx_client_factory
-        )
-        return Client(
-            transport,
-            timeout=300.0,
-            sampling_handler=sampling_handler,
-            sampling_capabilities=sampling_caps,
-        )
-    return Client(
-        url,
+    transport = StreamableHttpTransport(
+        server_url(),
         auth=auth_token(),
-        timeout=300.0,
-        sampling_handler=sampling_handler,
-        sampling_capabilities=sampling_caps,
+        headers=headers or None,
+        httpx_client_factory=_httpx_client_factory,
     )
+    return Client(transport, timeout=300.0)
 
 
 def result_to_text(result: Any, limit: int = 8000) -> str:

@@ -17,10 +17,8 @@ from gmail.draft_app import (
     _REMOTE_ATTR_RE,
     _REMOTE_CSS_URL_RE,
     DraftSnapshot,
-    _apply_content_edits,
     _b64url_decode,
     _build_draft_view,
-    _content_fields,
     _decode_part_text,
     _embedded_spec,
     _ensure_html_document,
@@ -30,6 +28,8 @@ from gmail.draft_app import (
     _set_header,
     _split_recipients,
     _update_draft_body,
+    apply_content_edits,
+    content_fields,
     create_gmail_draft_app,
 )
 
@@ -237,6 +237,11 @@ def test_view_hides_cc_when_empty():
 @pytest.fixture
 def draft_app_server():
     mcp = FastMCP("test-gmail-draft")
+    # FastMCP 4 lists app-only tools and leaves visibility to the host; the
+    # server applies the rule for clients without the UI extension.
+    from middleware.app_visibility_middleware import AppVisibilityMiddleware
+
+    mcp.add_middleware(AppVisibilityMiddleware())
     app = create_gmail_draft_app(mcp)
     assert app is not None, "prefab-ui must be installed for these tests"
     mcp.add_provider(app)
@@ -566,7 +571,7 @@ def test_embedded_spec_absent_for_plain_drafts():
 
 def test_content_fields_cover_prose_and_links_in_document_order():
     snapshot, _ = _make_spec_draft()
-    fields = _content_fields(_embedded_spec(snapshot))
+    fields = content_fields(_embedded_spec(snapshot))
     assert [(f["path"], f["label"]) for f in fields] == [
         ("blocks.0.title", "Hero title"),
         ("blocks.0.subtitle", "Hero subtitle"),
@@ -596,7 +601,7 @@ def test_content_fields_cover_image_urls():
         ],
     )
     snapshot = _make_draft(html=embed_email_spec(MJML_HTML, spec))
-    fields = _content_fields(_embedded_spec(snapshot))
+    fields = content_fields(_embedded_spec(snapshot))
     assert [(f["path"], f["label"], f["value"]) for f in fields] == [
         ("blocks.0.src", "Image URL", "https://example.com/a.png"),
         # alt defaults to "" — still editable so alt text can be added
@@ -604,7 +609,7 @@ def test_content_fields_cover_image_urls():
         ("blocks.0.href", "Image link", "https://example.com"),
     ]
     spec_data = _embedded_spec(snapshot)
-    assert _apply_content_edits(spec_data, {"blocks.0.src": "https://x.com/b.webp"})
+    assert apply_content_edits(spec_data, {"blocks.0.src": "https://x.com/b.webp"})
     assert spec_data["blocks"][0]["src"] == "https://x.com/b.webp"
 
 
@@ -613,7 +618,7 @@ def test_apply_content_edits_patches_leaf_values():
 
     snapshot, _ = _make_spec_draft()
     spec_data = _embedded_spec(snapshot)
-    changed = _apply_content_edits(
+    changed = apply_content_edits(
         spec_data,
         {
             "blocks.0.title": "Bigger News",
@@ -647,13 +652,13 @@ def test_apply_content_edits_rejects_non_content_paths(path):
     snapshot, _ = _make_spec_draft()
     spec_data = _embedded_spec(snapshot)
     with pytest.raises(ValueError):
-        _apply_content_edits(spec_data, {path: "x"})
+        apply_content_edits(spec_data, {path: "x"})
 
 
 def test_apply_content_edits_rejects_non_string_values():
     snapshot, _ = _make_spec_draft()
     with pytest.raises(ValueError):
-        _apply_content_edits(_embedded_spec(snapshot), {"blocks.0.title": 5})
+        apply_content_edits(_embedded_spec(snapshot), {"blocks.0.title": 5})
 
 
 def test_view_spec_draft_gets_the_content_editor():

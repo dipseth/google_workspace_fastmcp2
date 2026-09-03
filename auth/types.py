@@ -48,6 +48,7 @@ class SessionKey(str, Enum):
     IDENTITY_SOURCE = "identity_source"  # Which extraction path resolved the identity: "jwt" | "google_provider" | "session" | "oauth_file"
     MCP_CLIENT_ID = "mcp_client_id"  # DCR/CIMD client_id URL of the connecting MCP client (e.g. "https://claude.ai/oauth/claude-code-client-metadata")
     MCP_CLIENT_NAME = "mcp_client_name"  # Human-friendly client_name from the CIMD document (e.g. "Claude Code"), if resolvable
+    CLIENT = "client"  # Handshake identity + negotiated capabilities (see tools.client_capabilities.client_record); persisted per session
     API_KEY_OWNED_ACCOUNTS = "api_key_owned_accounts"
     SESSION_AUTHED_EMAILS = "session_authed_emails"
     SESSION_DISABLED_TOOLS = "session_disabled_tools"

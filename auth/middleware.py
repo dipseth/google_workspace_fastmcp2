@@ -39,6 +39,24 @@ from .types import AuthProvenance, SessionKey, is_me_alias
 logger = setup_logger()
 
 
+# Protocol eras negotiated by clients so far (FastMCP 4 serves handshake-era and
+# sessionless 2026-07-28 connections side by side). Logged once per version so
+# we learn which era Claude.ai / Claude Desktop actually use.
+_SEEN_PROTOCOL_VERSIONS: set[str] = set()
+
+
+def _note_protocol_version(context: Any) -> None:
+    try:
+        fctx = getattr(context, "fastmcp_context", None)
+        rc = getattr(fctx, "request_context", None) if fctx is not None else None
+        version = getattr(rc, "protocol_version", None)
+    except Exception:
+        version = None
+    if version and version not in _SEEN_PROTOCOL_VERSIONS:
+        _SEEN_PROTOCOL_VERSIONS.add(version)
+        logger.info(f"🧭 Client negotiated MCP protocol version {version}")
+
+
 class CredentialStorageMode(Enum):
     """Credential storage modes."""
 
@@ -177,6 +195,21 @@ class AuthMiddleware(Middleware):
 
         return session_id
 
+    # Only component requests carry session semantics. FastMCP 4 routes every
+    # inbound message through middleware (including cancelled/unroutable ones),
+    # so anything else passes straight through without session bookkeeping.
+    # `server/discover` (the 2026-07-28 opener) is deliberately not listed:
+    # under that protocol every request is its own session, so a discover-only
+    # session would be one identity-less, state-less store entry per connect.
+    # The client is recorded on the first component request instead.
+    _SESSION_SCOPED_METHOD_PREFIXES = (
+        "initialize",
+        "tools/",
+        "resources/",
+        "prompts/",
+        "completion/",
+    )
+
     async def on_request(self, context: MiddlewareContext, call_next):
         """
         Handle incoming requests and set session context.
@@ -184,12 +217,24 @@ class AuthMiddleware(Middleware):
         PHASE 1 FIX: Uses instance-level session tracking instead of FastMCP context.
         This avoids "Context is not available" errors during early request phases.
         """
+        method = getattr(context, "method", None) or ""
+        if not method.startswith(self._SESSION_SCOPED_METHOD_PREFIXES):
+            return await call_next(context)
+        _note_protocol_version(context)
 
         # PHASE 1 FIX: Get request ID and session without accessing FastMCP context
         request_id = self._get_request_id(context)
         session_id = self._get_or_create_session(request_id)
 
         logger.debug(f"🔍 Request {request_id} using session: {session_id}")
+
+        # Under MCP 2026-07-28 there is no `initialize` at all: every request
+        # is self-contained and carries clientInfo/capabilities in its `_meta`,
+        # from which the SDK synthesizes the connection. So the first component
+        # request — `tools/list` for a connect-and-idle client — is the earliest
+        # (and, for a session that never calls a tool, the only) point the
+        # client can be recorded.
+        self._record_client_if_visible(session_id)
 
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -217,6 +262,70 @@ class AuthMiddleware(Middleware):
                 f"🧹 Cleaned up request {request_id} (session preserved in store)"
             )
 
+    async def on_initialize(self, context: MiddlewareContext, call_next):
+        """Record the client from a legacy ``initialize`` handshake.
+
+        Pre-2026-07-28 clients open with ``initialize``; the SDK commits
+        ``session.client_params`` only after this whole chain returns, so
+        ``on_request`` cannot see the handshake on that first request and the
+        record is read from the request message itself here. Runs after
+        ``call_next`` so it carries the *negotiated* protocol version, not the
+        one the client asked for. 2026-07-28 clients never send this at all
+        and are recorded by ``on_request`` instead. Bookkeeping only: nothing
+        here can fail the handshake.
+        """
+        result = await call_next(context)
+        try:
+            from .context import (
+                get_session_context_sync,
+                get_session_data,
+                store_session_data,
+            )
+
+            session_id = get_session_context_sync()
+            if not session_id:
+                with self._session_lock:
+                    session_id = self._active_sessions.get(
+                        self._get_request_id(context)
+                    )
+            if not session_id:
+                return result
+
+            mcp_client_id, mcp_client_name = self._capture_mcp_client_identity()
+            if mcp_client_id:
+                store_session_data(session_id, SessionKey.MCP_CLIENT_ID, mcp_client_id)
+                if mcp_client_name:
+                    store_session_data(
+                        session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
+                    )
+
+            params = getattr(getattr(context, "message", None), "params", None)
+            record = None
+            if params is not None:
+                from tools.client_capabilities import client_record_from_handshake
+
+                record = client_record_from_handshake(
+                    params, getattr(result, "protocol_version", None)
+                )
+            self._record_client_once(session_id, record, mcp_client_name)
+
+            rec = get_session_data(session_id, SessionKey.CLIENT) or {}
+            logger.info(
+                "🤝 Client connected: %s %s (oauth_client=%s era=%s elicit=%s "
+                "tasks=%s ui=%s) session=%s...",
+                rec.get("name") or "(unnamed)",
+                rec.get("version") or "",
+                rec.get("oauth_client_name") or "-",
+                rec.get("protocol_version") or "?",
+                "+".join(rec.get("elicitation") or []) or "none",
+                rec.get("tasks"),
+                rec.get("ui_extension"),
+                session_id[:8],
+            )
+        except Exception as exc:
+            logger.debug(f"Could not record client at initialize: {exc}")
+        return result
+
     async def on_call_tool(self, context: MiddlewareContext, call_next):
         """
         Handle tool execution with session context, service injection, and unified GoogleProvider authentication.
@@ -241,6 +350,7 @@ class AuthMiddleware(Middleware):
 
         tool_name = context.message.name
         logger.debug(f"Processing tool call: {tool_name}")
+        _note_protocol_version(context)
 
         request_id = self._get_request_id(context)
 
@@ -284,6 +394,11 @@ class AuthMiddleware(Middleware):
                 store_session_data(
                     session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
                 )
+
+        # Fallback for a session whose handshake on_initialize did not see
+        # (a predecessor process, a client that skipped it). No-op once
+        # recorded, so the initialize-time record always wins.
+        self._record_client_once(session_id, oauth_client_name=mcp_client_name)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -768,6 +883,11 @@ class AuthMiddleware(Middleware):
                 store_session_data(
                     session_id, SessionKey.MCP_CLIENT_NAME, mcp_client_name
                 )
+
+        # Fallback for a session whose handshake on_initialize did not see
+        # (a predecessor process, a client that skipped it). No-op once
+        # recorded, so the initialize-time record always wins.
+        self._record_client_once(session_id, oauth_client_name=mcp_client_name)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -3386,6 +3506,74 @@ class AuthMiddleware(Middleware):
             return None
         except Exception:
             return None
+
+    def _record_client_if_visible(self, session_id: Optional[str]) -> None:
+        """Record the client from the session, but only once it is readable.
+
+        A born-ready 2026-07-28 connection exposes ``client_params`` on its
+        first request. A legacy connection does not until its ``initialize``
+        chain has returned, so on that request this skips and ``on_initialize``
+        records from the request params instead; the next request then finds
+        the record already present.
+        """
+        if not session_id:
+            return
+        try:
+            from tools.client_capabilities import handshake_params
+
+            from .context import get_session_data
+
+            if get_session_data(session_id, SessionKey.CLIENT) is not None:
+                return
+            if handshake_params() is None:
+                return
+            _, oauth_client_name = self._capture_mcp_client_identity()
+        except Exception as exc:
+            logger.debug(f"Could not read client handshake: {exc}")
+            return
+        self._record_client_once(session_id, oauth_client_name=oauth_client_name)
+
+    @staticmethod
+    def _record_client_once(
+        session_id: Optional[str],
+        record: Optional[dict] = None,
+        oauth_client_name: Optional[str] = None,
+    ) -> None:
+        """Store the handshake identity + capabilities under SessionKey.CLIENT.
+
+        ``record`` is the handshake-derived record when the caller already has
+        one (``on_initialize``); otherwise it is read from the live session.
+        ``oauth_client_name`` is the CIMD ``client_name`` ("Claude Code"), the
+        one human-readable name an OAuth session carries; None for API keys.
+
+        Bookkeeping only: any failure is logged and never reaches the request.
+        Stored on the live session and written by the session's next
+        ``persist_session_tool_states`` (never from here — see below); never
+        copied across a restore, since a successor session may be a different
+        host.
+        """
+        if not session_id:
+            return
+        try:
+            from tools.client_capabilities import client_record
+
+            from .context import get_session_data, store_session_data
+
+            if get_session_data(session_id, SessionKey.CLIENT) is None:
+                record = dict(record) if record is not None else client_record()
+                record["oauth_client_name"] = oauth_client_name
+                store_session_data(session_id, SessionKey.CLIENT, record)
+                # Deliberately no persist here. The file is rewritten from the
+                # live store, so the first write of a fresh process replaces
+                # whatever the previous process left — including the
+                # predecessor session that the tools/list restore is about to
+                # look up by email. An early version persisted from the first
+                # request of a fresh process and wiped that history, leaving
+                # every session with user_email null and no inherited tool
+                # state. The record reaches disk with the session's own
+                # persist: the restore, an enable/disable, or minimal startup.
+        except Exception as exc:
+            logger.warning(f"Could not record client for session: {exc}")
 
     def _capture_mcp_client_identity(self) -> tuple[Optional[str], Optional[str]]:
         """Best-effort extract of the MCP client's DCR identity from the current request.

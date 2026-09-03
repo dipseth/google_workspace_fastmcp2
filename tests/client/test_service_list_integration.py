@@ -329,7 +329,7 @@ class TestServiceListResourceConsistency:
                 tool = next((t for t in tools if t.name == tool_name), None)
                 if tool and hasattr(tool, "inputSchema"):
                     # Tool has a schema, which means it's been properly configured
-                    assert tool.inputSchema is not None
+                    assert tool.input_schema is not None
 
     @pytest.mark.asyncio
     async def test_service_discovery_completeness(self, client):

@@ -1195,6 +1195,11 @@ def persist_session_tool_states() -> bool:
                 # most recent predecessor found at reconnect was always one with
                 # the tool still disabled. An enable could clear the live
                 # session but never outlive it.
+                # A session known only by its client is not written. Under
+                # MCP 2026-07-28 every request is its own session, so that
+                # would be one identity-less, state-less line per
+                # server/discover or resources/list. The client record rides
+                # on the sessions that do carry identity or state.
                 if (
                     disabled_tools
                     or session_data.get("minimal_startup_applied")
@@ -1211,6 +1216,13 @@ def persist_session_tool_states() -> bool:
                             "minimal_startup_applied", False
                         ),
                         "user_email": session_data.get("user_email"),
+                        # Which client drove this session: handshake identity
+                        # plus negotiated era/elicitation/tasks. Captured once
+                        # per session by AuthMiddleware.on_initialize (with
+                        # on_call_tool as a fallback); never copied across a
+                        # restore, since the successor session may be a
+                        # different client.
+                        "client": session_data.get(SessionKey.CLIENT),
                     }
 
         if not persisted_states and not live_sessions:
@@ -1400,6 +1412,23 @@ def restore_session_tool_state_by_email(new_session_id: str, user_email: str) ->
         logger.debug(
             f"No previous session found for user {redact_email(user_email)} to restore from"
         )
+        # Nothing to inherit, but record the identity now so this session is
+        # the predecessor the next reconnect finds. Only sessions with identity
+        # or state are written, and the file is rewritten from the live store,
+        # so a user with no history on disk (fresh install, or a file that a
+        # previous process wrote without them) would otherwise never re-enter
+        # it until a manual enable/disable.
+        # Debt: a restore that writes on a miss. The Phase 3 UserSession (state
+        # keyed by principal, docs/fastmcp4_migration_plan.md) should absorb it.
+        with _store_lock:
+            if new_session_id not in _session_store:
+                _session_store[new_session_id] = {
+                    "created_at": datetime.now(),
+                    "last_accessed": datetime.now(),
+                }
+            _session_store[new_session_id][SessionKey.USER_EMAIL] = user_email
+            _session_store[new_session_id]["last_accessed"] = datetime.now()
+        persist_session_tool_states()
         return False
 
     if old_session_id == new_session_id:

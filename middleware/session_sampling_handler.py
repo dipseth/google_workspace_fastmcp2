@@ -27,9 +27,9 @@ logger = setup_logger()
 class SessionAwareSamplingHandler:
     """Sampling handler that checks per-session config before falling back to default.
 
-    Session resolution: iterates active sessions in reverse order looking for
-    a SAMPLING_CONFIG entry. If found, creates (or reuses) a LiteLLMSamplingHandler
-    configured with the user's provider details.
+    Session resolution: reads the SAMPLING_CONFIG of the current request's own
+    transport session (never another session's). If found, creates (or reuses)
+    a LiteLLMSamplingHandler configured with that user's provider details.
 
     Handler cache: keyed by (model, api_key, api_base) tuple to avoid re-creating
     handler instances on every call.
@@ -46,7 +46,9 @@ class SessionAwareSamplingHandler:
         params: SamplingParams,
         context: Any,
     ) -> CreateMessageResult | CreateMessageResultWithTools:
-        config = self._get_session_sampling_config()
+        config = (
+            self._get_request_override_config() or self._get_session_sampling_config()
+        )
         if config:
             handler = self._get_or_create_handler(config)
             if handler:
@@ -61,51 +63,89 @@ class SessionAwareSamplingHandler:
             raise RuntimeError("No sampling handler configured")
         return await self.default_handler(messages, params, context)
 
-    def _get_session_sampling_config(self) -> Optional[dict]:
-        """Find sampling config from any active session.
+    def _get_request_override_config(self) -> Optional[dict]:
+        """Per-request override from X-Sampling-* headers (opt-in via settings).
 
-        Walks sessions in reverse order (most recent first) looking for
-        a SAMPLING_CONFIG entry. If not in session cache, attempts to
-        lazy-load from encrypted disk.
+        FastMCP 4 removed client-fulfilled sampling, so a caller that wants a
+        specific model (the evals harness comparing providers) names it on the
+        request instead. Disabled unless ``SAMPLING_ALLOW_HEADER_OVERRIDE=true``.
         """
         try:
-            from auth.context import get_session_data, list_sessions
+            from config.settings import settings
+
+            if not getattr(settings, "sampling_allow_header_override", False):
+                return None
+            # get_http_headers() (not get_http_request()) so the override also
+            # reaches background-task workers, which restore the submitting
+            # request's headers but never fabricate a live Request object.
+            from fastmcp.server.dependencies import get_http_headers
+
+            headers = {
+                k.lower(): v for k, v in get_http_headers(include_all=True).items()
+            }
+            model = (headers.get("x-sampling-model") or "").strip()
+            if not model:
+                return None
+            config = {"model": model}
+            api_base = (headers.get("x-sampling-api-base") or "").strip()
+            api_key = (headers.get("x-sampling-api-key") or "").strip()
+            if api_base:
+                config["api_base"] = api_base
+            if api_key:
+                config["api_key"] = api_key
+            return config
+        except Exception:
+            return None
+
+    def _get_session_sampling_config(self) -> Optional[dict]:
+        """Find the sampling config for the *current* request's session.
+
+        Resolves the native transport session id of the in-flight request and
+        reads that session's SAMPLING_CONFIG, lazy-loading it from encrypted disk
+        (keyed by that session's user email) on first use. Outside a request
+        context, or when the session has no config, returns None so the server
+        default handler is used.
+
+        Never walks other sessions: a per-user provider key must only ever serve
+        the user who configured it.
+        """
+        try:
+            from auth.context import (
+                get_session_context_sync,
+                get_session_data,
+                store_session_data,
+            )
             from auth.types import SessionKey
 
-            for sid in reversed(list_sessions()):
-                # Check in-memory session cache first
-                config = get_session_data(sid, SessionKey.SAMPLING_CONFIG, default=None)
-                if config:
-                    return config
+            sid = get_session_context_sync()
+            if not sid:
+                return None
 
-                # Lazy-load from disk if user email is known
-                user_email = get_session_data(sid, SessionKey.USER_EMAIL, default=None)
-                if not user_email:
-                    continue
+            config = get_session_data(sid, SessionKey.SAMPLING_CONFIG, default=None)
+            if config:
+                return config
 
-                per_user_key = get_session_data(
-                    sid, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
-                )
-                google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB, default=None)
+            user_email = get_session_data(sid, SessionKey.USER_EMAIL, default=None)
+            if not user_email:
+                return None
 
-                try:
-                    from auth.context import get_auth_middleware
+            per_user_key = get_session_data(
+                sid, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+            )
+            google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB, default=None)
 
-                    auth_mw = get_auth_middleware()
-                    if auth_mw:
-                        loaded = auth_mw.load_sampling_config(
-                            user_email,
-                            per_user_key=per_user_key,
-                            google_sub=google_sub,
-                        )
-                        if loaded:
-                            # Cache back to session for fast lookup next time
-                            from auth.context import store_session_data
+            from auth.context import get_auth_middleware
 
-                            store_session_data(sid, SessionKey.SAMPLING_CONFIG, loaded)
-                            return loaded
-                except Exception as e:
-                    logger.debug("Failed to lazy-load sampling config: %s", e)
+            auth_mw = get_auth_middleware()
+            if not auth_mw:
+                return None
+            loaded = auth_mw.load_sampling_config(
+                user_email, per_user_key=per_user_key, google_sub=google_sub
+            )
+            if loaded:
+                # Cache back to this session for fast lookup next time
+                store_session_data(sid, SessionKey.SAMPLING_CONFIG, loaded)
+                return loaded
 
         except Exception as e:
             logger.debug("Session sampling config lookup failed: %s", e)

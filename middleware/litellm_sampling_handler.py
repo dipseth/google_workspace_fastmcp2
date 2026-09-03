@@ -109,7 +109,7 @@ class LiteLLMSamplingHandler:
                 pass
 
         # Convert MCP messages to LiteLLM (OpenAI) format
-        litellm_messages = self._convert_messages(messages, params.systemPrompt)
+        litellm_messages = self._convert_messages(messages, params.system_prompt)
 
         # Build kwargs
         kwargs: dict[str, Any] = {
@@ -122,10 +122,10 @@ class LiteLLMSamplingHandler:
             kwargs["api_base"] = self.api_base
         if params.temperature is not None:
             kwargs["temperature"] = params.temperature
-        if params.maxTokens:
-            kwargs["max_tokens"] = params.maxTokens
-        if params.stopSequences:
-            kwargs["stop"] = params.stopSequences
+        if params.max_tokens:
+            kwargs["max_tokens"] = params.max_tokens
+        if params.stop_sequences:
+            kwargs["stop"] = params.stop_sequences
 
         # Tools
         has_tools = bool(params.tools)
@@ -135,8 +135,8 @@ class LiteLLMSamplingHandler:
             # responses replay with stale IDs and cause infinite iteration
             # loops in the sampling middleware.
             kwargs["cache"] = {"no-cache": True, "no-store": True}
-        if params.toolChoice:
-            tc = self._convert_tool_choice(params.toolChoice)
+        if params.tool_choice:
+            tc = self._convert_tool_choice(params.tool_choice)
             if tc is not None:
                 kwargs["tool_choice"] = tc
 
@@ -247,7 +247,7 @@ class LiteLLMSamplingHandler:
                         text="[Sampling skipped — monthly budget exceeded]",
                     ),
                     model=self.default_model,
-                    stopReason="endTurn",
+                    stop_reason="endTurn",
                 )
         except ImportError:
             pass
@@ -409,7 +409,7 @@ class LiteLLMSamplingHandler:
                 result.append(
                     {
                         "role": "tool",
-                        "tool_call_id": content.toolCallId,
+                        "tool_call_id": content.tool_use_id,
                         "content": tool_content,
                     }
                 )
@@ -425,7 +425,7 @@ class LiteLLMSamplingHandler:
         """Convert MCP Tool definitions to OpenAI-format tool dicts."""
         result = []
         for tool in tools:
-            schema = tool.inputSchema if hasattr(tool, "inputSchema") else {}
+            schema = tool.input_schema if hasattr(tool, "input_schema") else {}
             if isinstance(schema, dict) and "type" not in schema:
                 schema = {**schema, "type": "object"}
 
@@ -497,14 +497,14 @@ class LiteLLMSamplingHandler:
                 role="assistant",
                 content=content_blocks,
                 model=model,
-                stopReason=stop_reason,
+                stop_reason=stop_reason,
             )
 
         return CreateMessageResult(
             role="assistant",
             content=content_blocks[0],  # Single content block for non-tool results
             model=model,
-            stopReason=stop_reason,
+            stop_reason=stop_reason,
         )
 
     def _map_stop_reason(self, finish_reason: str | None) -> str:

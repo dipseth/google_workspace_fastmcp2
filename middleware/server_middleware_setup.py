@@ -97,6 +97,12 @@ def setup_all_middleware(
     logger.info("  🔍 Monitoring for context lifecycle issues...")
 
     # ─── 4. Session Tool Filtering ───
+    # App-only tools (meta.ui.visibility == ["app"]) are listed by FastMCP 4 and
+    # filtered by the host; apply the rule here for clients without the UI extension.
+    from middleware.app_visibility_middleware import AppVisibilityMiddleware
+
+    mcp.add_middleware(AppVisibilityMiddleware())
+
     from middleware.session_tool_filtering_middleware import (
         setup_session_tool_filtering_middleware,
     )

@@ -218,7 +218,12 @@ class TestRowsAppEndToEnd:
     """The card's fetch, as the host would make it: a hashed tool, by key."""
 
     def _server(self):
+        from middleware.app_visibility_middleware import AppVisibilityMiddleware
+
         mcp = FastMCP("dash-test")
+        # FastMCP 4 lists app-only tools and leaves visibility to the host; the
+        # server applies the rule for clients without the UI extension.
+        mcp.add_middleware(AppVisibilityMiddleware())
         app = create_dashboard_rows_app()
         assert app is not None
         mcp.add_provider(app)

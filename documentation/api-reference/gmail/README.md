@@ -17,6 +17,7 @@ Complete API documentation for all Gmail tools in the FastMCP Google MCP Server.
 - **Fixed Elicitation Compatibility**: Added graceful fallback for MCP clients that don't support elicitation
 - **Resolved Schema Validation**: Fixed `structured_content must be a dict or None` errors
 - **Universal Client Support**: Email tools now work with any MCP client (elicitation-supporting or not)
+- **Protocol eras (FastMCP 4)**: interactive confirmation uses `ctx.elicit()` on handshake-era MCP connections. On the sessionless `2026-07-28` protocol the tool returns a form-mode input request instead (the SEP-2322 guard-tool pattern: the client collects the answer and calls the tool again with `inputResponses`; the subject and text sections are editable in the form). Only clients that declare no elicitation capability fall back to `GMAIL_ELICITATION_FALLBACK` and the `elicitationRequired` response
 - **Fixed Field Name Consistency**: Resolved TypedDict field access issues (`draftId` vs `draft_id`)
 
 ## Available Tools

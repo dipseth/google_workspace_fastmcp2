@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 
 from fastmcp import FastMCP
+from mcp_types import InputRequiredResult
 from pydantic import Field
 from typing_extensions import Annotated, Any, List, Literal, Optional, Union
 
@@ -54,6 +55,7 @@ from config.settings import settings
 
 # Import our custom type for consistent parameter definition
 from tools.common_types import UserGoogleEmailDrive
+from tools.elicitation import answered_oauth_prompt, prompt_for_oauth
 
 from .upload_types import (
     CheckAuthResponse,
@@ -71,6 +73,73 @@ from .utils import (
 
 # Default services — derived from the catalog (all non-required services).
 DEFAULT_SERVICES = ScopeRegistry.get_default_services()
+
+
+def _requested_services(
+    service_name: Optional[Union[str, list[str]]],
+) -> List[str]:
+    """The services this call is asking to authorize.
+
+    A display string (``"My App"``) names nothing resolvable, so it yields an
+    empty list and the caller falls back to the default token group.
+    """
+    if isinstance(service_name, list):
+        return list(service_name)
+    if service_name is None or service_name == "":
+        return list(DEFAULT_SERVICES)
+    return []
+
+
+def _verify_oauth_completed(
+    user_google_email: str,
+    requested_services: List[str],
+) -> Optional[StartAuthResponse]:
+    """Confirm a stored credential now covers ``requested_services``.
+
+    A client reporting ``accept`` on a url-mode elicitation is relaying what
+    the user said, not what Google did — the browser tab may have been closed
+    on the consent screen. The credential on disk is the only proof, so read
+    it back. Returns ``None`` when there is nothing usable yet, which leaves
+    the caller free to fall back to the clickable-link response.
+    """
+    from auth.google_auth import compare_scopes, get_valid_credentials
+
+    token_group = (
+        ScopeRegistry.get_token_group_for_services(requested_services)
+        if requested_services
+        else ScopeRegistry.DEFAULT_TOKEN_GROUP
+    )
+    try:
+        credentials = get_valid_credentials(user_google_email, token_group=token_group)
+    except Exception as exc:
+        logger.warning(f"Could not read credentials after OAuth: {exc}")
+        return None
+    if credentials is None:
+        return None
+
+    granted = list(getattr(credentials, "scopes", None) or [])
+    if requested_services:
+        sufficient, missing = compare_scopes(
+            granted, ScopeRegistry.get_scopes_for_services(requested_services)
+        )
+        if not sufficient:
+            logger.info(f"OAuth finished but scopes still missing: {missing}")
+            return None
+
+    return StartAuthResponse(
+        status="already_authenticated",
+        message=(
+            f"✅ Authentication complete for {user_google_email}. "
+            f"Continue with what you were doing."
+        ),
+        userEmail=user_google_email,
+        serviceName=list(requested_services) or None,
+        scopesIncluded=granted,
+        instructions=[
+            f"Pass user_google_email='{user_google_email}' explicitly in "
+            f"subsequent tool calls for this account."
+        ],
+    )
 
 
 def setup_drive_tools(mcp: FastMCP) -> None:
@@ -152,7 +221,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 ),
             ),
         ] = None,
-    ) -> StartAuthResponse:
+    ) -> Union[StartAuthResponse, InputRequiredResult]:
         """
         Initiate Google OAuth2 authentication flow for Google services access.
 
@@ -212,6 +281,33 @@ def setup_drive_tools(mcp: FastMCP) -> None:
 
         logger.info(f"Starting OAuth flow (auto_open_browser={auto_open_browser})")
 
+        # ── Re-entry leg ─────────────────────────────────────────────────
+        # Set only when this call is the second round of a url-mode
+        # elicitation: the client walked the user to Google and is now calling
+        # the tool again with their answer. `accept` is a claim, not proof, so
+        # it is checked against the stored credential; `allow_oauth_prompt`
+        # keeps a round that did not take from suspending all over again.
+        oauth_answer = answered_oauth_prompt()
+        allow_oauth_prompt = oauth_answer is None
+        if oauth_answer is not None:
+            answer_action = getattr(oauth_answer, "action", None)
+            logger.info(f"OAuth elicitation answered: {answer_action}")
+            if answer_action != "accept":
+                return StartAuthResponse(
+                    status="error",
+                    message="🚫 Authentication cancelled — no credentials were stored.",
+                    userEmail=user_google_email or "",
+                    error=f"User {answer_action or 'cancelled'}d the Google sign-in.",
+                )
+            # Believe the credential, not the claim. If it checks out we are
+            # done; if it does not, fall through and re-issue the link — never
+            # another prompt, since `allow_oauth_prompt` is already False.
+            confirmed = _verify_oauth_completed(
+                user_google_email or "", _requested_services(service_name)
+            )
+            if confirmed is not None:
+                return confirmed
+
         # Validate that user_google_email is provided
         if not user_google_email:
             logger.error("No user_google_email after context check")
@@ -230,12 +326,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
             # credential slot this flow would actually write (e.g. a
             # photos-only request must check the "photos" token group, not
             # the Workspace token).
-            if isinstance(service_name, list):
-                requested_services = service_name
-            elif service_name is None or service_name == "":
-                requested_services = DEFAULT_SERVICES
-            else:
-                requested_services = []  # custom display string — can't resolve scopes
+            requested_services = _requested_services(service_name)
 
             precheck_token_group = (
                 ScopeRegistry.get_token_group_for_services(requested_services)
@@ -347,6 +438,45 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 use_pkce=(auth_method != "file_credentials"),
                 auth_method=auth_method,
             )
+
+            # ── Hand the URL to the client instead of to the model ───────
+            # A clickable link ends the tool call: the user leaves, authorizes,
+            # comes back and has to re-ask for whatever they wanted. URL-mode
+            # elicitation keeps the call alive across the detour. Clients that
+            # never advertised it fall through to the link response below, so
+            # this can only add behavior.
+            if allow_oauth_prompt:
+                prompt = await prompt_for_oauth(
+                    message=(
+                        f"Authorize Google Workspace access for {user_google_email}. "
+                        f"You will sign in with Google and choose which services to "
+                        f"grant, then return here — no need to repeat your request."
+                    ),
+                    url=auth_url,
+                    request_state=f"start_google_auth:{user_google_email}",
+                )
+                if prompt.outcome == "suspended":
+                    # The client collects the answer and calls this tool again
+                    # with the same arguments; the re-entry leg picks it up.
+                    return prompt.suspend
+                if prompt.outcome == "declined":
+                    return StartAuthResponse(
+                        status="error",
+                        message="🚫 Authentication cancelled — no credentials were stored.",
+                        userEmail=user_google_email or "",
+                        error=f"User {prompt.action or 'cancelled'}d the Google sign-in.",
+                    )
+                if prompt.outcome == "completed":
+                    # Handshake-era client walked the user through it inline.
+                    verified = _verify_oauth_completed(
+                        user_google_email, requested_services
+                    )
+                    if verified is not None:
+                        return verified
+                    logger.info(
+                        "Client reported OAuth complete but no usable credential "
+                        "was found — falling back to the link response"
+                    )
 
             # Attempt to open browser automatically if requested
             browser_opened = False

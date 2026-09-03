@@ -1208,3 +1208,165 @@ class TestCardPathDoesNotFoldTheViewIntoItself:
 
         # The card goes out untouched — no block-output node appended.
         assert result.structured_content == self.TEXTLESS_CARD
+
+
+class TestExecuteSuspendsForClientInput:
+    """A nested tool's ask for client input becomes ``execute``'s own result.
+
+    Under Code Mode the block is the only thing that crosses the wire. The OAuth
+    prompt (``prompt_for_oauth``) suspends its tool with an ``InputRequiredResult``
+    that carries no content, so before this ``execute`` suppressed it and the user
+    got the clickable link instead. Now the ask is returned from ``execute``; the
+    client answers and re-runs the block with ``inputResponses``, and the nested
+    tool reads the answer off the same request context.
+
+    The in-memory client negotiates 2026-07-28, so this is the same wire shape
+    Claude Code sees. Claude Code negotiates no tasks, so the client's automatic
+    tasks extension is switched off: with it on, ``execute`` runs in a
+    background worker that has no session to elicit through.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _inline_execute(self, monkeypatch):
+        from fastmcp import Client
+
+        monkeypatch.setattr(Client, "_auto_internal_extensions", False)
+
+    @staticmethod
+    def _server(rounds: list):
+        from typing import Any
+
+        from fastmcp import FastMCP
+
+        from tools import elicitation as oe
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        async def start_fake_auth() -> Any:
+            """Stand-in for start_google_auth: prompt once, then report the answer."""
+            rounds.append(1)
+            answer = oe.answered_oauth_prompt()
+            if answer is not None:
+                return f"answered:{answer.action}"
+            prompt = await oe.prompt_for_oauth(
+                "Finish OAuth", "https://example.com/auth"
+            )
+            if prompt.outcome == "suspended":
+                return prompt.suspend
+            return f"fallback:{prompt.outcome}"
+
+        setup_code_mode(mcp)
+        return mcp
+
+    @staticmethod
+    def _handler(action: str, seen: list):
+        from fastmcp.client.elicitation import ElicitResult
+
+        async def handler(message, response_type, params, context):
+            seen.append(params)
+            return ElicitResult(action=action)
+
+        return handler
+
+    @pytest.mark.asyncio
+    async def test_the_ask_round_trips_through_execute(self, monkeypatch):
+        from fastmcp import Client
+
+        from tools import elicitation as oe
+
+        monkeypatch.setattr(oe, "url_elicitation_supported", lambda ctx=None: True)
+        rounds: list = []
+        seen: list = []
+        mcp = self._server(rounds)
+
+        async with Client(
+            mcp, elicitation_handler=self._handler("accept", seen)
+        ) as client:
+            result = await client.call_tool(
+                "execute", {"code": "return await call_tool('start_fake_auth', {})"}
+            )
+
+        assert result.content[0].text == "answered:accept"
+        assert len(seen) == 1
+        assert getattr(seen[0], "mode", None) == "url"
+        assert str(getattr(seen[0], "url", "")) == "https://example.com/auth"
+        assert len(rounds) == 2  # asked, then answered on the re-run
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_reaches_the_tool(self, monkeypatch):
+        from fastmcp import Client
+
+        from tools import elicitation as oe
+
+        monkeypatch.setattr(oe, "url_elicitation_supported", lambda ctx=None: True)
+        mcp = self._server([])
+
+        async with Client(
+            mcp, elicitation_handler=self._handler("decline", [])
+        ) as client:
+            result = await client.call_tool(
+                "execute", {"code": "return await call_tool('start_fake_auth', {})"}
+            )
+
+        assert result.content[0].text == "answered:decline"
+
+    @pytest.mark.asyncio
+    async def test_the_ask_wins_over_a_block_that_swallows_it(self, monkeypatch):
+        """LLM code wraps calls in try/except; the abort must not be catchable
+        into a half-result that skips the user."""
+        from fastmcp import Client
+
+        from tools import elicitation as oe
+
+        monkeypatch.setattr(oe, "url_elicitation_supported", lambda ctx=None: True)
+        seen: list = []
+        mcp = self._server([])
+        code = (
+            "try:\n"
+            "    r = await call_tool('start_fake_auth', {})\n"
+            "except Exception:\n"
+            "    r = 'swallowed'\n"
+            "return r"
+        )
+
+        async with Client(
+            mcp, elicitation_handler=self._handler("accept", seen)
+        ) as client:
+            result = await client.call_tool("execute", {"code": code})
+
+        assert len(seen) == 1
+        assert result.content[0].text == "answered:accept"
+
+    @pytest.mark.asyncio
+    async def test_a_form_only_client_gets_the_link_in_a_form(self, monkeypatch):
+        """Claude Code's shape: bare ``elicitation: {}``, which its SDK reads as
+        form-only. The test client declares both modes, so the url gate is
+        pinned off; the form gate stays real, and the form's message carries
+        the URL."""
+        from fastmcp import Client
+        from fastmcp.client.elicitation import ElicitResult
+
+        from tools import elicitation as oe
+
+        monkeypatch.setattr(oe, "url_elicitation_supported", lambda ctx=None: False)
+        rounds: list = []
+        seen: list = []
+        mcp = self._server(rounds)
+
+        async def handler(message, response_type, params, context):
+            seen.append((message, params))
+            return ElicitResult(action="accept", content={"authorized": True})
+
+        async with Client(mcp, elicitation_handler=handler) as client:
+            result = await client.call_tool(
+                "execute", {"code": "return await call_tool('start_fake_auth', {})"}
+            )
+
+        assert result.content[0].text == "answered:accept"
+        assert len(seen) == 1
+        message, params = seen[0]
+        assert getattr(params, "mode", None) == "form"
+        assert "https://example.com/auth" in message
+        assert len(rounds) == 2

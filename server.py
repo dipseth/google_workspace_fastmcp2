@@ -252,11 +252,17 @@ if _github_client_id and _github_client_secret:
     except Exception as e:
         logger.error(f"❌ Failed to create GitHubProvider: {e}", exc_info=True)
 
-# Configure sampling fallback handler (routes through LiteLLM or Anthropic)
+# Configure the server-side sampling handler (routes through LiteLLM or Anthropic)
 # Factory handles provider selection, lifespan registration, and session-aware wrapping
 from middleware.session_sampling_handler import create_sampling_handler
 
 _sampling_handler = create_sampling_handler(settings)
+
+# FastMCP 4 removed server-initiated sampling (SEP-2577). Dynamic tools sample
+# through middleware/sampling_runtime.py, which dispatches to this handler.
+from middleware.sampling_runtime import set_sampling_handler
+
+set_sampling_handler(_sampling_handler)
 
 # Create FastMCP instance with composed lifespans for proper lifecycle management
 # Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
@@ -291,9 +297,20 @@ For manual/legacy auth:
 ## Tool Management
 Use `manage_tools` to list, enable, or disable tools at runtime.""",
     auth=google_auth_provider,  # GoogleProvider when configured, None for legacy fallback
-    sampling_handler=_sampling_handler,  # Anthropic fallback when client lacks sampling
-    sampling_handler_behavior="fallback",  # Use client LLM when available, Anthropic when not
 )
+
+# ─── Background tasks (SEP-2663, io.modelcontextprotocol/tasks) ───
+# FastMCP 4 ships tasks as an extension; `task=True` tools (send_dynamic_card,
+# create_gmail_filter) need it registered before the lifespan starts. The
+# backend defaults to memory:// (single process); set FASTMCP_DOCKET_URL=redis://…
+# when running replicas.
+try:
+    from fastmcp_tasks import TasksExtension
+
+    mcp.add_extension(TasksExtension())
+    logger.info("🧵 Background tasks extension registered")
+except ImportError as e:
+    logger.warning(f"⚠️ fastmcp-tasks not installed; task=True tools run inline: {e}")
 
 if google_auth_provider:
     logger.info("🔐 FastMCP running with GoogleProvider OAuth 2.1")

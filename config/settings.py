@@ -177,6 +177,15 @@ class Settings(BaseSettings):
         description="Sampling provider: 'auto' (LiteLLM if configured, else Anthropic), 'litellm', or 'anthropic'",
         json_schema_extra={"env": "SAMPLING_PROVIDER"},
     )
+    sampling_allow_header_override: bool = Field(
+        default=False,
+        description=(
+            "Honor X-Sampling-Model / X-Sampling-Api-Base / X-Sampling-Api-Key request "
+            "headers as a per-request LLM override for server-side sampling. Used by the "
+            "cross-model evals harness (FastMCP 4 has no client-fulfilled sampling)."
+        ),
+        json_schema_extra={"env": "SAMPLING_ALLOW_HEADER_OVERRIDE"},
+    )
 
     # MCP List Page Size Configuration
     # Controls pagination of tools/resources/prompts listing responses.

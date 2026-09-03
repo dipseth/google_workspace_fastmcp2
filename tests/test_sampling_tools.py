@@ -588,8 +588,7 @@ class TestLiteLLMMessageConversion:
                 role="user",
                 content=ToolResultContent(
                     type="tool_result",
-                    toolUseId="call_123",
-                    toolCallId="call_123",
+                    tool_use_id="call_123",
                     content=[
                         MCPTextContent(type="text", text="Search found 5 results")
                     ],
@@ -649,7 +648,7 @@ class TestLiteLLMResultConversion:
         result = handler._to_result(response, with_tools=False)
         assert result.role == "assistant"
         assert result.content.text == "Hello world"
-        assert result.stopReason == "endTurn"
+        assert result.stop_reason == "endTurn"
 
     def test_tool_call_result(self):
         """Response with tool calls should produce CreateMessageResultWithTools."""
@@ -662,7 +661,7 @@ class TestLiteLLMResultConversion:
             content=None, tool_calls=[tc], finish_reason="tool_calls"
         )
         result = handler._to_result(response, with_tools=True)
-        assert result.stopReason == "toolUse"
+        assert result.stop_reason == "toolUse"
         # Should have at least one ToolUseContent block
         tool_blocks = [
             b for b in result.content if getattr(b, "type", None) == "tool_use"
@@ -727,12 +726,12 @@ class TestLiteLLMCostTracking:
                 "middleware.payment.cost_tracker.track_sample_call"
             ) as mock_track:
                 params = MagicMock()
-                params.systemPrompt = None
+                params.system_prompt = None
                 params.temperature = None
-                params.maxTokens = 100
-                params.stopSequences = None
+                params.max_tokens = 100
+                params.stop_sequences = None
                 params.tools = None
-                params.toolChoice = None
+                params.tool_choice = None
 
                 messages = [
                     MCPSamplingMessage(
@@ -783,12 +782,12 @@ class TestLiteLLMCostTracking:
                 "middleware.payment.cost_tracker.track_sample_call"
             ) as mock_track:
                 params = MagicMock()
-                params.systemPrompt = None
+                params.system_prompt = None
                 params.temperature = None
-                params.maxTokens = 100
-                params.stopSequences = None
+                params.max_tokens = 100
+                params.stop_sequences = None
                 params.tools = None
-                params.toolChoice = None
+                params.tool_choice = None
 
                 messages = [
                     MCPSamplingMessage(
@@ -911,7 +910,7 @@ class TestLiteLLMToolConversion:
         tool = MagicMock()
         tool.name = "search"
         tool.description = "Search for items"
-        tool.inputSchema = {
+        tool.input_schema = {
             "type": "object",
             "properties": {"query": {"type": "string"}},
         }
@@ -923,12 +922,12 @@ class TestLiteLLMToolConversion:
         assert result[0]["function"]["parameters"]["type"] == "object"
 
     def test_convert_tools_adds_type_if_missing(self):
-        """If inputSchema lacks 'type', it should be added."""
+        """If input_schema lacks 'type', it should be added."""
         handler = self._handler()
         tool = MagicMock()
         tool.name = "test"
         tool.description = ""
-        tool.inputSchema = {"properties": {"x": {"type": "string"}}}
+        tool.input_schema = {"properties": {"x": {"type": "string"}}}
         result = handler._convert_tools([tool])
         assert result[0]["function"]["parameters"]["type"] == "object"
 

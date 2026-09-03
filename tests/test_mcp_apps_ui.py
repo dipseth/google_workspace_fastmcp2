@@ -99,8 +99,8 @@ async def test_resource_has_correct_mime(mcp_with_ui):
             r for r in resources if str(r.uri) == "ui://manage-tools-dashboard"
         )
         # ui:// scheme should resolve to text/html;profile=mcp-app
-        assert dashboard.mimeType is not None
-        assert "text/html" in dashboard.mimeType
+        assert dashboard.mime_type is not None
+        assert "text/html" in dashboard.mime_type
 
 
 @pytest.mark.asyncio
