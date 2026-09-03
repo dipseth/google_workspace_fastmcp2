@@ -3,7 +3,7 @@
 Google refuses to put Photos Library scopes in the same authorization request
 as Workspace scopes, so Photos is consented separately and its credential
 lives in its own token group (``credentials/token_groups/photos/``). Until
-3.3.0 the access token this server minted always claimed the comprehensive
+3.0.0 the access token this server minted always claimed the comprehensive
 scope list, so nothing could tell a caller that Photos in particular was
 missing; the Photos tools failed deep inside the API client and the only way
 back was the generic service-selection page, which does not preselect Photos.

@@ -5,12 +5,12 @@
 The Session Tool Filtering Middleware enables **per-session tool enable/disable** functionality for FastMCP servers. This powerful middleware allows different MCP clients to have different tool availability without affecting other connected clients or the global tool registry.
 
 **Key Benefits:**
-- **Per-User Isolation**: Each authenticated user has their own set of enabled/disabled tools, shared by every connection they open (since 3.1.0; before, state was per transport session)
+- **Per-User Isolation**: Each authenticated user has their own set of enabled/disabled tools, shared by every connection they open (since 3.0.0; before, state was per transport session)
 - **Non-Invasive**: Session-scoped operations never modify the global tool state
 - **Protocol-Level Filtering**: Tools are filtered at both listing and execution stages, on handshake-era and MCP 2026-07-28 connections alike
 - **Protected Tools**: Core management tools always remain available
 
-> **Where the state lives (3.1.0+):** in the FastMCP session state store (`FASTMCP_STATE_STORE`, see the configuration guide), in a bucket keyed by the authenticated principal — the user's email for OAuth, per-user API key and Google-token callers, one shared admin bucket for the `MCP_API_KEY`, one anonymous bucket when the server runs without auth. `manage_tools(scope="session")` still names the scope "session" for compatibility; it means "this user". The helpers are in `auth/user_state.py`.
+> **Where the state lives (3.0.0+):** in the FastMCP session state store (`FASTMCP_STATE_STORE`, see the configuration guide), in a bucket keyed by the authenticated principal — the user's email for OAuth, per-user API key and Google-token callers, one shared admin bucket for the `MCP_API_KEY`, one anonymous bucket when the server runs without auth. `manage_tools(scope="session")` still names the scope "session" for compatibility; it means "this user". The helpers are in `auth/user_state.py`.
 
 ```mermaid
 graph TB
@@ -103,7 +103,7 @@ http://localhost:8002/mcp?minimal=false
 | `service` or `services` | `?service=gmail,drive` | Comma-separated list of services to enable. Applied once per distinct filter for a user; reconnecting with the same filter keeps what they enabled since, a different filter re-applies. |
 | `minimal` | `?minimal=false` | Override minimal startup mode |
 
-The `?uuid=` resume parameter was retired in 3.1.0: state is keyed by the authenticated user, so there is no session to resume.
+The `?uuid=` resume parameter was retired in 3.0.0: state is keyed by the authenticated user, so there is no session to resume.
 
 **Available Services:** `gmail`, `drive`, `calendar`, `docs`, `sheets`, `slides`, `photos`, `chat`, `forms`, `people`
 

@@ -123,7 +123,7 @@ Pre-existing failures, identical on 3.4.7 and unrelated to the upgrade (leave al
 
 ## Implementation status (2026-09-02)
 
-- **Phase 3 items 1, 3, 4, 5 (2026-09-03, branch `feat/fastmcp-v4-phase3`, one bump to 3.1.0).** Per-principal state (`auth/user_state.py`, `middleware/state_store.py`), cache hints, argument completion, the roles claim, per-token-group scopes and the Photos scope step-up (`auth/scope_step_up.py`) are implemented with tests; the step-up is not yet verified against a live client. Status and deviations in [fastmcp4_phase3_plan.md §7](fastmcp4_phase3_plan.md#7-implementation-status-2026-09-03-branch-featfastmcp-v4-phase3).
+- **Phase 3 items 1, 3, 4, 5 (2026-09-03, in PR #73 as release 3.0.0, bumped against main's 2.14.0).** Per-principal state (`auth/user_state.py`, `middleware/state_store.py`), cache hints, argument completion, the roles claim, per-token-group scopes and the Photos scope step-up (`auth/scope_step_up.py`) are implemented with tests; the step-up is not yet verified against a live client. Status and deviations in [fastmcp4_phase3_plan.md §7](fastmcp4_phase3_plan.md#7-implementation-status-2026-09-03-branch-featfastmcp-v4-phase3).
 
 Branch `feat/fastmcp-v4`. Phases 0, 1 and 2 are implemented; Phase 3 is not started, apart from the two elicitation items below.
 

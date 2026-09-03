@@ -149,7 +149,7 @@ Tests: `tests/test_user_state.py` (both eras: disable on one connection hides an
 
 ### Workstream D1 — done
 
-`auth/access_control.py` gained `ADMIN` (`require_roles("admin", extract=roles_from_claims)`), `is_admin()` (claim first, shared-key provenance fallback for pre-3.1.0 JWTs), `roles_for_provenance()`; `tests/test_roles.py` covers hide-and-deny on both eras. The claim is minted at the four token sites in `sso_google_provider.py` (shared key → `["admin"]`; per-user key, tokeninfo and OAuth JWT → `["user"]`, the JWT's verified claims widened after validation). `set_privacy_mode` reads `is_admin()`. No tool turned out to be admin-only in full, so `auth=ADMIN` is applied nowhere yet; `manage_tools(scope="global")` is deliberately left open because on a single-user OAuth deploy the owner is not the shared key. The `/api/*` routes keep rejecting shared-key *sessions* by provenance: they have no token context of their own.
+`auth/access_control.py` gained `ADMIN` (`require_roles("admin", extract=roles_from_claims)`), `is_admin()` (claim first, shared-key provenance fallback for pre-3.0.0 JWTs), `roles_for_provenance()`; `tests/test_roles.py` covers hide-and-deny on both eras. The claim is minted at the four token sites in `sso_google_provider.py` (shared key → `["admin"]`; per-user key, tokeninfo and OAuth JWT → `["user"]`, the JWT's verified claims widened after validation). `set_privacy_mode` reads `is_admin()`. No tool turned out to be admin-only in full, so `auth=ADMIN` is applied nowhere yet; `manage_tools(scope="global")` is deliberately left open because on a single-user OAuth deploy the owner is not the shared key. The `/api/*` routes keep rejecting shared-key *sessions* by provenance: they have no token context of their own.
 
 ### Workstream D2 — done, verified live
 
@@ -162,4 +162,4 @@ Tests: `tests/test_user_state.py` (both eras: disable on one connection hides an
 
 ### Release
 
-Everything above is one branch and one version bump (3.0.0 → 3.1.0). The plan's three-release split (3.1.0 / 3.2.0 / 3.3.0) was not reproduced as separate branches; if you want it, split at the workstream boundaries listed here.
+Everything above ships in PR #73 as release 3.0.0. The version is bumped against `main` (2.14.0), which never saw 3.0.0; the plan's three-release split (3.1.0 / 3.2.0 / 3.3.0) assumed #73 had already merged and does not apply. If you want the split, branch at the workstream boundaries listed here and bump each against `main` at that time.
