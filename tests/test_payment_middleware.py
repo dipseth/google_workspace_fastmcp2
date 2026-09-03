@@ -422,17 +422,26 @@ class TestX402PaymentMiddleware:
 
     @pytest.mark.asyncio
     async def test_session_cached_after_x402_payment(self):
-        """After x402 payment, session is cached with receipt."""
+        """After x402 payment, the caller's bucket holds the receipt."""
+        from fastmcp import FastMCP
+
+        from auth import user_state
+        from auth.types import SessionKey
+
+        user_state.set_server(FastMCP("payment-bucket-test"))
         mw = self._make_middleware()
 
-        with patch("auth.context.store_session_data") as mock_store:
-            with patch("auth.context.get_session_data", return_value=None):
-                mw._cache_payment_in_session(
-                    "session-abc", payer_address="0xPayer", tool_name="test_tool"
-                )
-                # PAYMENT_VERIFIED, PAYMENT_VERIFIED_AT, PAYMENT_NETWORK,
-                # PAYMENT_PAYER_ADDRESS, PAYMENT_RECEIPT, PAYMENT_RECEIPT_HMAC
-                assert mock_store.call_count == 6
+        await mw._cache_payment_in_session(
+            "session-abc", payer_address="0xPayer", tool_name="test_tool"
+        )
+
+        state = await user_state.user_bucket().load()
+        assert state[SessionKey.PAYMENT_VERIFIED.value] is True
+        assert state[SessionKey.PAYMENT_PAYER_ADDRESS.value] == "0xPayer"
+        assert state[SessionKey.PAYMENT_RECEIPT.value]["tool_name"] == "test_tool"
+        assert state[SessionKey.PAYMENT_RECEIPT_HMAC.value]
+        # A later request from the same principal (any session id) is honored.
+        assert await mw._is_payment_verified("session-xyz") is True
 
     # ── Unit tests for helper methods ──
 
@@ -484,45 +493,59 @@ class TestX402PaymentMiddleware:
             mock_get.return_value = AuthProvenance.API_KEY
             assert mw._is_session_exempt("session-123") is False
 
-    def test_is_payment_verified_no_session(self):
+    @pytest.mark.asyncio
+    async def test_is_payment_verified_no_record(self):
+        from fastmcp import FastMCP
+
+        from auth import user_state
+
+        user_state.set_server(FastMCP("payment-bucket-test"))
         mw = self._make_middleware()
-        assert mw._is_payment_verified(None) is False
+        assert await mw._is_payment_verified(None) is False
 
-    def test_is_payment_verified_true(self):
+    @pytest.mark.asyncio
+    async def test_is_payment_verified_true(self):
+        from fastmcp import FastMCP
+
+        from auth import user_state
+        from auth.types import SessionKey
+
+        user_state.set_server(FastMCP("payment-bucket-test"))
         mw = self._make_middleware()
-        with patch("auth.context.get_session_data") as mock_get:
-            from auth.types import SessionKey
+        await user_state.bucket_update(
+            {
+                SessionKey.PAYMENT_VERIFIED: True,
+                SessionKey.PAYMENT_VERIFIED_AT: time.time(),
+            }
+        )
+        assert await mw._is_payment_verified("session-123") is True
 
-            def side_effect(session_id, key, default=None):
-                if key == SessionKey.PAYMENT_VERIFIED:
-                    return True
-                if key == SessionKey.PAYMENT_VERIFIED_AT:
-                    return time.time()  # Just now
-                return default
+    @pytest.mark.asyncio
+    async def test_is_payment_verified_expired(self):
+        from fastmcp import FastMCP
 
-            mock_get.side_effect = side_effect
-            assert mw._is_payment_verified("session-123") is True
+        from auth import user_state
+        from auth.types import SessionKey
 
-    def test_is_payment_verified_expired(self):
+        user_state.set_server(FastMCP("payment-bucket-test"))
         mw = self._make_middleware(session_ttl_minutes=1)
-        with patch("auth.context.get_session_data") as mock_get:
-            from auth.types import SessionKey
+        await user_state.bucket_update(
+            {
+                SessionKey.PAYMENT_VERIFIED: True,
+                SessionKey.PAYMENT_VERIFIED_AT: time.time() - 120,  # TTL is 1 min
+            }
+        )
+        assert await mw._is_payment_verified("session-123") is False
 
-            def side_effect(session_id, key, default=None):
-                if key == SessionKey.PAYMENT_VERIFIED:
-                    return True
-                if key == SessionKey.PAYMENT_VERIFIED_AT:
-                    return time.time() - 120  # 2 minutes ago, TTL is 1 min
-                return default
+    @pytest.mark.asyncio
+    async def test_is_payment_verified_not_verified(self):
+        from fastmcp import FastMCP
 
-            mock_get.side_effect = side_effect
-            assert mw._is_payment_verified("session-123") is False
+        from auth import user_state
 
-    def test_is_payment_verified_not_verified(self):
+        user_state.set_server(FastMCP("payment-bucket-test"))
         mw = self._make_middleware()
-        with patch("auth.context.get_session_data") as mock_get:
-            mock_get.return_value = False
-            assert mw._is_payment_verified("session-123") is False
+        assert await mw._is_payment_verified("session-123") is False
 
     def test_strip_payment_arg(self):
         """_strip_payment_arg removes _x402_payment from arguments."""

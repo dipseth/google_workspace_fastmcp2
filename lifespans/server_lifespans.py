@@ -189,31 +189,18 @@ async def colbert_lifespan(server: Any):
 @lifespan
 async def session_state_lifespan(server: Any):
     """
-    Session tool filtering lifecycle with state persistence on shutdown.
+    Session tool filtering lifecycle marker.
 
-    Note: The actual middleware setup is done in server.py before lifespan runs.
-    This lifespan handles state persistence on shutdown.
+    Per-user tool state lives in the FastMCP session state store
+    (``FastMCP(session_state_store=...)``, see auth/user_state.py), which is
+    durable on its own, so nothing is persisted at shutdown any more. The
+    lifespan stays so the composed lifespan keeps its shape and state key.
 
     Yields:
-        Dict containing 'session_state_persisted' flag
+        Dict containing 'session_state_managed' flag
     """
-    from auth.context import persist_session_tool_states
-
-    logger.info("🔐 Session state lifespan: Ready for state management")
-
-    try:
-        yield {"session_state_managed": True}
-    finally:
-        # Persist session tool states on shutdown
-        logger.info("🔄 Session state lifespan: Persisting session states...")
-        try:
-            success = persist_session_tool_states()
-            if success:
-                logger.info("✅ Session state persisted successfully")
-            else:
-                logger.warning("⚠️ Session state persistence returned False")
-        except Exception as e:
-            logger.error(f"❌ Failed to persist session states: {e}")
+    logger.info("🔐 Session state lifespan: per-principal state in the FastMCP store")
+    yield {"session_state_managed": True}
 
 
 @lifespan

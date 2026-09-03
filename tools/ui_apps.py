@@ -34,7 +34,7 @@ _PROTECTED_TOOLS = {
 }
 
 
-def _collect_tools_json(mcp: FastMCP) -> str:
+async def _collect_tools_json(mcp: FastMCP) -> str:
     """Collect tool info from the server registry and return as JSON.
 
     Reuses the same enabled-state logic as ``manage_tools(action="list")``:
@@ -44,7 +44,7 @@ def _collect_tools_json(mcp: FastMCP) -> str:
     Also includes session-specific state and service grouping for the UI.
     """
     # Import here to avoid circular imports at module level
-    from auth.context import get_session_context_sync, get_session_disabled_tools_sync
+    from auth.context import get_session_disabled_tools
     from middleware.qdrant_core.query_parser import extract_service_from_tool
     from tools.server_tools import _get_tool_enabled_state
 
@@ -53,10 +53,10 @@ def _collect_tools_json(mcp: FastMCP) -> str:
     has_session = False
 
     try:
-        session_id = get_session_context_sync()
-        if session_id:
-            has_session = True
-            session_disabled = get_session_disabled_tools_sync(session_id)
+        # Per principal (auth/user_state.py): the same set every connection of
+        # this user sees, independent of the transport session.
+        session_disabled = await get_session_disabled_tools()
+        has_session = True
     except Exception:
         pass
 
@@ -422,8 +422,8 @@ def setup_ui_apps(mcp: FastMCP) -> None:
         tags={"ui", "dashboard", "tools"},
         app=AppConfig(prefers_border=True),
     )
-    def manage_tools_dashboard() -> str:
-        return _build_manage_tools_html(_collect_tools_json(mcp))
+    async def manage_tools_dashboard() -> str:
+        return _build_manage_tools_html(await _collect_tools_json(mcp))
 
     @mcp.resource(
         "ui://data-dashboard/{tool_name}",

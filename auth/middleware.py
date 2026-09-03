@@ -115,6 +115,10 @@ class AuthMiddleware(Middleware):
 
         self._active_sessions: Dict[int, str] = {}  # request_id -> session_id
         self._session_lock = threading.Lock()
+        # Last client record written per principal (bucket segment -> record
+        # without its timestamp), so the bucket is written once per client
+        # change rather than once per request.
+        self._client_records: Dict[str, dict] = {}
 
         # Initialize encryption if needed
         if storage_mode in [
@@ -234,7 +238,7 @@ class AuthMiddleware(Middleware):
         # request — `tools/list` for a connect-and-idle client — is the earliest
         # (and, for a session that never calls a tool, the only) point the
         # client can be recorded.
-        self._record_client_if_visible(session_id)
+        await self._record_client_if_visible()
 
         # Periodic cleanup of expired sessions
         now = datetime.now()
@@ -276,11 +280,7 @@ class AuthMiddleware(Middleware):
         """
         result = await call_next(context)
         try:
-            from .context import (
-                get_session_context_sync,
-                get_session_data,
-                store_session_data,
-            )
+            from .context import get_session_context_sync, store_session_data
 
             session_id = get_session_context_sync()
             if not session_id:
@@ -307,9 +307,7 @@ class AuthMiddleware(Middleware):
                 record = client_record_from_handshake(
                     params, getattr(result, "protocol_version", None)
                 )
-            self._record_client_once(session_id, record, mcp_client_name)
-
-            rec = get_session_data(session_id, SessionKey.CLIENT) or {}
+            rec = await self._record_client(record, mcp_client_name) or {}
             logger.info(
                 "🤝 Client connected: %s %s (oauth_client=%s era=%s elicit=%s "
                 "tasks=%s ui=%s) session=%s...",
@@ -398,7 +396,7 @@ class AuthMiddleware(Middleware):
         # Fallback for a session whose handshake on_initialize did not see
         # (a predecessor process, a client that skipped it). No-op once
         # recorded, so the initialize-time record always wins.
-        self._record_client_once(session_id, oauth_client_name=mcp_client_name)
+        await self._record_client(oauth_client_name=mcp_client_name)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -887,7 +885,7 @@ class AuthMiddleware(Middleware):
         # Fallback for a session whose handshake on_initialize did not see
         # (a predecessor process, a client that skipped it). No-op once
         # recorded, so the initialize-time record always wins.
-        self._record_client_once(session_id, oauth_client_name=mcp_client_name)
+        await self._record_client(oauth_client_name=mcp_client_name)
 
         # JWT AUTH: Primary authentication method following FastMCP pattern
         user_email = self._extract_user_from_jwt_token()
@@ -3410,21 +3408,22 @@ class AuthMiddleware(Middleware):
                 # key derivation.  This is non-public — only obtainable by
                 # completing OAuth for the account.
                 google_sub = access_token.claims.get("sub")
-                if google_sub and user_email:
+                if google_sub and user_email and "@" not in str(google_sub):
+                    # Same-request hand-off: the payment receipt and the
+                    # sampling-config decrypt read it back from this request's
+                    # own session a few frames later. Under 2026-07-28 that
+                    # session is fresh per request, so "the most recent
+                    # session" would be someone else's.
                     try:
                         from .context import (
+                            get_session_context_sync,
                             get_session_data,
-                            list_sessions,
                             store_session_data,
                         )
 
-                        for sid in reversed(list_sessions()):
-                            # Only write if not already set (avoid redundant writes per tool call)
-                            if not get_session_data(sid, SessionKey.GOOGLE_SUB):
-                                store_session_data(
-                                    sid, SessionKey.GOOGLE_SUB, google_sub
-                                )
-                            break
+                        sid = get_session_context_sync()
+                        if sid and not get_session_data(sid, SessionKey.GOOGLE_SUB):
+                            store_session_data(sid, SessionKey.GOOGLE_SUB, google_sub)
                     except Exception:
                         pass
 
@@ -3507,7 +3506,7 @@ class AuthMiddleware(Middleware):
         except Exception:
             return None
 
-    def _record_client_if_visible(self, session_id: Optional[str]) -> None:
+    async def _record_client_if_visible(self) -> None:
         """Record the client from the session, but only once it is readable.
 
         A born-ready 2026-07-28 connection exposes ``client_params`` on its
@@ -3516,64 +3515,52 @@ class AuthMiddleware(Middleware):
         records from the request params instead; the next request then finds
         the record already present.
         """
-        if not session_id:
-            return
         try:
             from tools.client_capabilities import handshake_params
 
-            from .context import get_session_data
-
-            if get_session_data(session_id, SessionKey.CLIENT) is not None:
-                return
             if handshake_params() is None:
                 return
             _, oauth_client_name = self._capture_mcp_client_identity()
         except Exception as exc:
             logger.debug(f"Could not read client handshake: {exc}")
             return
-        self._record_client_once(session_id, oauth_client_name=oauth_client_name)
+        await self._record_client(oauth_client_name=oauth_client_name)
 
-    @staticmethod
-    def _record_client_once(
-        session_id: Optional[str],
+    async def _record_client(
+        self,
         record: Optional[dict] = None,
         oauth_client_name: Optional[str] = None,
-    ) -> None:
-        """Store the handshake identity + capabilities under SessionKey.CLIENT.
+    ) -> Optional[dict]:
+        """Store the handshake identity + capabilities in the principal's bucket.
 
         ``record`` is the handshake-derived record when the caller already has
         one (``on_initialize``); otherwise it is read from the live session.
         ``oauth_client_name`` is the CIMD ``client_name`` ("Claude Code"), the
         one human-readable name an OAuth session carries; None for API keys.
 
-        Bookkeeping only: any failure is logged and never reaches the request.
-        Stored on the live session and written by the session's next
-        ``persist_session_tool_states`` (never from here — see below); never
-        copied across a restore, since a successor session may be a different
-        host.
+        One record per principal, last writer wins: a user who switches from
+        Claude Desktop to Claude Code overwrites it. The bucket is written only
+        when the record differs from the last one written for that principal in
+        this process. Bookkeeping only: any failure is logged and never reaches
+        the request. Returns the record.
         """
-        if not session_id:
-            return
         try:
             from tools.client_capabilities import client_record
 
-            from .context import get_session_data, store_session_data
+            from .user_state import CLIENT_KEY, user_bucket
 
-            if get_session_data(session_id, SessionKey.CLIENT) is None:
-                record = dict(record) if record is not None else client_record()
-                record["oauth_client_name"] = oauth_client_name
-                store_session_data(session_id, SessionKey.CLIENT, record)
-                # Deliberately no persist here. The file is rewritten from the
-                # live store, so the first write of a fresh process replaces
-                # whatever the previous process left — including the
-                # predecessor session that the tools/list restore is about to
-                # look up by email. An early version persisted from the first
-                # request of a fresh process and wiped that history, leaving
-                # every session with user_email null and no inherited tool
-                # state. The record reaches disk with the session's own
-                # persist: the restore, an enable/disable, or minimal startup.
+            record = dict(record) if record is not None else client_record()
+            record["oauth_client_name"] = oauth_client_name
+            bucket = user_bucket()
+            fingerprint = {k: v for k, v in record.items() if k != "first_seen"}
+            if self._client_records.get(bucket.segment) == fingerprint:
+                return record
+            await bucket.set(CLIENT_KEY, record)
+            self._client_records[bucket.segment] = fingerprint
+            return record
         except Exception as exc:
-            logger.warning(f"Could not record client for session: {exc}")
+            logger.warning(f"Could not record client for principal: {exc}")
+            return record
 
     def _capture_mcp_client_identity(self) -> tuple[Optional[str], Optional[str]]:
         """Best-effort extract of the MCP client's DCR identity from the current request.

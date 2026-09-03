@@ -437,6 +437,7 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                 show_service_selection=show_service_selection,
                 use_pkce=(auth_method != "file_credentials"),
                 auth_method=auth_method,
+                preselected_services=pre_selected_services,
             )
 
             # ── Hand the URL to the client instead of to the model ───────

@@ -121,6 +121,17 @@ def setup_all_middleware(
             "  ✅ Per-session tool enable/disable supported via scope='session'"
         )
 
+    # ─── 4b. Photos scope step-up ───
+    # A Photos-tagged tool called by a token without the Photos scopes (i.e. no
+    # Photos credential for that account yet) is answered with the OAuth
+    # elicitation carrying a Photos-only authorize link. Only meaningful when
+    # requests carry tokens.
+    if google_auth_provider:
+        from auth.scope_step_up import ScopeStepUpMiddleware
+
+        mcp.add_middleware(ScopeStepUpMiddleware())
+        logger.info("✅ Photos scope step-up middleware registered")
+
     # ─── 5. Template Middleware (must be before tool registration) ───
     from lifespans import register_template_middleware
     from middleware.template_middleware import (

@@ -661,6 +661,20 @@ class Settings(BaseSettings):
         json_schema_extra={"env": "REDIS_IO_URL_STRING"},
     )
 
+    # FastMCP session state store — backs ctx.set_state and the per-principal
+    # user buckets (auth/user_state.py). "auto" picks redis when
+    # REDIS_IO_URL_STRING is set, otherwise a file-tree store on disk.
+    fastmcp_state_store: Literal["auto", "redis", "disk", "memory"] = Field(
+        default="auto",
+        description="Backend for FastMCP session state: auto | redis | disk | memory. auto = redis when REDIS_IO_URL_STRING is set, else disk.",
+        json_schema_extra={"env": "FASTMCP_STATE_STORE"},
+    )
+    fastmcp_state_dir: str = Field(
+        default="",
+        description="Directory for the disk state store. If empty, uses credentials_dir/fastmcp-state",
+        json_schema_extra={"env": "FASTMCP_STATE_DIR"},
+    )
+
     # Sampling Cache Configuration
     sampling_cache_enabled: bool = Field(
         default=False,

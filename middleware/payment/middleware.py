@@ -123,31 +123,29 @@ class X402PaymentMiddleware(Middleware):
             pass
         return False
 
-    def _is_payment_verified(self, session_id: str | None) -> bool:
-        """Check if session has a valid (non-expired) payment with valid receipt."""
-        if not session_id:
-            return False
-        try:
-            from auth.context import get_session_data
-            from auth.types import SessionKey
+    async def _is_payment_verified(self, session_id: str | None) -> bool:
+        """Whether the calling principal holds a valid (non-expired) payment.
 
-            verified = get_session_data(
-                session_id, SessionKey.PAYMENT_VERIFIED, default=False
-            )
-            if not verified:
+        Read from the per-principal bucket (auth/user_state.py): a payment
+        verified on one request is honored on the next even when each request
+        is its own transport session, and every connection of that user shares
+        it. Any store error reads as "not verified".
+        """
+        try:
+            from auth.types import SessionKey
+            from auth.user_state import user_bucket
+
+            state = await user_bucket().load()
+            if not state.get(SessionKey.PAYMENT_VERIFIED.value):
                 return False
 
-            verified_at = get_session_data(
-                session_id, SessionKey.PAYMENT_VERIFIED_AT, default=0.0
-            )
-            if time.time() - float(verified_at) > self._session_ttl_seconds:
+            verified_at = state.get(SessionKey.PAYMENT_VERIFIED_AT.value, 0.0)
+            if time.time() - float(verified_at or 0.0) > self._session_ttl_seconds:
                 logger.info("Payment expired for session %s", session_id)
                 return False
 
             # Verify receipt HMAC integrity
-            receipt_dict = get_session_data(
-                session_id, SessionKey.PAYMENT_RECEIPT, default=None
-            )
+            receipt_dict = state.get(SessionKey.PAYMENT_RECEIPT.value)
             if receipt_dict:
                 try:
                     from middleware.payment.receipt import verify_receipt_hmac
@@ -306,7 +304,7 @@ class X402PaymentMiddleware(Middleware):
                 payer_address = str(payer_address)
 
             # Cache payment + receipt in session
-            self._cache_payment_in_session(
+            await self._cache_payment_in_session(
                 session_id,
                 payer_address=payer_address,
                 tool_name=tool_name,
@@ -362,13 +360,15 @@ class X402PaymentMiddleware(Middleware):
             session_id = pending.session_id
             if session_id and tx_hash:
                 try:
-                    from auth.context import store_session_data
                     from auth.types import SessionKey
+                    from auth.user_state import bucket_update
 
-                    store_session_data(
-                        session_id, SessionKey.PAYMENT_SETTLE_TX_HASH, tx_hash
+                    await bucket_update(
+                        {
+                            SessionKey.PAYMENT_SETTLE_TX_HASH: tx_hash,
+                            SessionKey.PAYMENT_TX_HASH: tx_hash,
+                        }
                     )
-                    store_session_data(session_id, SessionKey.PAYMENT_TX_HASH, tx_hash)
                 except Exception as e:
                     logger.warning("Could not store settlement hash: %s", e)
 
@@ -394,19 +394,17 @@ class X402PaymentMiddleware(Middleware):
 
         return result
 
-    def _cache_payment_in_session(
+    async def _cache_payment_in_session(
         self,
         session_id: str | None,
         payer_address: str = "",
         tool_name: str = "",
         tx_hash: str = "",
     ) -> None:
-        """Store payment verification + HMAC-signed receipt in session."""
-        if not session_id:
-            return
+        """Store payment verification + HMAC-signed receipt in the caller's bucket."""
         try:
-            from auth.context import store_session_data
             from auth.types import SessionKey
+            from auth.user_state import bucket_update
             from middleware.payment.constants import MCP_RESOURCE_URL_PREFIX
             from middleware.payment.receipt import (
                 build_payer_identity,
@@ -414,14 +412,8 @@ class X402PaymentMiddleware(Middleware):
             )
 
             now = time.time()
-            store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
-            store_session_data(session_id, SessionKey.PAYMENT_VERIFIED_AT, now)
-            store_session_data(
-                session_id, SessionKey.PAYMENT_NETWORK, settings.payment_network
-            )
-
             # Build and store payer identity + HMAC-signed receipt
-            payer = build_payer_identity(session_id, payer_address)
+            payer = build_payer_identity(session_id or "", payer_address)
             receipt = create_payment_receipt(
                 payer=payer,
                 tool_name=tool_name,
@@ -433,15 +425,15 @@ class X402PaymentMiddleware(Middleware):
                 if tool_name
                 else "",
             )
-
-            store_session_data(
-                session_id, SessionKey.PAYMENT_PAYER_ADDRESS, payer_address
-            )
-            store_session_data(
-                session_id, SessionKey.PAYMENT_RECEIPT, receipt.model_dump()
-            )
-            store_session_data(
-                session_id, SessionKey.PAYMENT_RECEIPT_HMAC, receipt.hmac
+            await bucket_update(
+                {
+                    SessionKey.PAYMENT_VERIFIED: True,
+                    SessionKey.PAYMENT_VERIFIED_AT: now,
+                    SessionKey.PAYMENT_NETWORK: settings.payment_network,
+                    SessionKey.PAYMENT_PAYER_ADDRESS: payer_address,
+                    SessionKey.PAYMENT_RECEIPT: receipt.model_dump(),
+                    SessionKey.PAYMENT_RECEIPT_HMAC: receipt.hmac,
+                }
             )
 
         except Exception as e:
@@ -550,7 +542,7 @@ class X402PaymentMiddleware(Middleware):
             return await call_next(context)
 
         # 3. Check if payment is already verified for this session (cached)
-        if self._is_payment_verified(session_id):
+        if await self._is_payment_verified(session_id):
             return await call_next(context)
 
         # 4. Check for x402 payment payload (Path A: header, Path B: tool arg)
