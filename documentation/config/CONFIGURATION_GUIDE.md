@@ -233,6 +233,9 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `AUTH_SECURITY_LEVEL` | No | `standard` | `standard`, `high`, or `custom` |
 | `GMAIL_ALLOW_LIST` | No | - | Comma-separated allowed email addresses |
 | `GMAIL_ENABLE_ELICITATION` | No | `true` | Enable elicitation for untrusted recipients |
+| `SAMPLING_ALLOW_HEADER_OVERRIDE` | No | `false` | Honor `X-Sampling-Model` / `X-Sampling-Api-Base` / `X-Sampling-Api-Key` request headers as a per-request LLM override for server-side sampling (used by the evals harness) |
+| `FASTMCP_DOCKET_URL` | No | `memory://` | Background-tasks backend for `task=True` tools (`fastmcp-tasks`); use `redis://host:6379/0` when running replicas |
+| `FASTMCP_TASKS_ENCRYPTION_KEY` | No | unset | Encrypts background-task context snapshots (caller token + request headers) at rest; plaintext when unset. Set it (≥32 random chars, same on every worker) whenever the tasks backend is Redis |
 | `SAMPLING_TOOLS` | No | `false` | Enable sampling middleware tools |
 | `CHAT_SERVICE_ACCOUNT_FILE` | No | - | Path to Chat service account JSON |
 | `MCP_CHAT_WEBHOOK` | No | - | Default webhook URL for all Google Chat card tools |
@@ -306,6 +309,20 @@ ENABLE_RESOURCE_TEMPLATING=true
 | `CREDENTIALS_DIR` | string | ".credentials" | Directory for stored credentials | No |
 | `CACHE_DIR` | string | ".cache" | Directory for cache files | No |
 | `TEMP_DIR` | string | "/tmp/fastmcp2" | Directory for temporary files | No |
+
+### Session State Store
+
+Per-user state (session-scoped disabled tools, privacy mode, sampling config, payment receipts, the connected-client record) and `ctx.set_state` values live in one FastMCP state store, keyed by the authenticated principal rather than the transport session. That is what makes the state survive MCP 2026-07-28 clients, whose every request is its own session, and lets every connection a user opens share it.
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `FASTMCP_STATE_STORE` | `auto` \| `redis` \| `disk` \| `memory` | `auto` | Backend for the store. `auto` picks `redis` when `REDIS_IO_URL_STRING` is set, otherwise `disk`. `memory` is process-local (tests, throwaway runs). | No |
+| `FASTMCP_STATE_DIR` | string | `$CREDENTIALS_DIR/fastmcp-state` | Directory for the `disk` backend (a file-tree store; one JSON file per key). | No |
+| `REDIS_IO_URL_STRING` | string | - | Redis URL (`redis://user:pass@host:port`). Shared across replicas; also used for response caching. | No |
+
+Retention: bucket writes get a 30-day ceiling and every write is clamped to 60 seconds–30 days. The shared `MCP_API_KEY` maps every holder to one admin bucket by design. On Glama and other single-container hosts without a persistent volume, the `disk` store resets on redeploy; per-user state is then per deployment rather than per request.
+
+The previous `credentials/session_tool_states.json` file is no longer written. A user's most recent entry in it is imported into their bucket the first time they connect, then the file is ignored (`SESSION_TOOL_STATE_FILE` still points at it for that one read).
 
 ### Qdrant Configuration
 

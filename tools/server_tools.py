@@ -29,7 +29,6 @@ from auth.context import (
     get_session_context,
     get_session_context_sync,
     get_session_disabled_tools,
-    get_session_disabled_tools_sync,
 )
 from auth.middleware import CredentialStorageMode
 from config.enhanced_logging import setup_logger
@@ -829,34 +828,28 @@ def setup_server_tools(mcp: FastMCP) -> None:
             "execute",
         }
 
-        # Helper to get current session state (uses sync versions to avoid async in sync helper)
-        def _get_session_state() -> SessionToolState:
+        # Helper to get current session state. The disabled set is per principal
+        # (auth/user_state.py), so it is the same for every connection this
+        # user has open and survives the per-request sessions of MCP 2026-07-28.
+        async def _get_session_state() -> SessionToolState:
             session_id = get_session_context_sync()
-            if session_id:
-                disabled = get_session_disabled_tools_sync(session_id)
-                return SessionToolState(
-                    sessionId=(
-                        session_id[:8] + "..." if len(session_id) > 8 else session_id
-                    ),
-                    sessionAvailable=True,
-                    sessionDisabledTools=sorted(list(disabled)),
-                    sessionDisabledCount=len(disabled),
-                )
+            disabled = await get_session_disabled_tools()
             return SessionToolState(
-                sessionId=None,
-                sessionAvailable=False,
-                sessionDisabledTools=[],
-                sessionDisabledCount=0,
+                sessionId=(
+                    session_id[:8] + "..."
+                    if session_id and len(session_id) > 8
+                    else session_id
+                ),
+                sessionAvailable=True,
+                sessionDisabledTools=sorted(disabled),
+                sessionDisabledCount=len(disabled),
             )
 
-        # Helper to get list of enabled tool names for this session
+        # Helper to get list of enabled tool names for this principal
         # This allows clients to update their tool list without notifications
-        def _get_enabled_tool_names(reg: Dict[str, Any]) -> List[str]:
-            """Get list of tool names currently enabled for this session."""
-            session_id = get_session_context_sync()
-            session_disabled = (
-                get_session_disabled_tools_sync(session_id) if session_id else set()
-            )
+        async def _get_enabled_tool_names(reg: Dict[str, Any]) -> List[str]:
+            """Get list of tool names currently enabled for this principal."""
+            session_disabled = await get_session_disabled_tools()
             enabled_names = []
             for name, tool in sorted(reg.items()):
                 # Skip internal tools
@@ -895,7 +888,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=0,
                 protectedTools=list(protected_tools_set),
                 sessionState=(
-                    _get_session_state() if scope_normalized == "session" else None
+                    await _get_session_state()
+                    if scope_normalized == "session"
+                    else None
                 ),
                 message=f"Invalid action '{action}'",
                 error="Valid actions: list, disable, enable, disable_all_except, enable_all",
@@ -913,7 +908,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=0,
                 protectedTools=list(protected_tools_set),
                 sessionState=(
-                    _get_session_state() if scope_normalized == "session" else None
+                    await _get_session_state()
+                    if scope_normalized == "session"
+                    else None
                 ),
                 message="Unable to access FastMCP tool registry",
                 error="Tool registry not available",
@@ -928,7 +925,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
         if action_normalized == "list":
             tool_list = []
-            session_state = _get_session_state()
+            session_state = await _get_session_state()
             session_disabled = set(session_state.sessionDisabledTools)
 
             from middleware.qdrant_core import extract_service_from_tool
@@ -1049,7 +1046,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,
                     protectedTools=list(protected_tools_set),
                     sessionState=(
-                        _get_session_state() if scope_normalized == "session" else None
+                        await _get_session_state()
+                        if scope_normalized == "session"
+                        else None
                     ),
                     message=f"No tools found matching service '{service_filter}'",
                     error=f"No registered tools belong to service '{service_filter}'",
@@ -1069,7 +1068,9 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=disabled_count,
                 protectedTools=list(protected_tools_set),
                 sessionState=(
-                    _get_session_state() if scope_normalized == "session" else None
+                    await _get_session_state()
+                    if scope_normalized == "session"
+                    else None
                 ),
                 message="'tool_names' parameter is required for this action",
                 error="Missing required parameter: tool_names",
@@ -1092,7 +1093,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,
                         disabledCount=disabled_count,
                         protectedTools=list(protected_tools_set),
-                        sessionState=_get_session_state(),
+                        sessionState=await _get_session_state(),
                         message="Session scope requires active session context",
                         error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
                     )
@@ -1116,7 +1117,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         skipped.append(name)
                         errors.append(f"Failed to disable tool '{name}' for session")
 
-                session_state = _get_session_state()
+                session_state = await _get_session_state()
                 # Notify MCP client and refresh session-aware instructions
                 if affected:
                     await _notify_and_refresh_instructions(
@@ -1131,7 +1132,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
-                    enabledToolNames=_get_enabled_tool_names(registry),
+                    enabledToolNames=await _get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Disabled {len(affected)} tools for this session"
@@ -1169,7 +1170,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=disabled_count + len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
-                enabledToolNames=_get_enabled_tool_names(registry),
+                enabledToolNames=await _get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Disabled {len(affected)} tools globally"
                 + (f", skipped {len(skipped)}" if skipped else ""),
@@ -1191,7 +1192,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,
                         disabledCount=disabled_count,
                         protectedTools=list(protected_tools_set),
-                        sessionState=_get_session_state(),
+                        sessionState=await _get_session_state(),
                         message="Session scope requires active session context",
                         error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
                     )
@@ -1209,7 +1210,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     else:
                         errors.append(f"Failed to disable tool '{name}' for session")
 
-                session_state = _get_session_state()
+                session_state = await _get_session_state()
                 # Notify MCP client and refresh session-aware instructions
                 if affected:
                     await _notify_and_refresh_instructions(
@@ -1224,7 +1225,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
-                    enabledToolNames=_get_enabled_tool_names(registry),
+                    enabledToolNames=await _get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools for this session",
@@ -1259,7 +1260,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
-                enabledToolNames=_get_enabled_tool_names(registry),
+                enabledToolNames=await _get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Kept {len(keep_set)} tools, disabled {len(affected)} tools globally",
                 errors=errors if errors else None,
@@ -1278,7 +1279,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,
                         disabledCount=disabled_count,
                         protectedTools=list(protected_tools_set),
-                        sessionState=_get_session_state(),
+                        sessionState=await _get_session_state(),
                         message="Session scope requires active session context",
                         error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
                     )
@@ -1296,7 +1297,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         skipped.append(name)
                         errors.append(f"Failed to enable tool '{name}' for session")
 
-                session_state = _get_session_state()
+                session_state = await _get_session_state()
                 # Notify MCP client and refresh session-aware instructions
                 if affected:
                     await _notify_and_refresh_instructions(
@@ -1311,7 +1312,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     disabledCount=disabled_count,  # Global state unchanged
                     toolsAffected=affected if affected else None,
                     toolsSkipped=skipped if skipped else None,
-                    enabledToolNames=_get_enabled_tool_names(registry),
+                    enabledToolNames=await _get_enabled_tool_names(registry),
                     protectedTools=list(protected_tools_set),
                     sessionState=session_state,
                     message=f"Enabled {len(affected)} tools for this session"
@@ -1345,7 +1346,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=disabled_count - len(affected),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
-                enabledToolNames=_get_enabled_tool_names(registry),
+                enabledToolNames=await _get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Enabled {len(affected)} tools globally"
                 + (f", skipped {len(skipped)}" if skipped else ""),
@@ -1365,7 +1366,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,
                         disabledCount=disabled_count,
                         protectedTools=list(protected_tools_set),
-                        sessionState=_get_session_state(),
+                        sessionState=await _get_session_state(),
                         message="Session scope requires active session context",
                         error="No session context available. Ensure SessionToolFilteringMiddleware is enabled.",
                     )
@@ -1376,7 +1377,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
                 # Clear all session disables
                 if await clear_session_disabled_tools(session_id):
-                    session_state = _get_session_state()
+                    session_state = await _get_session_state()
                     # Notify MCP client and refresh session-aware instructions
                     if affected:
                         await _notify_and_refresh_instructions(
@@ -1390,7 +1391,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,  # Global state unchanged
                         disabledCount=disabled_count,  # Global state unchanged
                         toolsAffected=affected if affected else None,
-                        enabledToolNames=_get_enabled_tool_names(registry),
+                        enabledToolNames=await _get_enabled_tool_names(registry),
                         protectedTools=list(protected_tools_set),
                         sessionState=session_state,
                         message=f"Enabled {len(affected)} session-disabled tools for this session",
@@ -1404,7 +1405,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                         enabledCount=enabled_count,
                         disabledCount=disabled_count,
                         protectedTools=list(protected_tools_set),
-                        sessionState=_get_session_state(),
+                        sessionState=await _get_session_state(),
                         message="Failed to clear session disabled tools",
                         error="Could not clear session state",
                     )
@@ -1434,7 +1435,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 disabledCount=len(skipped),
                 toolsAffected=affected if affected else None,
                 toolsSkipped=skipped if skipped else None,
-                enabledToolNames=_get_enabled_tool_names(registry),
+                enabledToolNames=await _get_enabled_tool_names(registry),
                 protectedTools=list(protected_tools_set),
                 message=f"Enabled {len(affected)} tools globally, skipped {len(skipped)}",
                 errors=errors if errors else None,
@@ -1450,7 +1451,7 @@ def setup_server_tools(mcp: FastMCP) -> None:
             disabledCount=disabled_count,
             protectedTools=list(protected_tools_set),
             sessionState=(
-                _get_session_state() if scope_normalized == "session" else None
+                await _get_session_state() if scope_normalized == "session" else None
             ),
             message="Unknown error while managing tools",
             error="Unexpected code path reached",
@@ -1517,12 +1518,14 @@ def setup_server_tools(mcp: FastMCP) -> None:
         Shared API key sessions are rejected because they use a random vault
         seed with no identity binding.
         """
-        from auth.context import (
-            get_session_context,
-            get_session_data,
-            store_session_data,
+        from auth.context import get_session_context
+        from auth.user_state import (
+            PRIVACY_FIELDS_KEY,
+            PRIVACY_MODE_KEY,
+            auth_provenance,
+            bucket_get,
+            bucket_update,
         )
-        from auth.types import AuthProvenance, SessionKey
 
         session_id = await get_session_context()
         if not session_id:
@@ -1531,11 +1534,13 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 "error": "No active session — cannot set privacy mode",
             }
 
-        # Security: reject shared API key sessions (random vault seed, no identity binding).
-        provenance = get_session_data(
-            session_id, SessionKey.AUTH_PROVENANCE, default=None
-        )
-        if provenance == AuthProvenance.API_KEY:
+        # Security: reject the shared admin key (random vault seed, no identity
+        # binding). Read from the token's roles claim, with the provenance
+        # fallback for JWTs minted before the claim existed.
+        from auth.access_control import is_admin
+
+        provenance = auth_provenance()
+        if is_admin():
             return {
                 "success": False,
                 "error": (
@@ -1545,16 +1550,11 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 "auth_provenance": str(provenance),
             }
 
-        # Get previous state
-        previous_mode = get_session_data(
-            session_id, SessionKey.PRIVACY_MODE, default=None
-        )
+        # Get previous state (per principal, so it is what every connection sees)
+        previous_mode = await bucket_get(PRIVACY_MODE_KEY)
         effective_previous = (
             previous_mode if previous_mode is not None else settings.privacy_mode
         )
-
-        # Store the new mode
-        store_session_data(session_id, SessionKey.PRIVACY_MODE, mode)
 
         # Build session-level additional fields set
         # Default: mask_content=True when mode is "auto"
@@ -1573,14 +1573,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
                 if f:
                     session_fields.add(f)
 
-        if session_fields:
-            store_session_data(
-                session_id,
-                SessionKey.PRIVACY_ADDITIONAL_FIELDS,
-                frozenset(session_fields),
-            )
-        else:
-            store_session_data(session_id, SessionKey.PRIVACY_ADDITIONAL_FIELDS, None)
+        await bucket_update(
+            {
+                PRIVACY_MODE_KEY: mode,
+                PRIVACY_FIELDS_KEY: sorted(session_fields) if session_fields else None,
+            }
+        )
 
         logger.info(
             "Privacy mode changed for session %s: %s -> %s (mask_content=%s, extra_fields=%s)",
@@ -1690,10 +1688,12 @@ def setup_server_tools(mcp: FastMCP) -> None:
             }
 
         if result.verified and ctx:
-            # Store payment verification + HMAC-signed receipt in session
+            # Store payment verification + HMAC-signed receipt in the caller's
+            # per-principal bucket, so a paid user stays paid on later requests
+            # even when each request is its own transport session.
             try:
-                from auth.context import store_session_data
                 from auth.types import SessionKey
+                from auth.user_state import bucket_update
                 from middleware.payment.receipt import (
                     build_payer_identity,
                     create_payment_receipt,
@@ -1701,26 +1701,6 @@ def setup_server_tools(mcp: FastMCP) -> None:
 
                 session_id = ctx.session_id
                 ttl_seconds = settings.payment_session_ttl_minutes * 60
-
-                store_session_data(session_id, SessionKey.PAYMENT_VERIFIED, True)
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_TX_HASH, verified_hash
-                )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_VERIFIED_AT, _time.time()
-                )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_AMOUNT, result.amount or ""
-                )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_NETWORK, settings.payment_network
-                )
-                if result.settlement_tx_hash:
-                    store_session_data(
-                        session_id,
-                        SessionKey.PAYMENT_SETTLE_TX_HASH,
-                        result.settlement_tx_hash,
-                    )
 
                 # Build HMAC-signed receipt binding payment to identity
                 payer = build_payer_identity(
@@ -1734,15 +1714,21 @@ def setup_server_tools(mcp: FastMCP) -> None:
                     tx_hash=verified_hash,
                     ttl_seconds=ttl_seconds,
                 )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_PAYER_ADDRESS, payer.wallet_address
-                )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_RECEIPT, receipt.model_dump()
-                )
-                store_session_data(
-                    session_id, SessionKey.PAYMENT_RECEIPT_HMAC, receipt.hmac
-                )
+                record = {
+                    SessionKey.PAYMENT_VERIFIED: True,
+                    SessionKey.PAYMENT_TX_HASH: verified_hash,
+                    SessionKey.PAYMENT_VERIFIED_AT: _time.time(),
+                    SessionKey.PAYMENT_AMOUNT: result.amount or "",
+                    SessionKey.PAYMENT_NETWORK: settings.payment_network,
+                    SessionKey.PAYMENT_PAYER_ADDRESS: payer.wallet_address,
+                    SessionKey.PAYMENT_RECEIPT: receipt.model_dump(),
+                    SessionKey.PAYMENT_RECEIPT_HMAC: receipt.hmac,
+                }
+                if result.settlement_tx_hash:
+                    record[SessionKey.PAYMENT_SETTLE_TX_HASH] = (
+                        result.settlement_tx_hash
+                    )
+                await bucket_update(record)
 
                 expires_at = _time.time() + ttl_seconds
                 logger.info(

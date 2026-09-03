@@ -1,9 +1,12 @@
 """Session-aware sampling handler — routes per-user LLM config when available.
 
-Wraps the server-default sampling handler and checks for per-session
-overrides stored via the OAuth success page. When a user has configured
-their own LLM provider (model, api_key, api_base), their sampling calls
-are routed through that provider instead of the server default.
+Wraps the server-default sampling handler and checks for a per-user override
+(saved through the OAuth intro screen or ``/api/sampling-config``). When a user
+has configured their own LLM provider (model, api_key, api_base), their
+sampling calls are routed through that provider instead of the server default.
+The lookup is keyed by the calling principal, so it works identically for
+handshake-era connections and for 2026-07-28 clients whose every request is a
+fresh transport session.
 
 Also provides `create_sampling_handler()` factory that creates the
 server-default handler (LiteLLM or Anthropic) and wraps it in a
@@ -24,12 +27,44 @@ from config.enhanced_logging import setup_logger
 logger = setup_logger()
 
 
-class SessionAwareSamplingHandler:
-    """Sampling handler that checks per-session config before falling back to default.
+# Decrypted per-user configs by bucket principal segment. The bucket itself
+# holds only the non-secret part (model, api_base) so no provider key lands in
+# the disk or Redis state store; the key comes from the encrypted per-user file
+# and is cached here for the life of the process.
+_decrypted_configs: dict[str, dict] = {}
 
-    Session resolution: iterates active sessions in reverse order looking for
-    a SAMPLING_CONFIG entry. If found, creates (or reuses) a LiteLLMSamplingHandler
-    configured with the user's provider details.
+
+def forget_sampling_config(email: str) -> None:
+    """Drop the in-process decrypted config for ``email`` (after save/clear)."""
+    from auth.user_state import UserBucket, principal_for_email
+
+    _decrypted_configs.pop(UserBucket(principal_for_email(email)).segment, None)
+
+
+def public_sampling_config(config: Optional[dict]) -> Optional[dict]:
+    """The part of a sampling config that may be written to the state store."""
+    if not config or not config.get("model"):
+        return None
+    public = {"model": config["model"], "has_api_key": bool(config.get("api_key"))}
+    if config.get("api_base"):
+        public["api_base"] = config["api_base"]
+    return public
+
+
+class SessionAwareSamplingHandler:
+    """Sampling handler that checks per-user config before falling back to default.
+
+    Resolution order for the calling principal (auth/user_state.py):
+
+    1. The in-process decrypted config for this principal.
+    2. The encrypted per-user file, decrypted with key material the current
+       request carries (the per-user API key bearer, or the OAuth ``sub``), then
+       cached in-process.
+    3. The bucket's public record (model, api_base) when the file cannot be
+       decrypted on this request — the provider then relies on server-side
+       credentials for that model.
+
+    Never another user's config: the principal comes from the request's token.
 
     Handler cache: keyed by (model, api_key, api_base) tuple to avoid re-creating
     handler instances on every call.
@@ -46,7 +81,10 @@ class SessionAwareSamplingHandler:
         params: SamplingParams,
         context: Any,
     ) -> CreateMessageResult | CreateMessageResultWithTools:
-        config = self._get_session_sampling_config()
+        config = (
+            self._get_request_override_config()
+            or await self._get_session_sampling_config()
+        )
         if config:
             handler = self._get_or_create_handler(config)
             if handler:
@@ -61,51 +99,109 @@ class SessionAwareSamplingHandler:
             raise RuntimeError("No sampling handler configured")
         return await self.default_handler(messages, params, context)
 
-    def _get_session_sampling_config(self) -> Optional[dict]:
-        """Find sampling config from any active session.
+    def _get_request_override_config(self) -> Optional[dict]:
+        """Per-request override from X-Sampling-* headers (opt-in via settings).
 
-        Walks sessions in reverse order (most recent first) looking for
-        a SAMPLING_CONFIG entry. If not in session cache, attempts to
-        lazy-load from encrypted disk.
+        FastMCP 4 removed client-fulfilled sampling, so a caller that wants a
+        specific model (the evals harness comparing providers) names it on the
+        request instead. Disabled unless ``SAMPLING_ALLOW_HEADER_OVERRIDE=true``.
         """
         try:
-            from auth.context import get_session_data, list_sessions
+            from config.settings import settings
+
+            if not getattr(settings, "sampling_allow_header_override", False):
+                return None
+            # get_http_headers() (not get_http_request()) so the override also
+            # reaches background-task workers, which restore the submitting
+            # request's headers but never fabricate a live Request object.
+            from fastmcp.server.dependencies import get_http_headers
+
+            headers = {
+                k.lower(): v for k, v in get_http_headers(include_all=True).items()
+            }
+            model = (headers.get("x-sampling-model") or "").strip()
+            if not model:
+                return None
+            config = {"model": model}
+            api_base = (headers.get("x-sampling-api-base") or "").strip()
+            api_key = (headers.get("x-sampling-api-key") or "").strip()
+            if api_base:
+                config["api_base"] = api_base
+            if api_key:
+                config["api_key"] = api_key
+            return config
+        except Exception:
+            return None
+
+    async def _get_session_sampling_config(self) -> Optional[dict]:
+        """Find the sampling config for the *calling principal*.
+
+        See the class docstring for the resolution order. Outside a request,
+        or for a principal with no config, returns None so the server default
+        handler is used.
+        """
+        try:
+            from auth.context import (
+                get_auth_middleware,
+                get_session_context_sync,
+                get_session_data,
+            )
             from auth.types import SessionKey
+            from auth.user_state import (
+                SAMPLING_CONFIG_KEY,
+                bucket_get,
+                bucket_set,
+                principal_email,
+                principal_sub,
+                user_bucket,
+            )
 
-            for sid in reversed(list_sessions()):
-                # Check in-memory session cache first
-                config = get_session_data(sid, SessionKey.SAMPLING_CONFIG, default=None)
-                if config:
-                    return config
+            bucket = user_bucket()
+            cached = _decrypted_configs.get(bucket.segment)
+            if cached:
+                return cached
 
-                # Lazy-load from disk if user email is known
-                user_email = get_session_data(sid, SessionKey.USER_EMAIL, default=None)
-                if not user_email:
-                    continue
+            public = await bucket_get(SAMPLING_CONFIG_KEY)
+            if public is not None and not public:
+                # Explicitly cleared: skip the file read.
+                return None
 
-                per_user_key = get_session_data(
-                    sid, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+            sid = get_session_context_sync()
+            user_email = principal_email() or (
+                get_session_data(sid, SessionKey.USER_EMAIL, default=None)
+                if sid
+                else None
+            )
+            if user_email:
+                per_user_key = (
+                    get_session_data(
+                        sid, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+                    )
+                    if sid
+                    else None
                 )
-                google_sub = get_session_data(sid, SessionKey.GOOGLE_SUB, default=None)
+                google_sub = principal_sub() or (
+                    get_session_data(sid, SessionKey.GOOGLE_SUB, default=None)
+                    if sid
+                    else None
+                )
+                auth_mw = get_auth_middleware()
+                if auth_mw:
+                    loaded = auth_mw.load_sampling_config(
+                        user_email, per_user_key=per_user_key, google_sub=google_sub
+                    )
+                    if loaded:
+                        _decrypted_configs[bucket.segment] = loaded
+                        if public != public_sampling_config(loaded):
+                            await bucket_set(
+                                SAMPLING_CONFIG_KEY, public_sampling_config(loaded)
+                            )
+                        return loaded
 
-                try:
-                    from auth.context import get_auth_middleware
-
-                    auth_mw = get_auth_middleware()
-                    if auth_mw:
-                        loaded = auth_mw.load_sampling_config(
-                            user_email,
-                            per_user_key=per_user_key,
-                            google_sub=google_sub,
-                        )
-                        if loaded:
-                            # Cache back to session for fast lookup next time
-                            from auth.context import store_session_data
-
-                            store_session_data(sid, SessionKey.SAMPLING_CONFIG, loaded)
-                            return loaded
-                except Exception as e:
-                    logger.debug("Failed to lazy-load sampling config: %s", e)
+            if public and public.get("model"):
+                # Could not decrypt the key on this request; route by model and
+                # let the provider pick up server-side credentials.
+                return {k: v for k, v in public.items() if k in ("model", "api_base")}
 
         except Exception as e:
             logger.debug("Session sampling config lookup failed: %s", e)

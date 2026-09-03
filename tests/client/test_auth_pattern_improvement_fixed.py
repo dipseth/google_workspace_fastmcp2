@@ -28,7 +28,7 @@ pytest.skip(
 
 import os
 
-import httpx
+import httpx2
 import pytest
 from dotenv import load_dotenv
 from fastmcp import Client
@@ -122,7 +122,7 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                 # Try to configure SSL bypass if possible
                 try:
                     # Create httpx client with SSL bypass
-                    httpx_client = httpx.AsyncClient(
+                    httpx_client = httpx2.AsyncClient(
                         verify=False,
                         timeout=30.0,  # Skip SSL verification for testing
                     )

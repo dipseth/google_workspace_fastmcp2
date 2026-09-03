@@ -8,8 +8,9 @@ Two phases per ``on_call_tool``:
   Phase A (inbound):  resolve [PRIVATE:token_N] in arguments → plaintext
   Phase B (outbound): scan response → encrypt sensitive values → mask content
 
-Per-session toggle: sessions can override the server default via
-``SessionKey.PRIVACY_MODE`` (set by the ``set_privacy_mode`` tool).
+Per-user toggle: a principal can override the server default via the
+``set_privacy_mode`` tool or ``/api/privacy-mode``; the choice lives in the
+per-principal bucket (auth/user_state.py).
 """
 
 from __future__ import annotations
@@ -39,8 +40,8 @@ class PrivacyMiddleware(Middleware):
     Args:
         mode: ``"disabled"``, ``"auto"`` (field heuristics + value patterns),
               or ``"strict"`` (encrypt all string values).
-              Acts as the server-wide default; individual sessions can
-              override via ``SessionKey.PRIVACY_MODE``.
+              Acts as the server-wide default; individual users can
+              override it (see ``set_privacy_mode``).
         additional_fields: Comma-separated extra field names to treat as PII.
         exclude_tools: Comma-separated tool names to skip privacy processing.
     """
@@ -72,54 +73,49 @@ class PrivacyMiddleware(Middleware):
         """Return True if this tool's response should be privacy-processed."""
         return tool_name not in self._exclude_tools
 
-    def _get_effective_mode(self, session_id: str | None) -> str:
-        """Return the privacy mode for this session.
+    async def _get_effective_mode(self, session_id: str | None) -> str:
+        """Return the privacy mode for the calling principal.
 
-        Checks session-level override first, falls back to server default.
+        The per-principal bucket (auth/user_state.py) wins over the server
+        default, so the choice a user made on one connection holds on all of
+        them and across the per-request sessions of MCP 2026-07-28.
         """
-        if session_id:
-            try:
-                from auth.context import get_session_data
-                from auth.types import SessionKey
+        try:
+            from auth.user_state import PRIVACY_MODE_KEY, bucket_get
 
-                session_mode = get_session_data(
-                    session_id, SessionKey.PRIVACY_MODE, default=None
-                )
-                if session_mode is not None:
-                    return session_mode
-            except Exception:
-                pass
+            session_mode = await bucket_get(PRIVACY_MODE_KEY)
+            if session_mode is not None:
+                return session_mode
+        except Exception:
+            pass
         return self._mode
 
-    def _get_effective_additional_fields(
+    async def _get_effective_additional_fields(
         self, session_id: str | None
     ) -> frozenset[str] | None:
-        """Merge server-level and session-level additional fields.
+        """Merge server-level and per-principal additional fields.
 
-        Session can store extra field names via ``SessionKey.PRIVACY_ADDITIONAL_FIELDS``.
-        The special value ``"__content__"`` expands to ``PRIVACY_CONTENT_FIELDS``.
+        The bucket stores extra field names under ``PRIVACY_FIELDS_KEY``. The
+        special value ``"__content__"`` expands to ``PRIVACY_CONTENT_FIELDS``.
         """
         merged: set[str] = (
             set(self._additional_fields) if self._additional_fields else set()
         )
 
-        if session_id:
-            try:
-                from auth.context import get_session_data
-                from auth.types import SessionKey
+        try:
+            from auth.user_state import PRIVACY_FIELDS_KEY, bucket_get
 
-                session_fields = get_session_data(
-                    session_id, SessionKey.PRIVACY_ADDITIONAL_FIELDS, default=None
-                )
-                if session_fields:
-                    if "__content__" in session_fields:
-                        from middleware.privacy.constants import PRIVACY_CONTENT_FIELDS
+            session_fields = await bucket_get(PRIVACY_FIELDS_KEY)
+            if session_fields:
+                session_fields = set(session_fields)
+                if "__content__" in session_fields:
+                    from middleware.privacy.constants import PRIVACY_CONTENT_FIELDS
 
-                        merged |= PRIVACY_CONTENT_FIELDS
-                        session_fields = session_fields - {"__content__"}
-                    merged |= session_fields
-            except Exception:
-                pass
+                    merged |= PRIVACY_CONTENT_FIELDS
+                    session_fields = session_fields - {"__content__"}
+                merged |= session_fields
+        except Exception:
+            pass
 
         return frozenset(merged) if merged else None
 
@@ -137,7 +133,7 @@ class PrivacyMiddleware(Middleware):
                 )
 
         # Determine effective mode for this session
-        effective_mode = self._get_effective_mode(session_id)
+        effective_mode = await self._get_effective_mode(session_id)
 
         # Short-circuit: excluded tools and disabled mode bypass Phase B entirely
         if effective_mode == "disabled" or not self._should_process(
@@ -160,7 +156,7 @@ class PrivacyMiddleware(Middleware):
             return result
 
         effective_strict = effective_mode == "strict"
-        effective_fields = self._get_effective_additional_fields(session_id)
+        effective_fields = await self._get_effective_additional_fields(session_id)
 
         # Process content blocks (what LLM reads — masked text)
         masked_content = result.content

@@ -8,7 +8,7 @@ and helps validate the actual resource system.
 MCP client types:
 - client.read_resource() → ReadResourceResult
   - .contents: list[TextResourceContents | BlobResourceContents]
-    - TextResourceContents: .text (str), .uri, .mimeType
+    - TextResourceContents: .text (str), .uri, .mime_type
 """
 
 import json

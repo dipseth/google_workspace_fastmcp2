@@ -1150,6 +1150,7 @@ async def initiate_oauth_flow(
     chat_sa_json: Optional[str] = None,
     privacy_mode: bool = False,
     sampling_config: Optional[dict] = None,
+    preselected_services: Optional[List[str]] = None,
 ) -> str:
     """
     Initiate OAuth flow for a user with optional service selection and PKCE support.
@@ -1177,7 +1178,10 @@ async def initiate_oauth_flow(
     # If no services selected and service selection is enabled, return selection URL
     if show_service_selection and not selected_services:
         return await _create_service_selection_url(
-            user_email, "custom", use_pkce=use_pkce
+            user_email,
+            "custom",
+            use_pkce=use_pkce,
+            preselected_services=preselected_services,
         )
 
     # Use selected services or default to comprehensive
@@ -1347,9 +1351,16 @@ async def initiate_oauth_flow(
 
 
 async def _create_service_selection_url(
-    user_email: str, flow_type: str, use_pkce: bool = True
+    user_email: str,
+    flow_type: str,
+    use_pkce: bool = True,
+    preselected_services: Optional[List[str]] = None,
 ) -> str:
-    """Create URL for service selection page with PKCE support."""
+    """Create URL for service selection page with PKCE support.
+
+    ``preselected_services`` are ticked when the page opens (a Photos-only
+    request preselects Photos); the user can still change them.
+    """
     state = secrets.token_urlsafe(32)
 
     # Store flow information
@@ -1358,6 +1369,7 @@ async def _create_service_selection_url(
         "flow_type": flow_type,
         "use_pkce": use_pkce,
         "timestamp": datetime.now().isoformat(),
+        "preselected_services": list(preselected_services or []),
     }
 
     # Clean up old entries

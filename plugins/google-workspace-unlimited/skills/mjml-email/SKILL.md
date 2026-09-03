@@ -16,4 +16,4 @@ This skill provides documentation for the gmail.mjml_types module.
 - `email-dsl-syntax.md` - Custom guide: email-dsl-syntax
 - `email-params.md` - Custom guide: email-params
 - `jinja-filters.md` - Custom guide: jinja-filters
-- `components/` - Per-component documentation (29 components)
+- `components/` - Per-component documentation (28 components)

@@ -253,19 +253,30 @@ def _generate_service_selection_html(
 
     # Retrieve the requested email from the OAuth state map for THIS specific flow
     requested_email = ""
+    preselected: List[str] = []
     try:
-        from auth.google_auth import _oauth_state_map
+        from auth.google_auth import _oauth_state_map, _service_selection_cache
 
         state_info = _oauth_state_map.get(state)
         if state_info:
             requested_email = state_info.get("user_email", "")
             if requested_email == "unknown@gmail.com":
                 requested_email = ""
+        flow_info = _service_selection_cache.get(state) or {}
+        preselected = list(flow_info.get("preselected_services") or [])
+        if not requested_email:
+            requested_email = flow_info.get("user_email", "") or ""
+            if requested_email == "unknown@gmail.com":
+                requested_email = ""
     except Exception:
         pass
 
     return generate_service_selection_html(
-        state, flow_type, use_pkce, requested_email=requested_email
+        state,
+        flow_type,
+        use_pkce,
+        requested_email=requested_email,
+        preselected_services=preselected,
     )
 
 
@@ -517,19 +528,27 @@ async def _build_oauth_success_html(
     force-regeneration, builds the API-key and security-viz sections, and
     returns the full success-page HTML.
     """
-    from auth.context import get_auth_middleware, store_session_data
-    from auth.types import SessionKey
+    from auth.context import get_auth_middleware
+    from auth.user_state import PRIVACY_MODE_KEY, SAMPLING_CONFIG_KEY, bucket_for_email
+    from middleware.session_sampling_handler import (
+        forget_sampling_config,
+        public_sampling_config,
+    )
 
     # ── Apply privacy mode and sampling config from intro screen ──
+    # Written to the user's per-principal bucket: the MCP connection that
+    # started this flow is not identifiable here (and under 2026-07-28 it is
+    # already gone), but the user is.
     _intro_privacy = getattr(credentials, "_privacy_mode", False)
     _intro_sampling = getattr(credentials, "_sampling_config", None)
     try:
-        if session_id and _intro_privacy:
-            store_session_data(session_id, SessionKey.PRIVACY_MODE, "auto")
+        _bucket = bucket_for_email(user_email)
+        if _intro_privacy:
+            await _bucket.set(PRIVACY_MODE_KEY, "auto")
             logger.info(
                 f"🛡️ Privacy mode enabled from intro screen for {redact_email(user_email)}"
             )
-        if session_id and _intro_sampling and _intro_sampling.get("model"):
+        if _intro_sampling and _intro_sampling.get("model"):
             auth_mw_sampling = get_auth_middleware()
             if auth_mw_sampling:
                 _cfg = {k: v for k, v in _intro_sampling.items() if v}
@@ -539,7 +558,8 @@ async def _build_oauth_success_html(
                     per_user_key=getattr(credentials, "_user_api_key", None),
                     google_sub=getattr(credentials, "_google_sub", None),
                 )
-                store_session_data(session_id, SessionKey.SAMPLING_CONFIG, _cfg)
+                await _bucket.set(SAMPLING_CONFIG_KEY, public_sampling_config(_cfg))
+                forget_sampling_config(user_email)
                 logger.info(
                     f"🤖 Sampling config saved from intro screen for {user_email}: "
                     f"model={_cfg.get('model', 'default')}"
@@ -1969,257 +1989,6 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
                 },
             )
 
-    # ── Per-session privacy mode toggle (called from OAuth success page) ──
-    @mcp.custom_route("/api/privacy-mode", methods=["POST", "OPTIONS"])
-    async def privacy_mode_api(request: Any):
-        """Set per-session privacy mode from the OAuth success page."""
-        from starlette.responses import JSONResponse, Response
-
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                },
-            )
-
-        try:
-            body = await request.json()
-            target_session = body.get("session_id")
-            mode = body.get("mode")
-
-            if mode not in ("disabled", "auto", "strict"):
-                return JSONResponse(
-                    {"success": False, "error": f"Invalid mode: {mode}"},
-                    status_code=400,
-                )
-
-            if not target_session:
-                return JSONResponse(
-                    {"success": False, "error": "Missing session_id"},
-                    status_code=400,
-                )
-
-            # SECURITY: require a signed action token bound to this session (same
-            # gate as the GoogleProvider-mode route) so a caller can't flip
-            # another session's privacy mode by guessing its id. Without this the
-            # legacy-mode endpoint would remain unauthenticated.
-            from auth.action_tokens import authorize_action
-
-            _ok, _why = authorize_action(
-                request,
-                "privacy-mode",
-                target_session,
-                body_token=body.get("action_token", ""),
-                subject_is_email=False,
-            )
-            if not _ok:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Unauthorized: a valid action token is required.",
-                    },
-                    status_code=401,
-                )
-
-            from auth.context import get_session_data, store_session_data
-            from auth.types import AuthProvenance, SessionKey
-
-            # Reject shared API key sessions (no identity binding)
-            provenance = get_session_data(
-                target_session, SessionKey.AUTH_PROVENANCE, default=None
-            )
-            if provenance == AuthProvenance.API_KEY:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Privacy mode requires authenticated session (not shared API key)",
-                    },
-                    status_code=403,
-                )
-
-            previous = get_session_data(
-                target_session, SessionKey.PRIVACY_MODE, default=None
-            )
-            store_session_data(target_session, SessionKey.PRIVACY_MODE, mode)
-
-            logger.info(
-                "Privacy mode set via API: session=%s, %s -> %s",
-                target_session[:8] + "...",
-                previous or "default",
-                mode,
-            )
-
-            return JSONResponse(
-                {
-                    "success": True,
-                    "previous_mode": previous or "disabled",
-                    "current_mode": mode,
-                }
-            )
-        except Exception as e:
-            logger.exception("Privacy mode API error")
-            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-
-    # ── Per-session sampling configuration (called from OAuth success page) ──
-    @mcp.custom_route("/api/sampling-config", methods=["POST", "OPTIONS"])
-    async def sampling_config_api(request: Any):
-        """Save or clear per-user sampling LLM configuration."""
-        from starlette.responses import JSONResponse, Response
-
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                },
-            )
-
-        try:
-            body = await request.json()
-            target_session = body.get("session_id") or ""
-            fallback_email = (body.get("user_email") or "").strip()
-            model = (body.get("model") or "").strip()
-            api_key = (body.get("api_key") or "").strip()
-            api_base = (body.get("api_base") or "").strip()
-            action = body.get("action", "save")  # "save" or "clear"
-
-            from auth.context import (
-                get_auth_middleware,
-                get_session_data,
-                list_sessions,
-                store_session_data,
-            )
-            from auth.types import AuthProvenance, SessionKey
-
-            # If no session_id provided, find one by email
-            if not target_session and fallback_email:
-                for _sid in reversed(list_sessions()):
-                    _sid_email = get_session_data(
-                        _sid, SessionKey.USER_EMAIL, default=None
-                    )
-                    if (
-                        _sid_email
-                        and _sid_email.lower().strip() == fallback_email.lower()
-                    ):
-                        target_session = _sid
-                        break
-
-            if not target_session:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Missing session_id and could not find session for email",
-                    },
-                    status_code=400,
-                )
-
-            # Reject shared API key sessions (no identity binding)
-            provenance = get_session_data(
-                target_session, SessionKey.AUTH_PROVENANCE, default=None
-            )
-            if provenance == AuthProvenance.API_KEY:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Sampling config requires authenticated session (not shared API key)",
-                    },
-                    status_code=403,
-                )
-
-            user_email = (
-                get_session_data(target_session, SessionKey.USER_EMAIL, default=None)
-                or fallback_email
-            )
-            if not user_email:
-                return JSONResponse(
-                    {"success": False, "error": "No user email in session"},
-                    status_code=400,
-                )
-
-            # SECURITY: require proof the caller owns this identity before saving
-            # LLM config (model/api_key/api_base). Otherwise an attacker who knows
-            # a victim's email/session could repoint api_base at their own server
-            # and capture the victim's prompts.
-            from auth.action_tokens import authorize_action
-
-            _ok, _why = authorize_action(
-                request,
-                "sampling-config",
-                user_email,
-                body_token=body.get("action_token", ""),
-            )
-            if not _ok:
-                logger.warning(
-                    f"🚫 /api/sampling-config unauthorized for {redact_email(user_email)}: {_why}"
-                )
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Unauthorized: a valid action token or owning API key is required.",
-                    },
-                    status_code=401,
-                )
-
-            auth_middleware = get_auth_middleware()
-            per_user_key = get_session_data(
-                target_session, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
-            )
-            google_sub = get_session_data(
-                target_session, SessionKey.GOOGLE_SUB, default=None
-            )
-
-            if action == "clear" or not model:
-                # Clear: remove from disk + session
-                if auth_middleware:
-                    auth_middleware.delete_sampling_config(user_email)
-                store_session_data(target_session, SessionKey.SAMPLING_CONFIG, None)
-                logger.info(
-                    "Sampling config cleared via API: session=%s, user=%s",
-                    target_session[:8] + "...",
-                    user_email,
-                )
-                return JSONResponse({"success": True, "cleared": True})
-
-            # Save config
-            config_dict = {"model": model}
-            if api_key:
-                config_dict["api_key"] = api_key
-            if api_base:
-                config_dict["api_base"] = api_base
-
-            if auth_middleware:
-                auth_middleware.save_sampling_config(
-                    user_email,
-                    config_dict,
-                    per_user_key=per_user_key,
-                    google_sub=google_sub,
-                )
-
-            store_session_data(target_session, SessionKey.SAMPLING_CONFIG, config_dict)
-
-            logger.info(
-                "Sampling config saved via API: session=%s, model=%s",
-                target_session[:8] + "...",
-                model,
-            )
-
-            return JSONResponse(
-                {
-                    "success": True,
-                    "model": model,
-                    "has_api_key": bool(api_key),
-                    "has_api_base": bool(api_base),
-                }
-            )
-        except Exception as e:
-            logger.exception("Sampling config API error")
-            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-
     # For simplicity, let's focus on the core endpoints that MCP Inspector needs
     # The client configuration endpoints can be added later if needed
 
@@ -2251,8 +2020,7 @@ def setup_oauth_endpoints_fastmcp(mcp) -> None:
     setup_status_check_routes(mcp)
 
     # Register config API routes (shared with GoogleProvider path)
-    # In GoogleProvider mode these are registered separately via setup_config_api_routes()
-    # Here they're already inline above, so no separate call needed.
+    setup_config_api_routes(mcp)
 
 
 def setup_config_api_routes(mcp) -> None:
@@ -2264,97 +2032,14 @@ def setup_config_api_routes(mcp) -> None:
 
     @mcp.custom_route("/api/privacy-mode", methods=["POST", "OPTIONS"])
     async def privacy_mode_api(request: Any):
-        """Set per-session privacy mode from the OAuth success page."""
-        from starlette.responses import JSONResponse, Response
+        """Set a user's privacy mode from a server-rendered page.
 
-        if request.method == "OPTIONS":
-            return Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                },
-            )
-
-        try:
-            body = await request.json()
-            target_session = body.get("session_id")
-            mode = body.get("mode")
-
-            if mode not in ("disabled", "auto", "strict"):
-                return JSONResponse(
-                    {"success": False, "error": f"Invalid mode: {mode}"},
-                    status_code=400,
-                )
-
-            if not target_session:
-                return JSONResponse(
-                    {"success": False, "error": "Missing session_id"},
-                    status_code=400,
-                )
-
-            # SECURITY: require a signed action token bound to this session, so a
-            # caller cannot flip another session's privacy mode by guessing its id.
-            from auth.action_tokens import authorize_action
-
-            _ok, _why = authorize_action(
-                request,
-                "privacy-mode",
-                target_session,
-                body_token=body.get("action_token", ""),
-                subject_is_email=False,
-            )
-            if not _ok:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Unauthorized: a valid action token is required.",
-                    },
-                    status_code=401,
-                )
-
-            from auth.context import get_session_data, store_session_data
-            from auth.types import AuthProvenance, SessionKey
-
-            provenance = get_session_data(
-                target_session, SessionKey.AUTH_PROVENANCE, default=None
-            )
-            if provenance == AuthProvenance.API_KEY:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Privacy mode requires authenticated session (not shared API key)",
-                    },
-                    status_code=403,
-                )
-
-            previous = get_session_data(
-                target_session, SessionKey.PRIVACY_MODE, default=None
-            )
-            store_session_data(target_session, SessionKey.PRIVACY_MODE, mode)
-
-            logger.info(
-                "Privacy mode set via API: session=%s, %s -> %s",
-                target_session[:8] + "...",
-                previous or "default",
-                mode,
-            )
-
-            return JSONResponse(
-                {
-                    "success": True,
-                    "previous_mode": previous or "disabled",
-                    "current_mode": mode,
-                }
-            )
-        except Exception as e:
-            logger.exception("Privacy mode API error")
-            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
-
-    @mcp.custom_route("/api/sampling-config", methods=["POST", "OPTIONS"])
-    async def sampling_config_api(request: Any):
-        """Save or clear per-user sampling LLM configuration."""
+        Body: ``mode`` plus either ``user_email`` (preferred) or a live
+        handshake-era ``session_id`` whose identity is looked up. The choice is
+        written to the user's per-principal bucket, so it applies to every
+        connection that user has and to 2026-07-28 clients whose requests are
+        each their own session.
+        """
         from starlette.responses import JSONResponse, Response
 
         if request.method == "OPTIONS":
@@ -2370,67 +2055,187 @@ def setup_config_api_routes(mcp) -> None:
         try:
             body = await request.json()
             target_session = body.get("session_id") or ""
-            fallback_email = (body.get("user_email") or "").strip()
-            model = (body.get("model") or "").strip()
-            api_key = (body.get("api_key") or "").strip()
-            api_base = (body.get("api_base") or "").strip()
-            action = body.get("action", "save")
+            user_email = (body.get("user_email") or "").strip().lower()
+            mode = body.get("mode")
 
-            from auth.context import (
-                get_auth_middleware,
-                get_session_data,
-                list_sessions,
-                store_session_data,
-            )
-            from auth.types import AuthProvenance, SessionKey
-
-            if not target_session and fallback_email:
-                for _sid in reversed(list_sessions()):
-                    _sid_email = get_session_data(
-                        _sid, SessionKey.USER_EMAIL, default=None
-                    )
-                    if (
-                        _sid_email
-                        and _sid_email.lower().strip() == fallback_email.lower()
-                    ):
-                        target_session = _sid
-                        break
-
-            if not target_session:
+            if mode not in ("disabled", "auto", "strict"):
                 return JSONResponse(
-                    {
-                        "success": False,
-                        "error": "Missing session_id and could not find session for email",
-                    },
+                    {"success": False, "error": f"Invalid mode: {mode}"},
                     status_code=400,
                 )
 
-            provenance = get_session_data(
-                target_session, SessionKey.AUTH_PROVENANCE, default=None
-            )
-            if provenance == AuthProvenance.API_KEY:
+            from auth.context import get_session_data
+            from auth.types import AuthProvenance
+            from auth.user_state import PRIVACY_MODE_KEY, bucket_for_email
+
+            if target_session:
+                # Reject shared API key sessions (no identity binding)
+                if (
+                    get_session_data(
+                        target_session, SessionKey.AUTH_PROVENANCE, default=None
+                    )
+                    == AuthProvenance.API_KEY
+                ):
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": "Privacy mode requires authenticated session (not shared API key)",
+                        },
+                        status_code=403,
+                    )
+                user_email = (
+                    user_email
+                    or (
+                        get_session_data(
+                            target_session, SessionKey.USER_EMAIL, default=""
+                        )
+                        or ""
+                    ).lower()
+                )
+
+            if not user_email and not target_session:
+                return JSONResponse(
+                    {"success": False, "error": "Missing user_email or session_id"},
+                    status_code=400,
+                )
+
+            # SECURITY: proof of ownership — a signed action token bound to the
+            # email (or, for pages that still sign the session id, to that id),
+            # or a per-user API key Bearer that owns the email. Checked before
+            # anything is resolved from the id so a guessed id is a plain 401.
+            from auth.action_tokens import authorize_action
+
+            _token = body.get("action_token", "")
+            _ok, _why = (False, "no subject")
+            if user_email:
+                _ok, _why = authorize_action(
+                    request, "privacy-mode", user_email, body_token=_token
+                )
+            if not _ok and target_session:
+                _ok, _why = authorize_action(
+                    request,
+                    "privacy-mode",
+                    target_session,
+                    body_token=_token,
+                    subject_is_email=False,
+                )
+            if not _ok:
                 return JSONResponse(
                     {
                         "success": False,
-                        "error": "Sampling config requires authenticated session (not shared API key)",
+                        "error": "Unauthorized: a valid action token is required.",
                     },
-                    status_code=403,
+                    status_code=401,
                 )
-
-            user_email = (
-                get_session_data(target_session, SessionKey.USER_EMAIL, default=None)
-                or fallback_email
-            )
             if not user_email:
                 return JSONResponse(
-                    {"success": False, "error": "No user email in session"},
+                    {"success": False, "error": "Session has no user identity"},
+                    status_code=400,
+                )
+
+            bucket = bucket_for_email(user_email)
+            previous = await bucket.get(PRIVACY_MODE_KEY)
+            await bucket.set(PRIVACY_MODE_KEY, mode)
+
+            logger.info(
+                "Privacy mode set via API: user=%s, %s -> %s",
+                redact_email(user_email),
+                previous or "default",
+                mode,
+            )
+
+            return JSONResponse(
+                {
+                    "success": True,
+                    "previous_mode": previous or "disabled",
+                    "current_mode": mode,
+                }
+            )
+        except Exception as e:
+            logger.exception("Privacy mode API error")
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+    # ── Per-user sampling configuration (called from OAuth success page) ──
+    @mcp.custom_route("/api/sampling-config", methods=["POST", "OPTIONS"])
+    async def sampling_config_api(request: Any):
+        """Save or clear a user's sampling LLM configuration.
+
+        The secret (``api_key``) goes only to the encrypted per-user file; the
+        user's bucket records the public part (model, api_base) so the sampling
+        handler can route by model on a replica that cannot decrypt the file.
+        """
+        from starlette.responses import JSONResponse, Response
+
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                },
+            )
+
+        try:
+            body = await request.json()
+            target_session = body.get("session_id") or ""
+            user_email = (body.get("user_email") or "").strip().lower()
+            model = (body.get("model") or "").strip()
+            api_key = (body.get("api_key") or "").strip()
+            api_base = (body.get("api_base") or "").strip()
+            action = body.get("action", "save")  # "save" or "clear"
+
+            from auth.context import get_auth_middleware, get_session_data
+            from auth.types import AuthProvenance
+            from auth.user_state import SAMPLING_CONFIG_KEY, bucket_for_email
+            from middleware.session_sampling_handler import (
+                forget_sampling_config,
+                public_sampling_config,
+            )
+
+            per_user_key = None
+            google_sub = None
+            if target_session:
+                # Reject shared API key sessions (no identity binding)
+                if (
+                    get_session_data(
+                        target_session, SessionKey.AUTH_PROVENANCE, default=None
+                    )
+                    == AuthProvenance.API_KEY
+                ):
+                    return JSONResponse(
+                        {
+                            "success": False,
+                            "error": "Sampling config requires authenticated session (not shared API key)",
+                        },
+                        status_code=403,
+                    )
+                user_email = (
+                    user_email
+                    or (
+                        get_session_data(
+                            target_session, SessionKey.USER_EMAIL, default=""
+                        )
+                        or ""
+                    ).lower()
+                )
+                per_user_key = get_session_data(
+                    target_session, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
+                )
+                google_sub = get_session_data(
+                    target_session, SessionKey.GOOGLE_SUB, default=None
+                )
+
+            if not user_email:
+                return JSONResponse(
+                    {"success": False, "error": "Missing user_email or session_id"},
                     status_code=400,
                 )
 
             # SECURITY: require proof the caller owns this identity before saving
             # LLM config (model/api_key/api_base). Otherwise an attacker who knows
-            # a victim's email/session could repoint api_base at their own server
-            # and capture the victim's prompts.
+            # a victim's email could repoint api_base at their own server and
+            # capture the victim's prompts.
             from auth.action_tokens import authorize_action
 
             _ok, _why = authorize_action(
@@ -2451,74 +2256,50 @@ def setup_config_api_routes(mcp) -> None:
                     status_code=401,
                 )
 
+            # Recipient key material for the encrypted file: a per-user API key
+            # Bearer is itself the key; the Google sub comes from persisted
+            # linkage prefs when no live session carries it.
+            if not per_user_key:
+                _authz = request.headers.get("Authorization", "")
+                if _authz.startswith("Bearer "):
+                    try:
+                        from auth.user_api_keys import lookup_key
+
+                        _bearer = _authz[len("Bearer ") :].strip()
+                        if lookup_key(_bearer):
+                            per_user_key = _bearer
+                    except Exception:
+                        pass
+            if not google_sub:
+                try:
+                    from auth.user_api_keys import get_oauth_linkage
+
+                    google_sub = get_oauth_linkage(user_email).get("google_sub") or None
+                except Exception:
+                    google_sub = None
+
             auth_middleware = get_auth_middleware()
-            per_user_key = get_session_data(
-                target_session, SessionKey.PER_USER_ENCRYPTION_KEY, default=None
-            )
-            google_sub = get_session_data(
-                target_session, SessionKey.GOOGLE_SUB, default=None
-            )
+            bucket = bucket_for_email(user_email)
 
             if action == "clear" or not model:
                 if auth_middleware:
                     auth_middleware.delete_sampling_config(user_email)
-                store_session_data(target_session, SessionKey.SAMPLING_CONFIG, None)
+                # {} marks "explicitly cleared" so the handler skips the file.
+                await bucket.set(SAMPLING_CONFIG_KEY, {})
+                forget_sampling_config(user_email)
                 logger.info(
-                    "Sampling config cleared via API: session=%s, user=%s",
-                    target_session[:8] + "...",
-                    user_email,
+                    "Sampling config cleared via API: user=%s",
+                    redact_email(user_email),
                 )
                 return JSONResponse({"success": True, "cleared": True})
 
+            # Save config
             config_dict = {"model": model}
             if api_key:
                 config_dict["api_key"] = api_key
             if api_base:
                 config_dict["api_base"] = api_base
 
-            # Validate: quick provider connectivity check if API key provided
-            validation_ok = True
-            validation_msg = ""
-            if api_key:
-                try:
-                    import httpx
-
-                    check_base = api_base or settings.litellm_api_base
-                    if (
-                        not check_base
-                        and settings.venice_inference_key
-                        and not settings.litellm_api_key
-                    ):
-                        check_base = "https://api.venice.ai/api/v1"
-                    if check_base:
-                        async with httpx.AsyncClient(
-                            timeout=5.0, verify=False
-                        ) as client:
-                            resp = await client.get(
-                                f"{check_base.rstrip('/')}/models",
-                                headers={"Authorization": f"Bearer {api_key}"},
-                            )
-                            if resp.status_code == 401:
-                                validation_ok = False
-                                validation_msg = (
-                                    "Invalid API key — authentication failed"
-                                )
-                            elif resp.status_code == 200:
-                                validation_msg = "API key verified"
-                            else:
-                                validation_msg = f"Provider returned status {resp.status_code} (saved anyway)"
-                except Exception as ve:
-                    validation_msg = f"Could not reach provider (saved anyway): {ve}"
-                    logger.debug("Sampling config validation warning: %s", ve)
-
-            if not validation_ok:
-                return JSONResponse(
-                    {"success": False, "error": validation_msg},
-                    status_code=400,
-                )
-
-            # Encrypt and save to disk
-            num_recipients = 0
             if auth_middleware:
                 auth_middleware.save_sampling_config(
                     user_email,
@@ -2526,35 +2307,14 @@ def setup_config_api_routes(mcp) -> None:
                     per_user_key=per_user_key,
                     google_sub=google_sub,
                 )
-                # Count recipients in the saved envelope
-                try:
-                    import json as _json
-                    from pathlib import Path
 
-                    from auth.google_auth import _normalize_email
-
-                    safe_email = (
-                        _normalize_email(user_email)
-                        .replace("@", "_at_")
-                        .replace(".", "_")
-                    )
-                    enc_path = (
-                        Path(settings.credentials_dir)
-                        / f"{safe_email}_sampling_config.enc"
-                    )
-                    if enc_path.exists():
-                        _env = _json.loads(enc_path.read_text())
-                        num_recipients = len(_env.get("recipients", {}))
-                except Exception:
-                    pass
-
-            store_session_data(target_session, SessionKey.SAMPLING_CONFIG, config_dict)
+            await bucket.set(SAMPLING_CONFIG_KEY, public_sampling_config(config_dict))
+            forget_sampling_config(user_email)
 
             logger.info(
-                "Sampling config saved via API: session=%s, model=%s, recipients=%d",
-                target_session[:8] + "...",
+                "Sampling config saved via API: user=%s, model=%s",
+                redact_email(user_email),
                 model,
-                num_recipients,
             )
 
             return JSONResponse(
@@ -2563,13 +2323,6 @@ def setup_config_api_routes(mcp) -> None:
                     "model": model,
                     "has_api_key": bool(api_key),
                     "has_api_base": bool(api_base),
-                    "validated": validation_msg or None,
-                    "encryption": {
-                        "method": "split-key envelope (AES + HMAC-SHA256)",
-                        "recipients": num_recipients,
-                    }
-                    if num_recipients
-                    else None,
                 }
             )
         except Exception as e:

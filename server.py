@@ -65,6 +65,7 @@ from prompts.structured_response_demo_prompts import (
     setup_structured_response_demo_prompts,
 )
 from resources.chat_digest_resources import setup_chat_digest_resources
+from resources.completions import setup_completions
 from resources.gmail_resources import setup_gmail_resources
 from resources.service_list_resources import setup_service_list_resources
 from resources.service_recent_resources import setup_service_recent_resources
@@ -252,20 +253,44 @@ if _github_client_id and _github_client_secret:
     except Exception as e:
         logger.error(f"❌ Failed to create GitHubProvider: {e}", exc_info=True)
 
-# Configure sampling fallback handler (routes through LiteLLM or Anthropic)
+# Configure the server-side sampling handler (routes through LiteLLM or Anthropic)
 # Factory handles provider selection, lifespan registration, and session-aware wrapping
 from middleware.session_sampling_handler import create_sampling_handler
 
 _sampling_handler = create_sampling_handler(settings)
 
+# FastMCP 4 removed server-initiated sampling (SEP-2577). Dynamic tools sample
+# through middleware/sampling_runtime.py, which dispatches to this handler.
+from middleware.sampling_runtime import set_sampling_handler
+
+set_sampling_handler(_sampling_handler)
+
+# Session state store: one AsyncKeyValue behind ctx.set_state and the
+# per-principal user buckets (auth/user_state.py). Redis when configured,
+# otherwise a file-tree store under credentials_dir so single-container
+# deploys keep per-user state across restarts.
+from middleware.state_store import build_state_store
+
+_state_store, _state_store_kind = build_state_store(settings)
+logger.info(f"🗄️ FastMCP state store: {_state_store_kind}")
+
 # Create FastMCP instance with composed lifespans for proper lifecycle management
-# Lifespans handle: Qdrant init/shutdown, ColBERT init, session state persistence,
-# cache cleanup, and dynamic instructions update
+# Lifespans handle: Qdrant init/shutdown, ColBERT init, cache cleanup, and
+# dynamic instructions update
 mcp = FastMCP(
     name=settings.server_name,
     version=__version__,
     list_page_size=settings.list_page_size or None,  # 0/None = no pagination
     lifespan=combined_server_lifespan,  # Composed lifespans for server lifecycle
+    session_state_store=_state_store,
+    # Client-side cache hints (SEP-2549). One knob for tools/list, prompts/list,
+    # resources/list, resources/templates/list, resources/read and
+    # server/discover. Private because tools/list varies by principal; 30 s
+    # because resources/read is hinted too and user://current/email flips
+    # right after auth. Inert for clients that negotiate the handshake era or
+    # pass no cache= at all.
+    cache_ttl=30,
+    cache_scope="private",
     instructions="""Google Workspace MCP Server - Comprehensive access to Google services.
 
 ## Authentication
@@ -291,9 +316,26 @@ For manual/legacy auth:
 ## Tool Management
 Use `manage_tools` to list, enable, or disable tools at runtime.""",
     auth=google_auth_provider,  # GoogleProvider when configured, None for legacy fallback
-    sampling_handler=_sampling_handler,  # Anthropic fallback when client lacks sampling
-    sampling_handler_behavior="fallback",  # Use client LLM when available, Anthropic when not
 )
+
+# Let Starlette routes and the OAuth callback (no FastMCP request context)
+# reach the same state store the middleware uses.
+from auth.user_state import set_server as _set_user_state_server
+
+_set_user_state_server(mcp)
+
+# ─── Background tasks (SEP-2663, io.modelcontextprotocol/tasks) ───
+# FastMCP 4 ships tasks as an extension; `task=True` tools (send_dynamic_card,
+# create_gmail_filter) need it registered before the lifespan starts. The
+# backend defaults to memory:// (single process); set FASTMCP_DOCKET_URL=redis://…
+# when running replicas.
+try:
+    from fastmcp_tasks import TasksExtension
+
+    mcp.add_extension(TasksExtension())
+    logger.info("🧵 Background tasks extension registered")
+except ImportError as e:
+    logger.warning(f"⚠️ fastmcp-tasks not installed; task=True tools run inline: {e}")
 
 if google_auth_provider:
     logger.info("🔐 FastMCP running with GoogleProvider OAuth 2.1")
@@ -553,6 +595,10 @@ setup_service_recent_resources(mcp)
 
 # Setup chat digest resources (aggregated recent messages across Chat spaces)
 setup_chat_digest_resources(mcp)
+
+# Argument completion for the chat digest template and Chat/Sheets prompts
+# (declares the completions capability on both protocol eras)
+setup_completions(mcp)
 
 # Setup template macro resources (discovery and usage examples)
 logger.info("📚 Registering template macro resources...")

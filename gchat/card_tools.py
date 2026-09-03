@@ -50,6 +50,7 @@ from config.enhanced_logging import setup_logger
 
 # Import settings for default webhook configuration
 from config.settings import settings
+from middleware.sampling_runtime import sample as runtime_sample
 
 # NLP parser commented out - SmartCardBuilder handles all parsing and rendering
 # SmartCardBuilder: NL description → Qdrant search → ModuleWrapper → Render
@@ -613,7 +614,8 @@ def setup_card_tools(mcp: FastMCP) -> None:
             f"card_params: {json.dumps(card_params, default=str)}"
         )
 
-        result = await ctx.sample(
+        result = await runtime_sample(
+            ctx,
             messages=user_message,
             system_prompt=system_prompt,
             tools=DRAFT_AGENT_TOOLS,

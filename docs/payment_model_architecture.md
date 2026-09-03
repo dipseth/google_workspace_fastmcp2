@@ -115,7 +115,7 @@ graph TB
             S2[Historical Pattern Matching<br/>Query past successful patterns]
             S3[Macro Discovery<br/>Suggest relevant templates]
             S4[DSL Error Recovery<br/>LLM corrects malformed DSL]
-            S1 & S2 & S3 & S4 --> Sample[ctx.sample → Claude API<br/>Direct token cost]
+            S1 & S2 & S3 & S4 --> Sample[sampling_runtime.sample → LiteLLM / Claude API<br/>Direct token cost]
         end
 
         subgraph "Module Wrapper System"

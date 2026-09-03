@@ -1,0 +1,40 @@
+{
+  "judge": {
+    "model": "anthropic/claude-sonnet-4-6",
+    "api_key_env": "ANTHROPIC_API_KEY"
+  },
+  "models": [
+    {
+      "label": "venice-glm-4.6",
+      "model": "openai/zai-org-glm-4.6",
+      "api_key_env": "VENICE_INFERENCE_KEY",
+      "api_base": "https://api.venice.ai/api/v1"
+    },
+    {
+      "label": "venice-claude-sonnet-4-6",
+      "model": "openai/claude-sonnet-4-6",
+      "api_key_env": "VENICE_INFERENCE_KEY",
+      "api_base": "https://api.venice.ai/api/v1",
+      "pricing": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}
+    },
+    {
+      "label": "venice-qwen3-235b",
+      "model": "openai/qwen3-235b-a22b-instruct-2507",
+      "api_key_env": "VENICE_INFERENCE_KEY",
+      "api_base": "https://api.venice.ai/api/v1"
+    },
+    {
+      "label": "anthropic-claude-sonnet-4-6",
+      "model": "anthropic/claude-sonnet-4-6",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "pricing": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}
+    },
+    {
+      "label": "anthropic-claude-haiku-4-5",
+      "model": "anthropic/claude-haiku-4-5",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "pricing": {"input_per_mtok": 1.0, "output_per_mtok": 5.0}
+    }
+  ],
+  "_notes": "Venice entries route through Venice's OpenAI-compatible endpoint (openai/<id> + api_base); Venice also hosts claude-sonnet-5, claude-opus-5, kimi-k2-6, deepseek-v4-pro, llama-3.3-70b. Anthropic entries go direct (key validated 2026-08-07). pricing = per-MTok USD fallback for models missing from LiteLLM's cost map."
+}

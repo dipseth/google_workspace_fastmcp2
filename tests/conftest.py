@@ -14,26 +14,33 @@ import pytest
 # ---------------------------------------------------------------------------
 # Keep test runs out of the developer's credentials/ directory.
 #
-# Anything that toggles per-session tool state (manage_tools, the session
-# filtering middleware, AuthMiddleware shutdown) calls
-# auth.context.persist_session_tool_states(), which writes to
-# settings.session_tool_state_path — by default
-# credentials/session_tool_states.json, the same file the *live* local server
-# reads at startup to restore a returning session's tools. Left unredirected,
-# a test run overwrote that file with throwaway test sessions, so the next real
-# server start inherited test state (or lost the real state).
+# Per-user tool state now lives in the FastMCP session state store (a fresh
+# MemoryStore per FastMCP instance unless server.py wires a disk/Redis store),
+# so a test run never touches the live server's state. Two module-level
+# handles still need resetting between tests: the retired
+# ``session_tool_states.json`` path that auth.user_state imports from once per
+# user, and the server handle auth.user_state uses outside a request.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True, scope="session")
 def _session_tool_state_in_tmp(tmp_path_factory):
-    """Redirect session-tool-state persistence to a per-run temp file."""
+    """Point the legacy tool-state import at a per-run temp file."""
     import auth.context as ctx
 
     path = tmp_path_factory.mktemp("session-state") / "session_tool_states.json"
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(ctx, "_get_session_tool_state_path", lambda: path)
         yield path
+
+
+@pytest.fixture(autouse=True)
+def _reset_user_state_server():
+    """Forget any FastMCP instance a test registered with auth.user_state."""
+    import auth.user_state as user_state
+
+    yield
+    user_state._server = None
 
 
 # ---------------------------------------------------------------------------

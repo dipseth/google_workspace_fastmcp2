@@ -103,7 +103,7 @@ class TestSamplingMiddleware:
         context_aware_tools = []
         for tool in tools:
             # Check tool schema for 'ctx' parameter
-            schema = str(tool.inputSchema) if hasattr(tool, "inputSchema") else ""
+            schema = str(tool.input_schema) if hasattr(tool, "inputSchema") else ""
             if "ctx" in schema.lower() or "context" in schema.lower():
                 context_aware_tools.append(tool.name)
 
@@ -170,7 +170,7 @@ class TestSamplingMiddleware:
                     # Try to call the tool with minimal parameters
                     test_params = (
                         {"text": "This is a test message for sampling"}
-                        if "text" in str(tool_info.inputSchema)
+                        if "text" in str(tool_info.input_schema)
                         else {}
                     )
 
@@ -220,7 +220,7 @@ class TestSamplingMiddleware:
         for tool in tools:
             tool_desc = tool.description.lower() if hasattr(tool, "description") else ""
             schema_str = (
-                str(tool.inputSchema).lower() if hasattr(tool, "inputSchema") else ""
+                str(tool.input_schema).lower() if hasattr(tool, "inputSchema") else ""
             )
 
             # Look for tools that might use templates

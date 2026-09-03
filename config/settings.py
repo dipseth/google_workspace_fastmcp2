@@ -177,6 +177,15 @@ class Settings(BaseSettings):
         description="Sampling provider: 'auto' (LiteLLM if configured, else Anthropic), 'litellm', or 'anthropic'",
         json_schema_extra={"env": "SAMPLING_PROVIDER"},
     )
+    sampling_allow_header_override: bool = Field(
+        default=False,
+        description=(
+            "Honor X-Sampling-Model / X-Sampling-Api-Base / X-Sampling-Api-Key request "
+            "headers as a per-request LLM override for server-side sampling. Used by the "
+            "cross-model evals harness (FastMCP 4 has no client-fulfilled sampling)."
+        ),
+        json_schema_extra={"env": "SAMPLING_ALLOW_HEADER_OVERRIDE"},
+    )
 
     # MCP List Page Size Configuration
     # Controls pagination of tools/resources/prompts listing responses.
@@ -650,6 +659,20 @@ class Settings(BaseSettings):
         default=None,
         description="Redis Cloud connection URL (redis://user:pass@host:port). Used for response caching and dashboard cache offloading.",
         json_schema_extra={"env": "REDIS_IO_URL_STRING"},
+    )
+
+    # FastMCP session state store — backs ctx.set_state and the per-principal
+    # user buckets (auth/user_state.py). "auto" picks redis when
+    # REDIS_IO_URL_STRING is set, otherwise a file-tree store on disk.
+    fastmcp_state_store: Literal["auto", "redis", "disk", "memory"] = Field(
+        default="auto",
+        description="Backend for FastMCP session state: auto | redis | disk | memory. auto = redis when REDIS_IO_URL_STRING is set, else disk.",
+        json_schema_extra={"env": "FASTMCP_STATE_STORE"},
+    )
+    fastmcp_state_dir: str = Field(
+        default="",
+        description="Directory for the disk state store. If empty, uses credentials_dir/fastmcp-state",
+        json_schema_extra={"env": "FASTMCP_STATE_DIR"},
     )
 
     # Sampling Cache Configuration

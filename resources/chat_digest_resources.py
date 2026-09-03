@@ -17,7 +17,6 @@ from datetime import datetime, timedelta, timezone
 
 from fastmcp import Context, FastMCP
 from fastmcp.resources import ResourceContent, ResourceResult
-from fastmcp.server.tasks import TaskConfig
 from pydantic import Field
 from typing_extensions import Annotated, Any, Dict, List, Optional
 
@@ -203,7 +202,6 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"chat", "digest", "messages", "recent", "google"},
         annotations={"readOnlyHint": True, "idempotentHint": False},
-        task=TaskConfig(mode="optional"),
         meta={
             "version": "1.0",
             "category": "digest",
@@ -274,7 +272,6 @@ def setup_chat_digest_resources(mcp: FastMCP) -> None:
         mime_type="application/json",
         tags={"chat", "digest", "messages", "recent", "google", "space"},
         annotations={"readOnlyHint": True, "idempotentHint": False},
-        task=TaskConfig(mode="optional"),
         meta={
             "version": "1.0",
             "category": "digest",

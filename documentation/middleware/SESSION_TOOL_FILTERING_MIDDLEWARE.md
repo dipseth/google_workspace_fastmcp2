@@ -5,10 +5,12 @@
 The Session Tool Filtering Middleware enables **per-session tool enable/disable** functionality for FastMCP servers. This powerful middleware allows different MCP clients to have different tool availability without affecting other connected clients or the global tool registry.
 
 **Key Benefits:**
-- **Session Isolation**: Each MCP client session can have its own set of enabled/disabled tools
+- **Per-User Isolation**: Each authenticated user has their own set of enabled/disabled tools, shared by every connection they open (since 3.0.0; before, state was per transport session)
 - **Non-Invasive**: Session-scoped operations never modify the global tool state
-- **Protocol-Level Filtering**: Tools are filtered at both listing and execution stages
+- **Protocol-Level Filtering**: Tools are filtered at both listing and execution stages, on handshake-era and MCP 2026-07-28 connections alike
 - **Protected Tools**: Core management tools always remain available
+
+> **Where the state lives (3.0.0+):** in the FastMCP session state store (`FASTMCP_STATE_STORE`, see the configuration guide), in a bucket keyed by the authenticated principal — the user's email for OAuth, per-user API key and Google-token callers, one shared admin bucket for the `MCP_API_KEY`, one anonymous bucket when the server runs without auth. `manage_tools(scope="session")` still names the scope "session" for compatibility; it means "this user". The helpers are in `auth/user_state.py`.
 
 ```mermaid
 graph TB
@@ -39,7 +41,7 @@ graph TB
 
 - **Per-Session Tool Management**: Enable/disable tools for individual client sessions
 - **Middleware-Based Filtering**: Intercepts `list_tools` and `call_tool` operations
-- **Thread-Safe**: Uses session storage patterns from `auth/context.py`
+- **Durable**: State is read from and written to the FastMCP state store (disk or Redis), so it survives restarts and replicas
 - **Protected Tools**: Core management tools cannot be disabled
 - **Scope Parameter**: Choose between `"global"` and `"session"` scope for operations
 - **Structured Responses**: Returns detailed session state in tool management responses
@@ -90,12 +92,6 @@ http://localhost:8002/mcp?service=gmail
 # Enable Gmail + Drive + Calendar
 http://localhost:8002/mcp?service=gmail,drive,calendar
 
-# Resume a previous session
-http://localhost:8002/mcp?uuid=your-session-id
-
-# Resume session with specific services
-http://localhost:8002/mcp?uuid=abc123&service=gmail,drive
-
 # Disable minimal startup (enable all tools)
 http://localhost:8002/mcp?minimal=false
 ```
@@ -104,9 +100,10 @@ http://localhost:8002/mcp?minimal=false
 
 | Parameter | Example | Description |
 |-----------|---------|-------------|
-| `service` or `services` | `?service=gmail,drive` | Comma-separated list of services to enable |
-| `uuid` | `?uuid=abc123` | Resume a previous session by ID |
+| `service` or `services` | `?service=gmail,drive` | Comma-separated list of services to enable. Applied once per distinct filter for a user; reconnecting with the same filter keeps what they enabled since, a different filter re-applies. |
 | `minimal` | `?minimal=false` | Override minimal startup mode |
+
+The `?uuid=` resume parameter was retired in 3.0.0: state is keyed by the authenticated user, so there is no session to resume.
 
 **Available Services:** `gmail`, `drive`, `calendar`, `docs`, `sheets`, `slides`, `photos`, `chat`, `forms`, `people`
 
@@ -420,34 +417,17 @@ sequenceDiagram
     Middleware-->>Client: Success
 ```
 
-## Session Context Resolution
+## Principal Resolution
 
-The middleware uses `get_session_context()` to identify the current session. This function checks multiple sources:
+The middleware keys state by the calling principal (`auth.user_state.principal_id()`), read from the request's access token:
 
-1. **Explicitly set session_id**: Via `set_session_context()` call
-2. **FastMCP's native session_id**: From the transport layer (`ctx.session_id`)
+| Token | Principal |
+|-------|-----------|
+| OAuth JWT, per-user API key, Google access token | `user:<email>` |
+| Shared `MCP_API_KEY` | one admin bucket |
+| No token (stdio / no-auth deploy) | one anonymous bucket |
 
-```python
-def get_session_context() -> Optional[str]:
-    """Get the current session ID from the FastMCP context."""
-    try:
-        ctx = get_context()
-
-        # First try explicitly set session_id
-        session_id = ctx.get_state("session_id")
-        if session_id:
-            return session_id
-
-        # Fall back to FastMCP's native session_id property
-        if hasattr(ctx, "session_id"):
-            native_session_id = ctx.session_id
-            if native_session_id:
-                return native_session_id
-
-        return None
-    except RuntimeError:
-        return None
-```
+The transport session id (`ctx.session_id`) is used only in log lines. Under MCP 2026-07-28 it is fresh on every request, which is why it can no longer carry state.
 
 ## Troubleshooting
 

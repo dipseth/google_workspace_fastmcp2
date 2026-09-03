@@ -117,5 +117,6 @@ class FormResponseDetails(TypedDict):
     respondentEmail: Optional[str]
     answers: List[FormResponseAnswer]
     answerCount: int
+    message: NotRequired[str]  # Status message emitted by get_form_response
     userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]

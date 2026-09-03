@@ -1,0 +1,99 @@
+{
+  "name": "dynamic-tools-v1",
+  "description": "Eval scenarios for DSL-driven dynamic tools (send_dynamic_card, compose_dynamic_email) and module-wrapper search. Run with evals/run_evals.py across sampling models.",
+  "items": [
+    {
+      "id": "card-status-simple",
+      "tool": "send_dynamic_card",
+      "tags": ["card", "dsl", "simple"],
+      "args": {
+        "card_description": "§[δ×2] Service status card",
+        "card_params": {
+          "title": "Service Status",
+          "subtitle": "Production health check",
+          "δ": {
+            "_items": [
+              {"topLabel": "API Gateway", "text": "{{ 'Online' | success_text }}"},
+              {"topLabel": "Database", "text": "Degraded — elevated latency"}
+            ]
+          }
+        },
+        "user_google_email": "sethrivers@gmail.com"
+      },
+      "judge_criteria": "The card was delivered without error. The response should indicate a card titled 'Service Status' with two decorated-text rows: API Gateway online (styled as success) and Database degraded. DSL structure §[δ×2] should be respected (one section, two DecoratedText widgets, no invented extra widgets)."
+    },
+    {
+      "id": "card-dsl-recovery",
+      "tool": "send_dynamic_card",
+      "tags": ["card", "dsl", "recovery", "sampling"],
+      "args": {
+        "card_description": "§[δ, Ƀ[ᵬ×2 Deployment summary card with two link buttons",
+        "card_params": {
+          "title": "Deploy Complete",
+          "text": "v2.5.1 deployed to production",
+          "buttons": [
+            {"text": "Release Notes", "url": "https://github.com/dipseth/google_workspace_fastmcp2/releases"},
+            {"text": "Dashboard", "url": "https://status.example.com"}
+          ]
+        },
+        "user_google_email": "sethrivers@gmail.com"
+      },
+      "judge_criteria": "The DSL in card_description is malformed (unclosed brackets). The sampling-based DSL recovery should repair it to a valid structure (one section with a text widget and a two-button list) and the card should still be delivered without error, containing the deploy text and both buttons."
+    },
+    {
+      "id": "card-draft-variations",
+      "tool": "send_dynamic_card",
+      "tags": ["card", "dsl", "sampling", "agent"],
+      "timeout_s": 420,
+      "args": {
+        "card_description": "§[δ×2] Sprint summary card",
+        "card_params": {
+          "title": "Sprint 42 Summary",
+          "δ": {
+            "_items": [
+              {"topLabel": "Completed", "text": "14 stories shipped"},
+              {"topLabel": "Carry-over", "text": "3 stories moved to Sprint 43"}
+            ]
+          }
+        },
+        "draft_variations": true,
+        "user_google_email": "sethrivers@gmail.com"
+      },
+      "judge_criteria": "The tool-equipped sampling agent should produce exactly 3 card variations (Conservative, Enhanced, Creative/Styled) and deliver them to the chat space in a shared thread without error. All variations must keep the sprint content (14 stories shipped, 3 carried over) and valid DSL structure."
+    },
+    {
+      "id": "email-weekly-status",
+      "tool": "compose_dynamic_email",
+      "tags": ["email", "dsl", "draft"],
+      "args": {
+        "email_description": "ε[ħ, τ×2, Ƀ] Weekly Status — Eval Harness",
+        "email_params": {
+          "ħ": {"title": "Weekly Status", "subtitle": "Google Workspace MCP"},
+          "τ": {
+            "_items": [
+              {"text": "The Langfuse evaluation harness is now wired into the dynamic tools."},
+              {"text": "Cross-model runs compare output quality, token usage, latency, and cost."}
+            ]
+          },
+          "Ƀ": {"text": "Open Langfuse", "url": "https://us.cloud.langfuse.com"}
+        },
+        "to": "myself",
+        "action": "draft",
+        "user_google_email": "sethrivers@gmail.com"
+      },
+      "judge_criteria": "A Gmail draft (not a send) was created without error, with subject 'Weekly Status — Eval Harness', a hero block, two text paragraphs matching the provided copy, and one button linking to Langfuse. Structure ε[ħ, τ×2, Ƀ] should be respected."
+    },
+    {
+      "id": "module-search-buttons",
+      "tool": "search_module",
+      "tags": ["module-wrapper", "search"],
+      "optional": true,
+      "args": {
+        "module_name": "card_framework.v2",
+        "query": "button widget with icon and click action",
+        "limit": 5
+      },
+      "judge_criteria": "The search returned up to 5 components from the wrapped card_framework.v2 module and the top results are genuinely button/interaction related (Button, ButtonList, OnClick, Icon), not unrelated widgets."
+    }
+  ]
+}

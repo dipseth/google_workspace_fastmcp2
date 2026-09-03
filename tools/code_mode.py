@@ -405,6 +405,14 @@ def _dashboard_injected(tool_name: str) -> bool:
         return False
 
 
+class _ClientInputRequired(Exception):
+    """Raised inside the sandbox bridge when a nested tool asks the client for input.
+
+    Only a signal to abort the block: the sandbox turns every exception into an
+    error string, so the ask itself travels out of band (see ``execute``).
+    """
+
+
 def _unwrap_for_sandbox(result: ToolResult, unwrap: Any, tool_name: str) -> Any:
     """Unwrap a ToolResult for code running inside the sandbox.
 
@@ -989,6 +997,33 @@ def get_discovery_tool_factories() -> list[Any]:
     ]
 
 
+def _ensure_tasks_extension(mcp: FastMCP) -> bool:
+    """Register the SEP-2663 tasks extension on *mcp* unless it already is.
+
+    A ``task=True`` tool cannot be served without it — FastMCP refuses the
+    connection at lifespan start — so the code that marks ``execute`` as
+    task-capable must also guarantee the extension. ``server.py`` registers
+    it first in production; this is idempotent so either order works, and a
+    bare ``FastMCP`` (tests, embedding) gets it here. Returns False when
+    ``fastmcp-tasks`` is not installed, in which case ``execute`` stays a
+    plain inline tool rather than breaking startup.
+    """
+    try:
+        from fastmcp_tasks import TasksExtension
+    except ImportError as exc:
+        logger.warning(
+            f"code_mode: fastmcp-tasks unavailable, execute runs inline: {exc}"
+        )
+        return False
+    try:
+        mcp.add_extension(TasksExtension())
+    except ValueError:
+        # Already registered (server.py does so first in production); FastMCP
+        # raises ValueError for a duplicate identifier.
+        pass
+    return True
+
+
 def setup_code_mode(mcp: FastMCP) -> None:
     """Register the CodeMode transform on *mcp*.
 
@@ -1005,6 +1040,7 @@ def setup_code_mode(mcp: FastMCP) -> None:
     # macro create + full MJML compose). Passing a limits dict replaces the
     # baseline entirely, so max_memory must be restated alongside the duration.
     max_duration = float(os.getenv("CODE_MODE_MAX_DURATION_SECS", "90"))
+    tasks_available = _ensure_tasks_extension(mcp)
     code_mode = CodeMode(
         sandbox_provider=EnhancedSandboxProvider(
             limits={"max_duration_secs": max_duration, "max_memory": 100 * 1024 * 1024}
@@ -1082,6 +1118,9 @@ def setup_code_mode(mcp: FastMCP) -> None:
             _unwrap_tool_result,
         )
         from fastmcp.tools import ToolResult as _ToolResult
+        from fastmcp.tools.base import (
+            InputRequiredToolResult as _InputRequiredToolResult,
+        )
         from pydantic import ValidationError as _VE
 
         transform = code_mode
@@ -1121,6 +1160,25 @@ def setup_code_mode(mcp: FastMCP) -> None:
                     prefab_result = structured
                     prefab_tool = tool_name
 
+            # A nested tool that asks the client for input (SEP-2322) — the
+            # OAuth prompt in start_google_auth is the case that matters —
+            # returns an InputRequiredToolResult, which carries no content.
+            # Under Code Mode the block is the only thing that crosses the
+            # wire, so the ask has to become *execute's* result: remember it
+            # here, abort the block, and return it once the sandbox unwinds.
+            # On the client's re-run (same code plus inputResponses) the block
+            # starts over and the nested tool reads the answer off the same
+            # request context, so nothing else has to change hands.
+            pending_input: Any = None
+
+            def _bridge(result: Any, tool_name: str) -> Any:
+                nonlocal pending_input
+                if isinstance(result, _InputRequiredToolResult):
+                    pending_input = result.input_required
+                    raise _ClientInputRequired(tool_name)
+                _capture_prefab(result, tool_name)
+                return _unwrap_for_sandbox(result, _unwrap_tool_result, tool_name)
+
             async def call_tool(tool_name: str, params: dict[str, Any]) -> Any:
                 backend_tools = await _get_cached_tools()
                 tool = transform._find_tool(tool_name, backend_tools)
@@ -1129,17 +1187,29 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 called_tools.append(tool_name)
 
                 try:
-                    result = await ctx.fastmcp.call_tool(tool.name, params)
-                    _capture_prefab(result, tool_name)
-                    return _unwrap_for_sandbox(result, _unwrap_tool_result, tool_name)
+                    return _bridge(
+                        await ctx.fastmcp.call_tool(tool.name, params), tool_name
+                    )
                 except _VE as ve:
+                    # Only the tool's *argument* validation is recoverable —
+                    # pydantic reports those as "... errors for call[<tool>]"
+                    # or "... errors for <function>". A model that failed
+                    # inside the tool ("... for EmailSpec") is a real error and
+                    # must surface as itself, not as a hallucinated argument fix.
+                    first_line = (str(ve).splitlines() or [""])[0]
+                    subject = first_line.rsplit(" for ", 1)[-1].strip()
+                    tool_names = {
+                        tool.name,
+                        tool_name,
+                        getattr(getattr(tool, "fn", None), "__name__", None),
+                    }
+                    if not (subject.startswith("call[") or subject in tool_names):
+                        raise
                     # Attempt argument recovery via LLM
                     corrected = await _recover_args(ctx, tool, tool_name, params, ve)
                     if corrected is not None:
-                        result = await ctx.fastmcp.call_tool(tool.name, corrected)
-                        _capture_prefab(result, tool_name)
-                        return _unwrap_for_sandbox(
-                            result, _unwrap_tool_result, tool_name
+                        return _bridge(
+                            await ctx.fastmcp.call_tool(tool.name, corrected), tool_name
                         )
                     raise  # re-raise if recovery failed
 
@@ -1158,6 +1228,17 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 code,
                 external_functions={"call_tool": call_tool},
             )
+
+            if pending_input is not None:
+                # The ask is the legitimate result of this leg. It wins even if
+                # the block caught the abort and carried on: whatever it made
+                # without the input is not what the user asked for, and the
+                # re-run rebuilds it with the input in hand.
+                logger.info(
+                    "code_mode: a tool asked the client for input — "
+                    "suspending execute for the round trip"
+                )
+                return pending_input
 
             # A client that cannot render MCP UI gains nothing from a view
             # spec and pays for it: the view rides in structuredContent, which
@@ -1265,10 +1346,16 @@ def setup_code_mode(mcp: FastMCP) -> None:
                 pass
             return _default_view()
 
+        # Under Code Mode the block is the only thing that crosses the wire:
+        # the tools it calls run in-process, so ``task=True`` on any of them
+        # can never fire. The block is therefore the unit of background work.
+        # Optional mode — a client that negotiated the tasks extension may
+        # opt in per call; every other call runs inline exactly as before.
         tool = Tool.from_function(
             fn=execute,
             name=transform.execute_tool_name,
             description=transform._build_execute_description(),
+            task=tasks_available,
         )
 
         # Point the host at a Prefab renderer. Hosts decide a tool can draw UI
@@ -1305,6 +1392,14 @@ def setup_code_mode(mcp: FastMCP) -> None:
         error: Exception,
     ) -> dict | None:
         """Use LLM sampling to fix tool arguments on ValidationError."""
+        # The recovered call's own error is what surfaces to the caller, so
+        # the original — the one that actually explains the failure — must
+        # be on record here.
+        logger.warning(
+            f"code_mode: {tool_name} raised {type(error).__name__} — "
+            f"{str(error).splitlines()[0] if str(error) else error!r}; "
+            "attempting argument recovery"
+        )
         try:
             from config.settings import settings as _s
 

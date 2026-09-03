@@ -97,6 +97,12 @@ def setup_all_middleware(
     logger.info("  🔍 Monitoring for context lifecycle issues...")
 
     # ─── 4. Session Tool Filtering ───
+    # App-only tools (meta.ui.visibility == ["app"]) are listed by FastMCP 4 and
+    # filtered by the host; apply the rule here for clients without the UI extension.
+    from middleware.app_visibility_middleware import AppVisibilityMiddleware
+
+    mcp.add_middleware(AppVisibilityMiddleware())
+
     from middleware.session_tool_filtering_middleware import (
         setup_session_tool_filtering_middleware,
     )
@@ -114,6 +120,17 @@ def setup_all_middleware(
         logger.info(
             "  ✅ Per-session tool enable/disable supported via scope='session'"
         )
+
+    # ─── 4b. Photos scope step-up ───
+    # A Photos-tagged tool called by a token without the Photos scopes (i.e. no
+    # Photos credential for that account yet) is answered with the OAuth
+    # elicitation carrying a Photos-only authorize link. Only meaningful when
+    # requests carry tokens.
+    if google_auth_provider:
+        from auth.scope_step_up import ScopeStepUpMiddleware
+
+        mcp.add_middleware(ScopeStepUpMiddleware())
+        logger.info("✅ Photos scope step-up middleware registered")
 
     # ─── 5. Template Middleware (must be before tool registration) ───
     from lifespans import register_template_middleware

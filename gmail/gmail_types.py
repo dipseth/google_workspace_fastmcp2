@@ -450,6 +450,15 @@ class SendGmailMessageResponse(TypedDict):
     # Jinja2 template processing fields (from template middleware)
     jinjaTemplateApplied: NotRequired[bool]
     jinjaTemplateError: NotRequired[Optional[str]]
+    # Keys the send/forward paths actually emit (camelCase). FastMCP 4
+    # serializes results through the return annotation and drops keys the
+    # schema does not declare, so these must be listed to reach the client.
+    message: NotRequired[str]  # Human-readable status / blocked notice
+    messageId: NotRequired[Optional[str]]
+    threadId: NotRequired[Optional[str]]
+    contentType: NotRequired[str]
+    templateApplied: NotRequired[bool]
+    templateName: NotRequired[Optional[str]]
 
 
 class DraftGmailMessageResponse(TypedDict):

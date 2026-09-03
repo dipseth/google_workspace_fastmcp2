@@ -11,7 +11,7 @@ Usage:
 
 import os
 
-import httpx
+import httpx2
 import pytest
 from dotenv import load_dotenv
 from fastmcp import Client
@@ -31,10 +31,10 @@ VICTIM_EMAIL = os.getenv("TEST_EMAIL_ADDRESS", "test_example@gmail.com")
 
 
 def _make_httpx_factory(**kwargs):
-    return httpx.AsyncClient(
+    return httpx2.AsyncClient(
         verify=False,
         headers=kwargs.get("headers"),
-        timeout=kwargs.get("timeout") or httpx.Timeout(30.0),
+        timeout=kwargs.get("timeout") or httpx2.Timeout(30.0),
         auth=kwargs.get("auth"),
         follow_redirects=kwargs.get("follow_redirects", True),
     )

@@ -22,7 +22,7 @@ Note: This is a framework support file used by all client tests.
 
 import os
 
-import httpx
+import httpx2
 from dotenv import load_dotenv
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -32,7 +32,7 @@ from .test_helpers import AutoRefreshTaskHandler
 
 # NOTE on TLS for local tests:
 # - `localhost+2.pem` is a *server* (leaf) cert. Clients generally need the *issuing CA/root*.
-# - FastMCP 2.14.3 supports injecting an `httpx.AsyncClient` via `httpx_client_factory`.
+# - FastMCP injects an `httpx2.AsyncClient` via `httpx_client_factory` (httpx2 since FastMCP 4).
 #   We use that hook to set verify=False by default for local tests.
 #
 # If you *do* have a CA bundle you want httpx to trust (e.g. mkcert root CA), set:
@@ -45,40 +45,8 @@ if _CA_BUNDLE:
 # Load environment variables from .env file
 load_dotenv()
 
-# Sampling handler for tests — uses LiteLLM (Venice) or Anthropic when tools call ctx.sample()
-_test_sampling_handler = None
-_venice_key = os.getenv("VENICE_INFERENCE_KEY")
-_litellm_key = os.getenv("LITELLM_API_KEY")
-_anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-_pref = os.getenv("SAMPLING_PROVIDER", "auto").lower().strip()
-
-if _pref in ("auto", "litellm") and (_litellm_key or _venice_key):
-    try:
-        from middleware.litellm_sampling_handler import LiteLLMSamplingHandler
-
-        api_key = _litellm_key or _venice_key
-        api_base = os.getenv("LITELLM_API_BASE")
-        if not api_base and _venice_key and not _litellm_key:
-            api_base = "https://api.venice.ai/api/v1"
-        _test_sampling_handler = LiteLLMSamplingHandler(
-            default_model=os.getenv("LITELLM_MODEL", "openai/zai-org-glm-4.6"),
-            api_key=api_key,
-            api_base=api_base,
-        )
-    except ImportError:
-        pass  # litellm not installed
-
-if _test_sampling_handler is None and _pref in ("auto", "anthropic") and _anthropic_key:
-    try:
-        from anthropic import AsyncAnthropic
-        from fastmcp.client.sampling.handlers.anthropic import AnthropicSamplingHandler
-
-        _test_sampling_handler = AnthropicSamplingHandler(
-            default_model="claude-sonnet-4-6",
-            client=AsyncAnthropic(api_key=_anthropic_key),
-        )
-    except ImportError:
-        pass  # fastmcp[anthropic] not installed
+# Sampling is server-side on FastMCP 4 (middleware/sampling_runtime.py); the
+# server's own LiteLLM/Anthropic keys fulfil every sampling call a tool makes.
 
 # Server configuration from environment variables with defaults
 SERVER_HOST = os.getenv("SERVER_HOST", os.getenv("MCP_SERVER_HOST", "localhost"))
@@ -160,11 +128,7 @@ def print_test_configuration():
     )
     print(f"   SSL_CERT_FILE: {os.getenv('SSL_CERT_FILE', 'Not set')}")
     print(f"   SSL_KEY_FILE: {os.getenv('SSL_KEY_FILE', 'Not set')}")
-    sampling_desc = "None (no API key set)"
-    if _test_sampling_handler:
-        handler_name = type(_test_sampling_handler).__name__
-        sampling_desc = f"{handler_name}"
-    print(f"   SAMPLING: {sampling_desc}")
+    print("   SAMPLING: server-side (FastMCP 4 runtime)")
 
 
 async def create_test_client(test_email: str = TEST_EMAIL):
@@ -175,7 +139,7 @@ async def create_test_client(test_email: str = TEST_EMAIL):
       accepts an `http_client` argument.
     - FastMCP exposes this through `StreamableHttpTransport(..., httpx_client_factory=...)`.
 
-    So for local tests we inject our own `httpx.AsyncClient(verify=False)` so HTTPS works
+    So for local tests we inject our own `httpx2.AsyncClient(verify=False)` so HTTPS works
     even when the local dev cert is not trusted by Python/httpx.
     """
 
@@ -189,7 +153,7 @@ async def create_test_client(test_email: str = TEST_EMAIL):
 
     last_error: Exception | None = None
 
-    def _httpx_client_factory(**kwargs) -> httpx.AsyncClient:
+    def _httpx_client_factory(**kwargs) -> httpx2.AsyncClient:
         """Factory compatible with FastMCP/MCP http client factory signature.
 
         FastMCP passes kwargs such as:
@@ -201,10 +165,10 @@ async def create_test_client(test_email: str = TEST_EMAIL):
         We accept **kwargs to stay compatible across versions.
         """
         verify_tls = os.getenv("MCP_TEST_TLS_VERIFY", "false").lower() == "true"
-        return httpx.AsyncClient(
+        return httpx2.AsyncClient(
             verify=verify_tls,
             headers=kwargs.get("headers"),
-            timeout=kwargs.get("timeout") or httpx.Timeout(30.0),
+            timeout=kwargs.get("timeout") or httpx2.Timeout(30.0),
             auth=kwargs.get("auth"),
             follow_redirects=kwargs.get("follow_redirects", True),
         )
@@ -221,6 +185,11 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                     "   🔒 Using HTTPS with TLS verification disabled for local testing"
                 )
 
+            # Auto-refresh the tool cache on list_changed notifications.
+            handler = AutoRefreshTaskHandler()
+            # The client suite exercises handshake-era behaviour (sessions,
+            # elicitation, tool-list notifications); pin the legacy protocol
+            # until the guard-tool port lands.
             if protocol == "https":
                 transport = StreamableHttpTransport(
                     test_url,
@@ -230,7 +199,8 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                 test_client = Client(
                     transport,
                     timeout=30.0,
-                    sampling_handler=_test_sampling_handler,
+                    mode="legacy",
+                    message_handler=handler,
                 )
             else:
                 # HTTP fallback uses default transport inference
@@ -238,12 +208,10 @@ async def create_test_client(test_email: str = TEST_EMAIL):
                     test_url,
                     auth=auth_config,
                     timeout=30.0,
-                    sampling_handler=_test_sampling_handler,
+                    mode="legacy",
+                    message_handler=handler,
                 )
-
-            # Install handler that auto-refreshes tool cache on list_changed
-            handler = AutoRefreshTaskHandler(test_client)
-            test_client._session_kwargs["message_handler"] = handler
+            handler.client = test_client
 
             # Verify connection by entering context, listing tools, then exiting
             # The caller (conftest fixture) will re-enter the context for actual use

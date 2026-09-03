@@ -648,13 +648,13 @@ def _embedded_spec(snapshot: DraftSnapshot) -> Optional[dict]:
     return extract_embedded_spec(_decode_part_text(html_part))
 
 
-def _content_fields(spec_data: dict) -> list[dict]:
+def content_fields(spec_data: dict) -> list[dict]:
     """Derive the editable content fields from an embedded EmailSpec dict.
 
     Returns ``[{"path", "label", "value", "multiline"}]`` in document order.
     ``path`` addresses the leaf in the spec dict (``blocks.2.title``,
     ``blocks.4.columns.0.blocks.1.text``) and is the only handle the UI gets —
-    :func:`_apply_content_edits` re-validates every path server-side.
+    :func:`apply_content_edits` re-validates every path server-side.
     """
     fields: list[dict] = []
 
@@ -698,10 +698,10 @@ def _content_fields(spec_data: dict) -> list[dict]:
     return fields
 
 
-def _apply_content_edits(spec_data: dict, fields: dict) -> int:
+def apply_content_edits(spec_data: dict, fields: dict) -> int:
     """Patch ``{path: value}`` leaf edits into the spec dict, in place.
 
-    Only paths :func:`_content_fields` could have produced are accepted:
+    Only paths :func:`content_fields` could have produced are accepted:
     every step is a structural key (``blocks``/``columns``) or a list index,
     and the leaf must be an existing string field allowed for its block type.
     Anything else raises ``ValueError`` — the UI only submits derived paths,
@@ -894,7 +894,7 @@ def _build_draft_view(
     preview_html, warning = preview if preview is not None else snapshot.preview_html()
 
     spec_data = _embedded_spec(snapshot)
-    edit_fields = _content_fields(spec_data) if spec_data else []
+    edit_fields = content_fields(spec_data) if spec_data else []
 
     to_value = ", ".join(snapshot.to)
     cc_value = ", ".join(snapshot.cc)
@@ -1308,7 +1308,7 @@ def create_gmail_draft_app(mcp: Any = None):
         The spec is re-rendered and the draft body swapped losslessly; the
         result carries the refreshed preview document so the card can update
         its iframe in place. Layout cannot change — only leaf values that
-        ``_apply_content_edits`` allows are ever written.
+        ``apply_content_edits`` allows are ever written.
         """
         from gmail.compose import _render_email_spec
         from gmail.service import _get_gmail_service_with_fallback
@@ -1328,7 +1328,7 @@ def create_gmail_draft_app(mcp: Any = None):
                         "compose_dynamic_email to get an editable draft."
                     ),
                 }
-            changed = _apply_content_edits(spec_data, fields)
+            changed = apply_content_edits(spec_data, fields)
             if not changed:
                 return {
                     "ok": True,

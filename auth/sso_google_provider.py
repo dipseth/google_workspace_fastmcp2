@@ -237,6 +237,8 @@ def create_sso_google_provider(
                 _last_stale_warn[token_prefix] = now
             return None
 
+        from auth.access_control import ROLES_CLAIM, roles_for_provenance
+        from auth.scope_step_up import scopes_for_principal
         from auth.types import AuthProvenance
 
         # 1. Shared admin API key
@@ -245,11 +247,12 @@ def create_sso_google_provider(
             return _FastMCPAccessToken(
                 token=token,
                 client_id="api-key-client",
-                scopes=comprehensive_scopes,
+                scopes=scopes_for_principal(None, comprehensive_scopes, admin=True),
                 expires_at=int(_time.time()) + 86400,
                 claims={
                     "sub": "api-key-user",
                     "auth_method": AuthProvenance.API_KEY,
+                    ROLES_CLAIM: roles_for_provenance(AuthProvenance.API_KEY),
                 },
             )
 
@@ -264,12 +267,13 @@ def create_sso_google_provider(
             return _FastMCPAccessToken(
                 token=token,
                 client_id=f"user-key-{user_email}",
-                scopes=comprehensive_scopes,
+                scopes=scopes_for_principal(user_email, comprehensive_scopes),
                 expires_at=int(_time.time()) + 86400,
                 claims={
                     "sub": user_email,
                     "email": user_email,
                     "auth_method": AuthProvenance.USER_API_KEY,
+                    ROLES_CLAIM: roles_for_provenance(AuthProvenance.USER_API_KEY),
                 },
             )
 
@@ -280,6 +284,23 @@ def create_sso_google_provider(
             logger.info(
                 f"✅ load_access_token succeeded: client={result.client_id}, scopes={result.scopes}"
             )
+            # OAuth users carry the "user" role; the proxy's verified claims are
+            # a plain dict on the token, so the claim is added after validation.
+            # Scopes reflect the token groups this account has consented to:
+            # Workspace from the JWT itself, Photos only once its credential
+            # exists (auth/scope_step_up.py).
+            try:
+                if isinstance(result.claims, dict) and ROLES_CLAIM not in result.claims:
+                    result.claims[ROLES_CLAIM] = roles_for_provenance(
+                        AuthProvenance.OAUTH
+                    )
+                _claims = result.claims if isinstance(result.claims, dict) else {}
+                _email = _claims.get("email") or _claims.get("google_email")
+                result.scopes = scopes_for_principal(
+                    _email, list(result.scopes or []) + list(comprehensive_scopes)
+                )
+            except Exception:
+                pass
             return result
 
         # 4. Fallback: try validating as a raw Google access token
@@ -324,12 +345,15 @@ def create_sso_google_provider(
                         return _FastMCPAccessToken(
                             token=token,
                             client_id=f"google-tokeninfo-{_email}",
-                            scopes=comprehensive_scopes,
+                            scopes=scopes_for_principal(_email, comprehensive_scopes),
                             expires_at=int(_time.time()) + _expires_in,
                             claims={
                                 "sub": _email,
                                 "email": _email,
                                 "auth_method": AuthProvenance.USER_API_KEY,
+                                ROLES_CLAIM: roles_for_provenance(
+                                    AuthProvenance.USER_API_KEY
+                                ),
                             },
                         )
                     else:

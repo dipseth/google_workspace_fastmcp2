@@ -619,10 +619,22 @@ def build_revoke_section(user_email: str, base_url: str) -> str:
 
 
 def generate_service_selection_html(
-    state: str, flow_type: str, use_pkce: bool = True, requested_email: str = ""
+    state: str,
+    flow_type: str,
+    use_pkce: bool = True,
+    requested_email: str = "",
+    preselected_services: list[str] | None = None,
 ) -> str:
-    """Generate the service selection page HTML with authentication method choice."""
+    """Generate the service selection page HTML with authentication method choice.
+
+    ``preselected_services`` are ticked when the page opens instead of the
+    common set (e.g. ``["photos"]`` for a Photos-only request).
+    """
+    import json as _json
+
     from config.settings import settings as _settings
+
+    _preselected_json = _json.dumps([str(s) for s in (preselected_services or []) if s])
 
     _env_client_id = (
         _settings.google_client_id or _settings.fastmcp_server_auth_google_client_id
@@ -1216,6 +1228,8 @@ def generate_service_selection_html(
 
 <script>
     const COMMON_SERVICES = ['drive','gmail','calendar','docs','sheets','slides','photos','chat','forms','people'];
+    // Services the requesting tool asked to preselect (empty = use the common set).
+    const PRESELECTED_SERVICES = {_preselected_json};
 
     function copyDwdScopes(btn) {{
         const scopes = 'https://www.googleapis.com/auth/chat.spaces,https://www.googleapis.com/auth/chat.spaces.create,https://www.googleapis.com/auth/chat.delete,https://www.googleapis.com/auth/chat.app.delete,https://www.googleapis.com/auth/chat.memberships,https://www.googleapis.com/auth/chat.memberships.readonly,https://www.googleapis.com/auth/chat.memberships.app,https://www.googleapis.com/auth/chat.messages,https://www.googleapis.com/auth/chat.messages.readonly,https://www.googleapis.com/auth/chat.messages.create,https://www.googleapis.com/auth/chat.app.memberships,https://www.googleapis.com/auth/chat.app.spaces,https://www.googleapis.com/auth/chat.app.spaces.create,https://www.googleapis.com/auth/chat.messages.reactions,https://www.googleapis.com/auth/chat.messages.reactions.create,https://www.googleapis.com/auth/chat.messages.reactions.readonly';
@@ -1305,8 +1319,15 @@ def generate_service_selection_html(
     }}
 
     document.addEventListener('DOMContentLoaded', function() {{
-        // Pre-select common services
-        selectCommon();
+        // Pre-select what the requesting tool asked for, else the common services
+        if (PRESELECTED_SERVICES.length) {{
+            document.querySelectorAll('input[name="services"]:not(:disabled)').forEach(cb => {{
+                cb.checked = PRESELECTED_SERVICES.includes(cb.value);
+                updateChip(cb);
+            }});
+        }} else {{
+            selectCommon();
+        }}
         // Required checkboxes always checked
         document.querySelectorAll('input[name="services"]:disabled').forEach(cb => {{
             cb.checked = true; updateChip(cb);

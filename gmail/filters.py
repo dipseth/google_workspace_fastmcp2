@@ -14,7 +14,6 @@ from typing import Annotated
 
 from fastmcp import FastMCP
 from fastmcp.dependencies import Progress
-from fastmcp.server.tasks import TaskConfig
 from googleapiclient.errors import HttpError
 from pydantic import Field
 from typing_extensions import Any, List, Literal, Optional

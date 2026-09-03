@@ -25,16 +25,24 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mcp.types
 from fastmcp import Client
-from fastmcp.client.tasks import TaskNotificationHandler
+from fastmcp.client.messages import MessageHandler
 
 
-class AutoRefreshTaskHandler(TaskNotificationHandler):
-    """Auto-refreshes the client tool cache on list_changed notifications."""
+class AutoRefreshTaskHandler(MessageHandler):
+    """Auto-refreshes the client tool cache on list_changed notifications.
+
+    FastMCP 4 moved task notifications into ``fastmcp_tasks``; tool-list
+    refreshes ride the ordinary client ``message_handler`` instead.
+    """
+
+    def __init__(self, client=None):
+        super().__init__()
+        self.client = client
 
     async def on_tool_list_changed(
         self, notification: mcp.types.ToolListChangedNotification
     ) -> None:
-        client = self._client_ref()
+        client = self.client
         if client is not None and client.is_connected():
             try:
                 await client.list_tools()
@@ -120,9 +128,9 @@ class ToolTestRunner:
                 return {
                     "name": tool.name,
                     "description": tool.description,
-                    "inputSchema": tool.inputSchema,
+                    "inputSchema": tool.input_schema,
                     "has_user_email_param": "user_google_email"
-                    in str(tool.inputSchema),
+                    in str(tool.input_schema),
                 }
         return None
 

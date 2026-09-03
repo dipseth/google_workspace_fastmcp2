@@ -229,6 +229,68 @@ class AccessControl:
         }
 
 
+# ---------------------------------------------------------------------------
+# Roles (token claim) — admin gating for tools and routes
+# ---------------------------------------------------------------------------
+# Every access token this server mints carries a ``roles`` claim
+# (auth/sso_google_provider.py): ``["admin"]`` for the shared MCP_API_KEY,
+# ``["user"]`` for per-user keys, OAuth JWTs and Google tokeninfo tokens. Tool
+# registrations gate on it with ``auth=ADMIN``; Starlette routes and tool
+# bodies that need a partial check read the same claim through ``is_admin``.
+# A role denial is a plain AuthorizationError — there is nothing to step up to.
+
+ADMIN_ROLE = "admin"
+USER_ROLE = "user"
+ROLES_CLAIM = "roles"
+
+
+def roles_from_claims(claims: Optional[dict]) -> List[str]:
+    """The roles a token carries, tolerating a provider that stores one bare string."""
+    if not claims:
+        return []
+    roles = claims.get(ROLES_CLAIM)
+    if isinstance(roles, str):
+        return [roles]
+    if isinstance(roles, (list, tuple, set, frozenset)):
+        return [str(r) for r in roles]
+    return []
+
+
+def roles_for_provenance(auth_method: Optional[str]) -> List[str]:
+    """Roles to mint for a token of the given ``auth_method`` (AuthProvenance value)."""
+    from auth.types import AuthProvenance
+
+    if auth_method == AuthProvenance.API_KEY:
+        return [ADMIN_ROLE]
+    return [USER_ROLE]
+
+
+def is_admin() -> bool:
+    """True when the current request's token carries the admin role.
+
+    Falls back to the shared-key provenance for a token minted before the
+    ``roles`` claim existed (a cached JWT from a previous release).
+    """
+    from auth.types import AuthProvenance
+    from auth.user_state import auth_provenance, principal_claims
+
+    claims = principal_claims()
+    if ADMIN_ROLE in roles_from_claims(claims):
+        return True
+    return ROLES_CLAIM not in claims and auth_provenance() == AuthProvenance.API_KEY
+
+
+def _build_admin_check():
+    from fastmcp.server.auth import require_roles
+
+    return require_roles(ADMIN_ROLE, extract=roles_from_claims)
+
+
+# ``auth=ADMIN`` on a tool/resource/prompt hides it from non-admins and denies
+# calls with AuthorizationError.
+ADMIN = _build_admin_check()
+
+
 # Global access control instance
 _access_control: Optional[AccessControl] = None
 
