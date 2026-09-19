@@ -384,9 +384,16 @@ class OptimizedPhotosClient:
         return media_item
 
     async def upload_photos_batch(
-        self, file_paths: List[str], album_id: Optional[str] = None
+        self,
+        file_paths: List[str],
+        album_id: Optional[str] = None,
+        description: str = "",
     ) -> Dict[str, Any]:
-        """Upload multiple photos in a batch operation."""
+        """Upload multiple photos in a batch operation.
+
+        ``description`` applies to every item; when empty each item falls back
+        to "Uploaded from <filename>".
+        """
         logger.info(f"Batch uploading {len(file_paths)} photos")
 
         results = {"successful": [], "failed": [], "total": len(file_paths)}
@@ -394,7 +401,9 @@ class OptimizedPhotosClient:
         # Process in batches of 50 (API limit)
         for i in range(0, len(file_paths), self.batch_size):
             batch_files = file_paths[i : i + self.batch_size]
-            batch_results = await self._upload_batch_chunk(batch_files, album_id)
+            batch_results = await self._upload_batch_chunk(
+                batch_files, album_id, description
+            )
 
             results["successful"].extend(batch_results["successful"])
             results["failed"].extend(batch_results["failed"])
@@ -528,7 +537,10 @@ class OptimizedPhotosClient:
         return result.get("mediaItem", {})
 
     async def _upload_batch_chunk(
-        self, file_paths: List[str], album_id: Optional[str] = None
+        self,
+        file_paths: List[str],
+        album_id: Optional[str] = None,
+        description: str = "",
     ) -> Dict[str, Any]:
         """Upload a chunk of files in batch."""
         results = {"successful": [], "failed": []}
@@ -579,7 +591,8 @@ class OptimizedPhotosClient:
 
             new_media_items.append(
                 {
-                    "description": f"Uploaded from {os.path.basename(file_path)}",
+                    "description": description
+                    or f"Uploaded from {os.path.basename(file_path)}",
                     "simpleMediaItem": {
                         "fileName": os.path.basename(file_path),
                         "uploadToken": token_or_error,
