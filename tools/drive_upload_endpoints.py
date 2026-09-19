@@ -5,10 +5,13 @@ Inverse of ``/attachment-download``. Registered by
 ``settings.drive_upload_client_fs`` is enabled.
 
 Flow:
-    1. ``upload_to_drive`` tool allocates an upload + signs a PUT URL.
-    2. Client streams file bytes via ``PUT /drive-upload?uid=...&exp=...&sig=...``.
-    3. Tool is re-invoked with the same ``path`` and finalizes the Drive upload
+    1. ``upload_to_drive`` / ``upload_photos`` signs a PUT URL.
+    2. Client streams file bytes via ``PUT /drive-upload?t=...&sig=...``.
+    3. Tool is re-invoked with the same ``path`` and finalizes the upload
        from the staged bytes.
+
+The endpoint keeps no state of its own: the signed token says where the bytes
+go, so the PUT may land on a different replica from the two tool calls.
 """
 
 from __future__ import annotations
@@ -31,27 +34,23 @@ def setup_drive_upload_endpoints(mcp: FastMCP) -> None:
 
         from config.settings import settings
         from drive.upload_staging import (
-            mark_received,
-            staged_path,
+            commit_staged,
+            incoming_path,
             verify_upload_url,
         )
 
         query = dict(request.query_params)
-        upload_id = query.get("uid", "")
-        exp = query.get("exp", "")
+        token = query.get("t", "")
         sig = query.get("sig", "")
 
-        if not all([upload_id, exp, sig]):
+        if not all([token, sig]):
             return JSONResponse(
-                {"error": "Missing required query parameters (uid, exp, sig)"},
+                {"error": "Missing required query parameters (t, sig)"},
                 status_code=400,
             )
 
-        # verify_upload_url atomically returns the allocation alongside the
-        # validity check, so a TTL eviction between verify and use cannot
-        # strand a consumed token without its allocation record.
-        valid, error, alloc = verify_upload_url(upload_id, exp, sig)
-        if not valid or alloc is None:
+        valid, error, payload = verify_upload_url(token, sig)
+        if not valid or payload is None:
             status = (
                 410
                 if "expired" in error.lower() or "already used" in error.lower()
@@ -60,7 +59,8 @@ def setup_drive_upload_endpoints(mcp: FastMCP) -> None:
             return JSONResponse({"error": error}, status_code=status)
 
         max_bytes = settings.drive_upload_max_size_mb * 1024 * 1024
-        target = staged_path(upload_id)
+        upload_id = payload["uid"]
+        target = incoming_path(upload_id)
 
         # Stream the request body to disk to avoid loading large files in memory.
         # Enforce max-size during streaming.
@@ -104,17 +104,29 @@ def setup_drive_upload_endpoints(mcp: FastMCP) -> None:
                 pass
             return JSONResponse({"error": "Empty body"}, status_code=400)
 
-        mark_received(upload_id, total)
+        try:
+            await commit_staged(payload, target, total)
+        except Exception as e:
+            logger.error("Drive upload commit failed: %s", e, exc_info=True)
+            try:
+                import os
+
+                os.unlink(target)
+            except OSError:
+                pass
+            return JSONResponse(
+                {"error": f"Failed to store staged upload: {e}"}, status_code=500
+            )
 
         return JSONResponse(
             {
                 "status": "received",
                 "uploadId": upload_id,
                 "bytes": total,
-                "filename": alloc.filename,
+                "filename": payload.get("fn"),
                 "nextStep": (
-                    "Re-invoke upload_to_drive with the same path to finalize "
-                    "the Drive upload."
+                    "Re-invoke the tool that issued this URL with the same "
+                    "path to finalize the upload."
                 ),
             },
             status_code=200,

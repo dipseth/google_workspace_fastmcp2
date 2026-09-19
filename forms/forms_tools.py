@@ -31,6 +31,16 @@ SUPPORTED QUESTION TYPES:
 - TIME_QUESTION: Time picker with optional duration
 - RATING_QUESTION: Star rating systems
 - FILE_UPLOAD_QUESTION: File attachment uploads
+- DROPDOWN_QUESTION: Drop-down selections
+
+SUPPORTED CONTENT ITEMS (add_questions_to_form, same list as the questions):
+- IMAGE_ITEM: A standalone image (image_url, optional title/description)
+- VIDEO_ITEM: A YouTube video (youtube_url, optional caption)
+- TEXT_ITEM: A title + description block
+- PAGE_BREAK_ITEM: Starts a new section
+Any question can also carry an image (image_url), and so can a choice option
+({"value": "A", "image_url": "..."}). Image URLs must be publicly reachable -
+Google fetches them once when the item is created and stores its own copy.
 
 HTML FORMATTING SUPPORT:
 Google Forms API has LIMITED HTML support for rich content:
@@ -41,9 +51,9 @@ SUPPORTED HTML ELEMENTS:
 - Lists: <ul>, <ol>, <li> for bullet and numbered lists
 
 RICH CONTENT ALTERNATIVES:
-- Images: Use imageItem type (not HTML <img> tags)
-- Videos: Use videoItem type (YouTube videos)
-- Formatted Text: Use textItem type for rich text sections
+- Images: Use IMAGE_ITEM, or image_url on a question/option (not HTML <img> tags)
+- Videos: Use VIDEO_ITEM (YouTube videos)
+- Formatted Text: Use TEXT_ITEM for rich text sections
 - HTML limitations: No CSS, JavaScript, or complex HTML structures
 
 FORMATTING EXAMPLES:
@@ -69,6 +79,7 @@ from tools.common_types import UserGoogleEmailForms
 from .forms_types import (
     FormCreationResult,
     FormDetails,
+    FormItemSummary,
     FormPublishResult,
     FormQuestion,
     FormResponseAnswer,
@@ -96,16 +107,27 @@ GRADABLE_QUESTION_TYPES = {
     "RATING_QUESTION",
 }
 
+# Simplified choice question types -> Forms API ChoiceQuestion.type
+CHOICE_QUESTION_TYPES = {
+    "MULTIPLE_CHOICE_QUESTION": "RADIO",
+    "CHECKBOX_QUESTION": "CHECKBOX",
+    "DROPDOWN_QUESTION": "DROP_DOWN",
+}
+
+IMAGE_ALIGNMENTS = {"LEFT", "CENTER", "RIGHT"}
+
 # Valid update fields for validation
 VALID_UPDATE_FIELDS = {
     "title",
     "description",
-    "question",
-    "questionGroupItem",
-    "imageItem",
-    "videoItem",
-    "pageBreakItem",
-    "textItem",
+    "required",
+    "options",
+    "shuffle",
+    "image_url",
+    "image_alt_text",
+    "image_width",
+    "image_alignment",
+    "delete",
 }
 
 # Item type mappings for detection
@@ -126,7 +148,10 @@ QUESTION_TYPE_DETECTORS = {
     "dateQuestion": "DATE",
     "timeQuestion": "TIME",
     "ratingQuestion": "RATING",
+    "fileUploadQuestion": "FILE_UPLOAD",
 }
+
+CHOICE_KIND_LABELS = {"RADIO": "Radio", "CHECKBOX": "Checkbox", "DROP_DOWN": "Dropdown"}
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -146,7 +171,9 @@ def format_question_details(question: Dict[str, Any]) -> str:
     question_item = question.get("questionItem", {})
     q_question = question_item.get("question", {})
 
-    q_type = q_question.get("type", "Unknown")
+    # The API's Question has no "type" field; the kind is whichever
+    # *Question key is present.
+    q_type = extract_question_type(question)
     q_text = question.get("title", "No title")
     q_id = question.get("itemId", "No ID")
     required = q_question.get("required", False)
@@ -154,19 +181,30 @@ def format_question_details(question: Dict[str, Any]) -> str:
     # Extract additional details based on question type
     details = []
 
-    if q_type == "CHOICE_QUESTION":
+    if q_type == "MULTIPLE_CHOICE":
         choice_q = q_question.get("choiceQuestion", {})
         options = choice_q.get("options", [])
-        details.append(f"Options: {len(options)}")
+        kind = choice_q.get("type", "")
+        details.append(f"Kind: {CHOICE_KIND_LABELS.get(kind, kind or 'Unknown')}")
         details.append(
-            f"Type: {'Radio' if choice_q.get('type') == 'RADIO' else 'Checkbox'}"
+            "Options: " + ", ".join(str(o.get("value", "")) for o in options)
+            if options
+            else "Options: none"
         )
+        with_image = sum(1 for o in options if "image" in o)
+        if with_image:
+            details.append(f"Option images: {with_image}")
+        if choice_q.get("shuffle"):
+            details.append("Shuffled: Yes")
     elif q_type == "SCALE":
         scale_q = q_question.get("scaleQuestion", {})
         details.append(f"Scale: {scale_q.get('low', 1)} to {scale_q.get('high', 5)}")
     elif q_type == "TEXT":
         text_q = q_question.get("textQuestion", {})
         details.append(f"Paragraph: {'Yes' if text_q.get('paragraph') else 'No'}")
+
+    if "image" in question_item:
+        details.append("Image: Yes")
 
     # Build the formatted string
     parts = [
@@ -218,13 +256,22 @@ def format_response_answers(
     return formatted_answers
 
 
+def _has_choice_options(question: Dict[str, Any]) -> bool:
+    """Choice questions accept both the simplified and the API option format."""
+    return "options" in question or "options" in question.get("choiceQuestion", {})
+
+
+def _is_http_url(value: Any) -> bool:
+    return isinstance(value, str) and value.startswith(("http://", "https://"))
+
+
 def validate_question_structure(question: Dict[str, Any]) -> bool:
     """
-    Validate that a question dict has the required structure.
+    Validate that an item dict has the required structure.
     Accepts both simplified format and Google API format.
 
     Args:
-        question: Question dictionary to validate
+        question: Question (or non-question item) dictionary to validate
 
     Returns:
         bool: True if valid, False otherwise
@@ -237,27 +284,25 @@ def validate_question_structure(question: Dict[str, Any]) -> bool:
 
     q_type = question["type"]
 
+    # An image attached to a question must be a fetchable URL
+    if "image_url" in question and not _is_http_url(question["image_url"]):
+        return False
+
+    # Non-question items
+    if q_type == "IMAGE_ITEM":
+        return "image_url" in question
+    elif q_type == "VIDEO_ITEM":
+        return _is_http_url(question.get("youtube_url"))
+    elif q_type in ("TEXT_ITEM", "PAGE_BREAK_ITEM"):
+        return "title" in question
+
     # Check required fields based on question type
     if q_type == "TEXT_QUESTION":
         return "title" in question
-    elif q_type == "MULTIPLE_CHOICE_QUESTION":
-        # Accept both simplified format and API format
-        has_options = "options" in question
-        has_choice_question = (
-            "choiceQuestion" in question
-            and "options" in question.get("choiceQuestion", {})
-        )
-        return "title" in question and (has_options or has_choice_question)
+    elif q_type in CHOICE_QUESTION_TYPES:
+        return "title" in question and _has_choice_options(question)
     elif q_type == "SCALE_QUESTION":
         return all(key in question for key in ["title", "low", "high"])
-    elif q_type == "CHECKBOX_QUESTION":
-        # Accept both simplified format and API format
-        has_options = "options" in question
-        has_choice_question = (
-            "choiceQuestion" in question
-            and "options" in question.get("choiceQuestion", {})
-        )
-        return "title" in question and (has_options or has_choice_question)
     elif q_type == "DATE_QUESTION":
         return "title" in question
     elif q_type == "TIME_QUESTION":
@@ -270,46 +315,119 @@ def validate_question_structure(question: Dict[str, Any]) -> bool:
     return False
 
 
-def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
+def build_image(source: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Build a Forms API question item from a simplified question dict.
+    Build a Forms API Image from the simplified image_* keys.
+
+    The Forms API fetches `sourceUri` once, at creation time, and keeps its own
+    copy, so the URL only has to be publicly reachable while the item is created.
 
     Args:
-        question: Simplified question dictionary
+        source: Dict carrying image_url plus optional image_alt_text,
+            image_width (pixels, 0-740) and image_alignment (LEFT/CENTER/RIGHT)
 
     Returns:
-        Forms API formatted question item
+        Forms API formatted Image
+    """
+    image_url = source.get("image_url")
+    if not _is_http_url(image_url):
+        raise ValueError(f"image_url must be a public http(s) URL: {image_url!r}")
+
+    image: Dict[str, Any] = {"sourceUri": image_url}
+    if source.get("image_alt_text"):
+        image["altText"] = source["image_alt_text"]
+
+    properties: Dict[str, Any] = {}
+    if "image_width" in source:
+        properties["width"] = source["image_width"]
+    if "image_alignment" in source:
+        alignment = str(source["image_alignment"]).upper()
+        if alignment not in IMAGE_ALIGNMENTS:
+            raise ValueError(
+                f"image_alignment must be one of {sorted(IMAGE_ALIGNMENTS)}: {alignment!r}"
+            )
+        properties["alignment"] = alignment
+    if properties:
+        image["properties"] = properties
+
+    return image
+
+
+def build_choice_options(options: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Build Forms API choice options.
+
+    Each option is either a plain string or a dict with `value` and optional
+    image_* keys (see build_image) to show a picture beside the option.
+    """
+    built = []
+    for opt in options:
+        if isinstance(opt, dict):
+            if "value" not in opt:
+                raise ValueError(f"Choice option is missing 'value': {opt}")
+            option: Dict[str, Any] = {"value": opt["value"]}
+            if "image_url" in opt:
+                option["image"] = build_image(opt)
+            built.append(option)
+        else:
+            built.append({"value": opt})
+    return built
+
+
+def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a Forms API item from a simplified item dict.
+
+    Handles questions and the non-question items (IMAGE_ITEM, VIDEO_ITEM,
+    TEXT_ITEM, PAGE_BREAK_ITEM).
+
+    Args:
+        question: Simplified item dictionary
+
+    Returns:
+        Forms API formatted item
     """
     if not validate_question_structure(question):
         raise ValueError(f"Invalid question structure: {question}")
 
     q_type = question["type"]
-    title = question["title"]
 
-    # Base structure
-    item = {
-        "title": title,
-        "questionItem": {"question": {"required": question.get("required", False)}},
-    }
+    item: Dict[str, Any] = {}
+    if "title" in question:
+        item["title"] = question["title"]
+    if "description" in question:
+        item["description"] = question["description"]
+
+    # Non-question items
+    if q_type == "IMAGE_ITEM":
+        item["imageItem"] = {"image": build_image(question)}
+        return item
+    elif q_type == "VIDEO_ITEM":
+        item["videoItem"] = {"video": {"youtubeUri": question["youtube_url"]}}
+        if "caption" in question:
+            item["videoItem"]["caption"] = question["caption"]
+        return item
+    elif q_type == "TEXT_ITEM":
+        item["textItem"] = {}
+        return item
+    elif q_type == "PAGE_BREAK_ITEM":
+        item["pageBreakItem"] = {}
+        return item
+
+    item["questionItem"] = {"question": {"required": question.get("required", False)}}
+    if "image_url" in question:
+        item["questionItem"]["image"] = build_image(question)
 
     q_obj = item["questionItem"]["question"]
 
     if q_type == "TEXT_QUESTION":
         q_obj["textQuestion"] = {"paragraph": question.get("paragraph", False)}
 
-    elif q_type == "MULTIPLE_CHOICE_QUESTION":
-        options = [{"value": opt} for opt in question["options"]]
+    elif q_type in CHOICE_QUESTION_TYPES:
+        options = question.get("options") or question["choiceQuestion"]["options"]
         q_obj["choiceQuestion"] = {
-            "type": "RADIO",
-            "options": options,
-            "shuffle": question.get("shuffle", False),
-        }
-
-    elif q_type == "CHECKBOX_QUESTION":
-        options = [{"value": opt} for opt in question["options"]]
-        q_obj["choiceQuestion"] = {
-            "type": "CHECKBOX",
-            "options": options,
+            "type": CHOICE_QUESTION_TYPES[q_type],
+            "options": build_choice_options(options),
             "shuffle": question.get("shuffle", False),
         }
 
@@ -350,51 +468,151 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
-def build_batch_update_request(updates: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_create_item_requests(
+    questions: List[Dict[str, Any]], start_index: int
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Build createItem requests that place the items consecutively from start_index.
+
+    Invalid items are skipped without leaving a gap in the indexes (the Forms API
+    rejects an index past the end of the form).
+
+    Args:
+        questions: Simplified item dictionaries
+        start_index: Position of the first new item (0 = top of the form)
+
+    Returns:
+        Tuple of (createItem requests, one error string per skipped item)
+    """
+    requests: List[Dict[str, Any]] = []
+    skipped: List[str] = []
+
+    for position, question in enumerate(questions):
+        try:
+            item = build_question_item(question)
+        except (ValueError, KeyError, TypeError) as e:
+            skipped.append(f"#{position}: {e}")
+            continue
+        requests.append(
+            {
+                "createItem": {
+                    "item": item,
+                    "location": {"index": start_index + len(requests)},
+                }
+            }
+        )
+
+    return requests, skipped
+
+
+def build_batch_update_request(
+    updates: List[Dict[str, Any]], items: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
     Build a batch update request from a list of updates.
 
+    The Forms API addresses items by index, so each update's item_id is resolved
+    against the form's current items. All fields for one item go into a single
+    updateItem. Deletes run last, highest index first, so earlier indexes stay
+    valid within the batch.
+
     Args:
-        updates: List of update dictionaries
+        updates: List of update dictionaries (item_id plus fields to change)
+        items: The form's current items, in order (from forms.get)
 
     Returns:
         Batch update request body
+
+    Raises:
+        ValueError: If an item_id is unknown or a field does not fit the item type
     """
-    requests = []
+    index_by_id = {item.get("itemId"): idx for idx, item in enumerate(items)}
+    update_requests: List[Dict[str, Any]] = []
+    delete_indexes: List[int] = []
 
     for update in updates:
         item_id = update.get("item_id")
         if not item_id:
             continue
+        if item_id not in index_by_id:
+            raise ValueError(f"item_id not found in form: {item_id!r}")
+        index = index_by_id[item_id]
+        existing = items[index]
 
-        request = {}
+        if update.get("delete"):
+            delete_indexes.append(index)
+            continue
 
-        # Handle different update types
+        item: Dict[str, Any] = {"itemId": item_id}
+        mask: List[str] = []
+
         if "title" in update:
-            request["updateItem"] = {
-                "item": {"itemId": item_id, "title": update["title"]},
-                "updateMask": "title",
-            }
+            item["title"] = update["title"]
+            mask.append("title")
 
         if "description" in update:
-            request["updateItem"] = {
-                "item": {"itemId": item_id, "description": update["description"]},
-                "updateMask": "description",
-            }
+            item["description"] = update["description"]
+            mask.append("description")
+
+        question_fields = {"required", "options", "shuffle"} & set(update)
+        if question_fields and "questionItem" not in existing:
+            raise ValueError(
+                f"{sorted(question_fields)} only apply to questions: {item_id!r}"
+            )
 
         if "required" in update:
-            request["updateItem"] = {
-                "item": {
-                    "itemId": item_id,
-                    "questionItem": {"question": {"required": update["required"]}},
-                },
-                "updateMask": "questionItem.question.required",
-            }
+            question = item.setdefault("questionItem", {}).setdefault("question", {})
+            question["required"] = update["required"]
+            mask.append("questionItem.question.required")
 
-        if request:
-            requests.append(request)
+        if "options" in update or "shuffle" in update:
+            existing_choice = (
+                existing["questionItem"].get("question", {}).get("choiceQuestion")
+            )
+            if not existing_choice:
+                raise ValueError(
+                    f"options/shuffle only apply to choice questions: {item_id!r}"
+                )
+            question = item.setdefault("questionItem", {}).setdefault("question", {})
+            choice = question.setdefault(
+                "choiceQuestion", {"type": existing_choice.get("type", "RADIO")}
+            )
+            if "options" in update:
+                choice["options"] = build_choice_options(update["options"])
+                mask.append("questionItem.question.choiceQuestion.options")
+            if "shuffle" in update:
+                choice["shuffle"] = update["shuffle"]
+                mask.append("questionItem.question.choiceQuestion.shuffle")
 
-    return {"requests": requests}
+        if "image_url" in update:
+            if "questionItem" in existing:
+                item.setdefault("questionItem", {})["image"] = build_image(update)
+                mask.append("questionItem.image")
+            elif "imageItem" in existing:
+                item["imageItem"] = {"image": build_image(update)}
+                mask.append("imageItem.image")
+            else:
+                raise ValueError(
+                    f"image_url only applies to questions and image items: {item_id!r}"
+                )
+
+        if mask:
+            update_requests.append(
+                {
+                    "updateItem": {
+                        "item": item,
+                        "location": {"index": index},
+                        "updateMask": ",".join(mask),
+                    }
+                }
+            )
+
+    delete_requests = [
+        {"deleteItem": {"location": {"index": index}}}
+        for index in sorted(set(delete_indexes), reverse=True)
+    ]
+
+    return {"requests": update_requests + delete_requests}
 
 
 def extract_item_type(item: Dict[str, Any]) -> str:
@@ -621,8 +839,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="add_questions_to_form",
-        description="Add multiple interactive questions to an existing Google Form. Supports all question types including text, multiple choice, scales, dates, and file uploads with comprehensive formatting options.",
-        tags={"forms", "questions", "update", "google"},
+        description="Add questions and content items to an existing Google Form. Supports all question types (text, multiple choice, checkbox, dropdown, scale, date, time, rating, file upload) plus images, YouTube videos, text blocks and section breaks. Questions and choice options can carry an image. Items are appended to the end of the form unless insert_index is given.",
+        tags={"forms", "questions", "images", "update", "google"},
         annotations={
             "title": "Add Questions to Form",
             "readOnlyHint": False,
@@ -641,20 +859,29 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         questions: Annotated[
             List[Dict[str, Any]],
             Field(
-                description="List of question dictionaries using SIMPLIFIED format. Examples: {'type': 'TEXT_QUESTION', 'title': 'Name', 'required': True} or {'type': 'MULTIPLE_CHOICE_QUESTION', 'title': 'Pick one', 'options': ['A', 'B', 'C'], 'required': True}"
+                description="List of item dictionaries using SIMPLIFIED format, added in order. Questions: {'type': 'TEXT_QUESTION', 'title': 'Name', 'required': True} or {'type': 'MULTIPLE_CHOICE_QUESTION', 'title': 'Pick one', 'options': ['A', 'B', 'C'], 'required': True}. Any item takes an optional 'description'. Any question takes an optional 'image_url' (shown with the question), and a choice option may be {'value': 'A', 'image_url': 'https://...'} instead of a string. Content items: {'type': 'IMAGE_ITEM', 'image_url': 'https://...', 'title': 'Poster A'}, {'type': 'VIDEO_ITEM', 'youtube_url': 'https://www.youtube.com/watch?v=...'}, {'type': 'TEXT_ITEM', 'title': 'Heading', 'description': 'Body text'}, {'type': 'PAGE_BREAK_ITEM', 'title': 'Section 2'}. Images take optional 'image_alt_text', 'image_width' (pixels, max 740) and 'image_alignment' (LEFT/CENTER/RIGHT). image_url must be publicly reachable: Google fetches it once when the item is created and keeps its own copy."
             ),
         ],
+        insert_index: Annotated[
+            Optional[int],
+            Field(
+                description="Position of the first new item, 0 = top of the form (positions count every item, not just questions - see get_form's items list). Default: append after the last existing item.",
+                ge=0,
+            ),
+        ] = None,
         user_google_email: UserGoogleEmailForms = None,
     ) -> FormUpdateResult:
         """
-        Add multiple interactive questions to an existing Google Form using batch operations.
+        Add questions and content items to an existing Google Form using batch operations.
 
         Use simplified format: Text: {"type": "TEXT_QUESTION", "title": "Name", "required": True}
         Multiple choice: {"type": "MULTIPLE_CHOICE_QUESTION", "title": "Pick", "options": ["A", "B"]}
+        Image: {"type": "IMAGE_ITEM", "image_url": "https://example.com/a.png", "title": "A"}
 
         Args:
             form_id: Form ID from create_form output
-            questions: List of simplified question dictionaries
+            questions: List of simplified item dictionaries
+            insert_index: Position of the first new item; None appends to the end
             user_google_email: Google account for authentication
 
         Returns:
@@ -664,20 +891,24 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         try:
             forms_service = await _get_forms_service_with_fallback(user_google_email)
 
+            # New items go after the existing ones unless a position is given
+            if insert_index is None:
+                existing = await asyncio.to_thread(
+                    forms_service.forms().get(formId=form_id).execute
+                )
+                start_index = len(existing.get("items", []))
+            else:
+                start_index = insert_index
+
             # Build batch update requests
-            requests = []
-            for i, question in enumerate(questions):
-                try:
-                    item = build_question_item(question)
-                    requests.append(
-                        {"createItem": {"item": item, "location": {"index": i}}}
-                    )
-                except ValueError as e:
-                    logger.warning(f"Skipping invalid question: {e}")
-                    continue
+            requests, skipped = build_create_item_requests(questions, start_index)
+            for reason in skipped:
+                logger.warning(f"Skipping invalid question {reason}")
 
             if not requests:
                 error_msg = "❌ No valid questions to add"
+                if skipped:
+                    error_msg += f" (skipped: {'; '.join(skipped)})"
                 return FormUpdateResult(
                     success=False,
                     message=error_msg,
@@ -703,7 +934,11 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
             edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
             title = form.get("info", {}).get("title", "Untitled Form")
-            success_msg = f"✅ Successfully added {len(requests)} questions to form"
+            success_msg = f"✅ Successfully added {len(requests)} items to form"
+            if skipped:
+                success_msg += (
+                    f" (skipped {len(skipped)} invalid: {'; '.join(skipped)})"
+                )
 
             logger.info(f"[add_questions_to_form] {success_msg}")
             return FormUpdateResult(
@@ -790,9 +1025,18 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             # Extract questions
             items = form.get("items", [])
             questions: List[FormQuestion] = []
+            item_summaries: List[FormItemSummary] = []
 
-            for item in items:
+            for index, item in enumerate(items):
                 item_type = extract_item_type(item)
+                item_summaries.append(
+                    FormItemSummary(
+                        index=index,
+                        itemId=item.get("itemId", ""),
+                        title=item.get("title", ""),
+                        itemType=item_type,
+                    )
+                )
                 if item_type == "questionItem":
                     question_item = item.get("questionItem", {})
                     q_question = question_item.get("question", {})
@@ -800,7 +1044,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     form_question = FormQuestion(
                         itemId=item.get("itemId", ""),
                         title=item.get("title", "No title"),
-                        type=q_question.get("type", "Unknown"),
+                        type=extract_question_type(item),
                         required=q_question.get("required", False),
                         details=format_question_details(item),
                     )
@@ -819,6 +1063,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 responseUrl=response_url,
                 questions=questions,
                 questionCount=len(questions),
+                items=item_summaries,
             )
 
         except HttpError as e:
@@ -1433,7 +1678,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="update_form_questions",
-        description="Modify existing questions in a Google Form including titles, descriptions, required status, and other settings. Uses efficient batch operations for multiple updates.",
+        description="Modify or delete existing items in a Google Form: titles, descriptions, required status, choice options (with optional per-option images), question/image-item images, and item deletion. Uses one batch operation for all updates.",
         tags={"forms", "update", "questions", "google"},
         annotations={
             "title": "Update Form Questions",
@@ -1453,7 +1698,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         questions_to_update: Annotated[
             List[Dict[str, Any]],
             Field(
-                description="List of update dictionaries. Each dictionary must include: item_id (the ID of the question to update from get_form), and one or more fields to update (title, description, required). Example: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}]"
+                description="List of update dictionaries. Each must include item_id (from get_form) and one or more of: 'title', 'description', 'required' (questions), 'options' (choice questions; REPLACES the option list - each option is a string or {'value': 'A', 'image_url': 'https://...'}), 'shuffle' (choice questions), 'image_url' (sets the image on a question or replaces an image item's image; takes optional 'image_alt_text', 'image_width', 'image_alignment'), or 'delete': True to remove the item. Image URLs must be publicly reachable. Examples: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}], [{'item_id': '12345', 'options': [{'value': 'A', 'image_url': 'https://example.com/a.png'}, 'None of them']}], [{'item_id': '67890', 'delete': True}]"
             ),
         ],
         user_google_email: UserGoogleEmailForms = None,
@@ -1461,7 +1706,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         """
         Modify existing questions in a Google Form using efficient batch operations.
 
-        Use get_form first to get item_ids. Supported updates: title, description, required status.
+        Use get_form first to get item_ids. Supported updates: title, description,
+        required, options (with per-option images), shuffle, image_url, delete.
 
         Args:
             form_id: Form ID containing questions to update
@@ -1495,8 +1741,13 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     error=error_msg,
                 )
 
-            # Build batch update request
-            batch_update_body = build_batch_update_request(valid_updates)
+            # Build batch update request (the Forms API addresses items by index)
+            current = await asyncio.to_thread(
+                forms_service.forms().get(formId=form_id).execute
+            )
+            batch_update_body = build_batch_update_request(
+                valid_updates, current.get("items", [])
+            )
 
             # Execute the update
             result = await asyncio.to_thread(

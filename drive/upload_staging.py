@@ -7,30 +7,51 @@ Instead the tool issues an HMAC-signed PUT URL; the client uploads file
 content there; ``upload_to_drive`` is re-called and finalizes the Drive
 upload from the staged bytes.
 
+No upload state lives in process memory, so the three requests of one upload
+(issue, PUT, finalize) may each land on a different replica:
+
+    - The signed URL carries everything the PUT endpoint needs — object key,
+      filename, destination — so it needs no allocation record to look up.
+    - The staged object is named ``HMAC(owner, client_path)``. The finalize
+      call recomputes that name and looks; there is no index to consult.
+    - ``owner`` is the authenticated principal, not the transport session:
+      under MCP 2026-07-28 (and Code Mode through the claude.ai connector)
+      every request is its own session.
+
+What replicas must share for that to hold:
+
+    - ``.auth_encryption_key`` — it signs the URLs *and* names the objects.
+    - The staging store: ``DRIVE_UPLOAD_TEMP_DIR`` on a shared volume, or
+      ``DRIVE_UPLOAD_STAGING_URI=gs://bucket/prefix``.
+    - Redis, for one-time use of a URL across replicas (``ConsumedTokenStore``
+      falls back to per-process memory without it).
+
 Security:
     - HMAC-SHA256 signed URLs (HKDF-derived key, distinct ``info`` from
-      attachment downloads)
+      attachment downloads); the whole payload is signed as one token
     - One-time use via ``ConsumedTokenStore``
-    - UUID-prefixed filenames prevent collisions and guessing
-    - Path traversal protection via ``os.path.realpath()``
-    - Temp dir with ``0o700`` permissions
-    - Eager + lazy file cleanup
-    - Allocations bound to ``(session_id, client_path)`` so phase 2 of the
-      tool call can locate the staged bytes without an extra parameter
+    - Object names are hex digests the client cannot choose; validated before
+      they touch a path
+    - Staging dir ``0o700``, staged files ``0o600``
+    - Eager + lazy cleanup; staged bytes older than the TTL are never served
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac as _hmac
+import json
+import mimetypes
 import os
+import re
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-from urllib.parse import urlencode
+from typing import Any, Optional, Protocol
+from urllib.parse import urlencode, urlparse
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -45,25 +66,41 @@ _hmac_key_cache: Optional[bytes] = None
 _consumed_uploads = ConsumedTokenStore("drive-upload", default_ttl_seconds=900)
 _cleanup_task: Optional[asyncio.Task] = None
 
+_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
+_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+# Names this module writes; the sweep touches nothing else in the directory.
+_OWN_FILE_RE = re.compile(
+    r"^(?:[0-9a-f]{64}\.(?:bin|json)|\.incoming-[0-9a-f]{32}|\.meta-[0-9a-f]{32})$"
+)
+
 
 @dataclass
-class _Allocation:
+class UploadTicket:
+    """A signed PUT URL issued for one ``(owner, client_path)``."""
+
     upload_id: str
-    session_id: str
-    client_path: str
+    key: str
+    url: str
+    expires_at: int
+    filename: str
+
+
+@dataclass
+class StagedUpload:
+    """Bytes a client has PUT, waiting for the finalize call."""
+
+    key: str
     filename: str
     mime_type: str
     folder_id: str
-    user_email: str
     custom_filename: Optional[str]
-    allocated_at: float = field(default_factory=time.time)
-    received: bool = False
+    size: int
+    received_at: float
 
 
-# upload_id -> _Allocation
-_allocations: dict[str, _Allocation] = {}
-# (session_id, client_path) -> upload_id
-_session_index: dict[tuple[str, str], str] = {}
+# ---------------------------------------------------------------------------
+# Signing
+# ---------------------------------------------------------------------------
 
 
 def _get_server_secret() -> str:
@@ -78,7 +115,7 @@ def _get_server_secret() -> str:
     fallback = _secrets.token_urlsafe(32)
     logger.warning(
         "No .auth_encryption_key found; drive upload URLs using random ephemeral key. "
-        "URLs will NOT survive server restarts."
+        "URLs will NOT survive server restarts or verify on another replica."
     )
     return fallback
 
@@ -100,118 +137,307 @@ def _get_hmac_key() -> bytes:
     return _hmac_key_cache
 
 
-def _compute_signature(params: dict) -> str:
-    """Compute HMAC-SHA256 over canonical query params (excluding ``sig``)."""
-    data = {k: v for k, v in sorted(params.items()) if k != "sig"}
-    canonical = "&".join(f"{k}={v}" for k, v in data.items())
-    return _hmac.new(_get_hmac_key(), canonical.encode(), hashlib.sha256).hexdigest()
+def _sign(data: bytes) -> str:
+    return _hmac.new(_get_hmac_key(), data, hashlib.sha256).hexdigest()
 
 
-def _get_temp_dir() -> str:
-    from config.settings import settings
+def object_key(owner: str, client_path: str) -> str:
+    """Name of the staged object for ``(owner, client_path)``.
 
-    temp_dir = settings.drive_upload_temp_dir
-    os.makedirs(temp_dir, mode=0o700, exist_ok=True)
-    return temp_dir
+    Deterministic, so the finalize call finds the bytes without a lookup
+    table, and keyed, so it reveals neither the owner nor the path.
+    """
+    return _sign(b"object\0" + owner.encode() + b"\0" + client_path.encode())
 
 
-def allocate_upload(
-    session_id: str,
+async def staging_owner(user_email: Optional[str]) -> Optional[str]:
+    """Who a staged upload belongs to, stable across the two tool calls.
+
+    A per-user token (OAuth JWT, per-user API key) → its principal, which the
+    caller cannot choose. The shared ``MCP_API_KEY`` is one principal for every
+    holder, so the target account splits it. With no token at all (legacy
+    no-auth HTTP) the transport session is the only handle there is.
+    """
+    from auth.context import get_session_context
+    from auth.user_state import SHARED_KEY_PRINCIPAL, principal_id
+
+    principal = principal_id()
+    if principal and principal != SHARED_KEY_PRINCIPAL:
+        return principal
+    if principal:
+        return f"{principal}:{(user_email or '').lower().strip()}"
+    session_id = await get_session_context()
+    return f"session:{session_id}" if session_id else None
+
+
+# ---------------------------------------------------------------------------
+# Stores
+# ---------------------------------------------------------------------------
+
+
+class StagingStore(Protocol):
+    """Where staged bytes live. Methods block; call them via ``to_thread``."""
+
+    def incoming_path(self, upload_id: str) -> str:
+        """Local path the PUT endpoint streams to before ``commit``."""
+
+    def commit(self, key: str, incoming: str, meta: dict) -> None:
+        """Publish ``incoming`` as ``key``. Meta is written last: its presence
+        means the bytes are complete."""
+
+    def read_meta(self, key: str) -> Optional[dict]: ...
+
+    def read_bytes(self, key: str) -> Optional[bytes]: ...
+
+    def delete(self, key: str) -> None: ...
+
+    def evict_expired(self, ttl_seconds: int) -> int: ...
+
+
+def _sweep_dir(root: str, ttl_seconds: int) -> int:
+    """Unlink files in ``root`` older than the TTL (abandoned PUTs included)."""
+    cutoff = time.time() - ttl_seconds
+    removed = 0
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if not _OWN_FILE_RE.match(entry.name):
+                continue
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                os.unlink(entry.path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+class DirectoryStore:
+    """Staging in a directory: local disk, or a volume every replica mounts."""
+
+    def __init__(self, root: str) -> None:
+        self._root = root
+        os.makedirs(root, mode=0o700, exist_ok=True)
+
+    def _path(self, name: str) -> str:
+        return os.path.join(self._root, name)
+
+    def incoming_path(self, upload_id: str) -> str:
+        # Same directory as the target, so commit is an atomic rename.
+        return self._path(f".incoming-{upload_id}")
+
+    def commit(self, key: str, incoming: str, meta: dict) -> None:
+        # Owner-only, whatever the umask: on a shared volume the directory may
+        # predate this process and not be 0o700.
+        os.chmod(incoming, 0o600)
+        os.replace(incoming, self._path(f"{key}.bin"))
+        tmp = self._path(f".meta-{uuid.uuid4().hex}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(meta, f)
+        os.replace(tmp, self._path(f"{key}.json"))
+
+    def read_meta(self, key: str) -> Optional[dict]:
+        try:
+            with open(self._path(f"{key}.json")) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def read_bytes(self, key: str) -> Optional[bytes]:
+        try:
+            with open(self._path(f"{key}.bin"), "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def delete(self, key: str) -> None:
+        # Meta first: a reader that still sees it must still find the bytes.
+        for name in (f"{key}.json", f"{key}.bin"):
+            try:
+                os.unlink(self._path(name))
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning("Failed to clean up staged upload %s: %s", key[:8], e)
+
+    def evict_expired(self, ttl_seconds: int) -> int:
+        return _sweep_dir(self._root, ttl_seconds)
+
+
+class GcsStore:
+    """Staging in a Cloud Storage bucket (``gs://bucket/prefix``).
+
+    Needs ``google-cloud-storage`` and application default credentials.
+    Expiry of abandoned objects is the bucket's job: give it a lifecycle rule
+    that deletes objects under the prefix after a day.
+    """
+
+    def __init__(self, bucket: Any, prefix: str, scratch_dir: str) -> None:
+        self._bucket = bucket
+        self._prefix = prefix.strip("/")
+        self._scratch = scratch_dir
+        os.makedirs(scratch_dir, mode=0o700, exist_ok=True)
+
+    @classmethod
+    def from_uri(cls, uri: str, scratch_dir: str) -> "GcsStore":
+        try:
+            from google.cloud import storage as gcs_storage
+        except ImportError as e:
+            raise RuntimeError(
+                "DRIVE_UPLOAD_STAGING_URI is a gs:// URI but google-cloud-storage "
+                "is not installed."
+            ) from e
+        parsed = urlparse(uri)
+        return cls(gcs_storage.Client().bucket(parsed.netloc), parsed.path, scratch_dir)
+
+    def _blob(self, name: str) -> Any:
+        return self._bucket.blob(f"{self._prefix}/{name}" if self._prefix else name)
+
+    def incoming_path(self, upload_id: str) -> str:
+        return os.path.join(self._scratch, f".incoming-{upload_id}")
+
+    def commit(self, key: str, incoming: str, meta: dict) -> None:
+        try:
+            self._blob(f"{key}.bin").upload_from_filename(incoming)
+            self._blob(f"{key}.json").upload_from_string(
+                json.dumps(meta), content_type="application/json"
+            )
+        finally:
+            try:
+                os.unlink(incoming)
+            except OSError:
+                pass
+
+    def _download(self, name: str) -> Optional[bytes]:
+        from google.api_core.exceptions import NotFound
+
+        try:
+            return self._blob(name).download_as_bytes()
+        except NotFound:
+            return None
+
+    def read_meta(self, key: str) -> Optional[dict]:
+        raw = self._download(f"{key}.json")
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return None
+
+    def read_bytes(self, key: str) -> Optional[bytes]:
+        return self._download(f"{key}.bin")
+
+    def delete(self, key: str) -> None:
+        from google.api_core.exceptions import NotFound
+
+        for name in (f"{key}.json", f"{key}.bin"):
+            try:
+                self._blob(name).delete()
+            except NotFound:
+                pass
+
+    def evict_expired(self, ttl_seconds: int) -> int:
+        # Only the local scratch files of abandoned PUTs; see class docstring.
+        return _sweep_dir(self._scratch, ttl_seconds)
+
+
+_store: Optional[StagingStore] = None
+
+
+def get_store() -> StagingStore:
+    global _store
+    if _store is None:
+        from config.settings import settings
+
+        uri = settings.drive_upload_staging_uri
+        if uri.startswith("gs://"):
+            _store = GcsStore.from_uri(uri, settings.drive_upload_temp_dir)
+        elif uri:
+            raise RuntimeError(
+                f"Unsupported DRIVE_UPLOAD_STAGING_URI {uri!r}: use gs://bucket/prefix, "
+                "or leave it empty and point DRIVE_UPLOAD_TEMP_DIR at the staging dir."
+            )
+        else:
+            _store = DirectoryStore(settings.drive_upload_temp_dir)
+    return _store
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: issue a signed URL
+# ---------------------------------------------------------------------------
+
+
+async def issue_upload(
+    base_url: str,
+    owner: str,
     client_path: str,
-    user_email: str,
     folder_id: str,
     custom_filename: Optional[str],
-) -> _Allocation:
-    """Reserve an upload slot for a (session_id, client_path) tuple.
+    ttl_seconds: int,
+) -> UploadTicket:
+    """Sign a one-time PUT URL for ``(owner, client_path)``.
 
-    If an allocation already exists for the same tuple and hasn't received
-    bytes yet, it is returned as-is (idempotent re-issue). If it already
-    received bytes, the existing allocation is returned so the tool can
-    finalize. If it expired, a fresh allocation replaces it.
+    Every call issues a fresh URL. Several may be outstanding for the same
+    pair; each writes the same object, and the last PUT wins.
     """
-    import mimetypes
+    await asyncio.to_thread(get_store().evict_expired, ttl_seconds)
+    start_cleanup_task()
 
-    _evict_expired()
-
-    key = (session_id, client_path)
-    existing_id = _session_index.get(key)
-    if existing_id and existing_id in _allocations:
-        return _allocations[existing_id]
-
-    upload_id = uuid.uuid4().hex
     filename = custom_filename or os.path.basename(client_path) or "upload"
     mime_type, _ = mimetypes.guess_type(filename)
-    alloc = _Allocation(
-        upload_id=upload_id,
-        session_id=session_id,
-        client_path=client_path,
-        filename=filename,
-        mime_type=mime_type or "application/octet-stream",
-        folder_id=folder_id,
-        user_email=user_email,
-        custom_filename=custom_filename,
-    )
-    _allocations[upload_id] = alloc
-    _session_index[key] = upload_id
-
-    try:
-        start_cleanup_task()
-    except RuntimeError:
-        pass
-    return alloc
-
-
-def get_allocation(upload_id: str) -> Optional[_Allocation]:
-    return _allocations.get(upload_id)
-
-
-def find_allocation_by_path(session_id: str, client_path: str) -> Optional[_Allocation]:
-    """Look up an allocation by (session_id, client_path)."""
-    upload_id = _session_index.get((session_id, client_path))
-    if not upload_id:
-        return None
-    return _allocations.get(upload_id)
-
-
-def generate_upload_url(
-    base_url: str,
-    upload_id: str,
-    ttl_seconds: int,
-) -> tuple[str, int]:
-    """Generate a signed PUT URL for a staged upload allocation.
-
-    Returns:
-        (url, exp_timestamp)
-    """
+    upload_id = uuid.uuid4().hex
+    key = object_key(owner, client_path)
     exp = int(time.time()) + ttl_seconds
-    params = {
+    payload = {
         "uid": upload_id,
-        "exp": str(exp),
+        "k": key,
+        "exp": exp,
+        "fn": filename,
+        "mt": mime_type or "application/octet-stream",
+        "fid": folder_id,
+        "cfn": custom_filename,
     }
-    params["sig"] = _compute_signature(params)
-    base = base_url.rstrip("/")
-    return f"{base}/drive-upload?{urlencode(params)}", exp
+    token = (
+        base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    query = urlencode({"t": token, "sig": _sign(token.encode())})
+    url = f"{base_url.rstrip('/')}/drive-upload?{query}"
+    return UploadTicket(
+        upload_id=upload_id, key=key, url=url, expires_at=exp, filename=filename
+    )
 
 
-def verify_upload_url(
-    upload_id: str, exp: str, sig: str
-) -> tuple[bool, str, Optional[_Allocation]]:
+# ---------------------------------------------------------------------------
+# PUT endpoint
+# ---------------------------------------------------------------------------
+
+
+def verify_upload_url(token: str, sig: str) -> tuple[bool, str, Optional[dict]]:
     """Verify PUT-URL signature, expiry, and one-time use.
 
-    Returns ``(is_valid, error_message, allocation)``. The allocation
-    reference is captured *before* the token is consumed, so a TTL
-    eviction firing between this call and the endpoint's use of the
-    allocation cannot strand a consumed token without an allocation.
+    Returns ``(is_valid, error_message, payload)``. Nothing in the token is
+    read before the signature checks out.
     """
-    params = {"uid": upload_id, "exp": exp}
-    expected = _compute_signature(params)
-    if not _hmac.compare_digest(sig, expected):
+    if not _hmac.compare_digest(sig, _sign(token.encode())):
         return False, "Invalid signature", None
 
     try:
-        exp_ts = int(exp)
-    except (ValueError, TypeError):
-        return False, "Invalid expiry", None
+        padded = token + "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+        upload_id, key, exp_ts = payload["uid"], payload["k"], int(payload["exp"])
+    except (ValueError, KeyError, TypeError):
+        return False, "Malformed upload token", None
+
+    if not _UPLOAD_ID_RE.match(str(upload_id)) or not _KEY_RE.match(str(key)):
+        return False, "Malformed upload token", None
 
     if time.time() > exp_ts:
         return False, "Upload link has expired", None
@@ -219,87 +445,91 @@ def verify_upload_url(
     if _consumed_uploads.is_consumed_sync(upload_id):
         return False, "Upload URL already used", None
 
-    alloc = _allocations.get(upload_id)
-    if alloc is None:
-        return False, "Unknown upload id", None
-
     _consumed_uploads.consume_sync(upload_id)
-    return True, "", alloc
+    return True, "", payload
 
 
-def staged_path(upload_id: str) -> str:
-    """Return the on-disk path where bytes for this upload are stored."""
-    temp_dir = _get_temp_dir()
-    alloc = _allocations.get(upload_id)
-    suffix = alloc.filename if alloc else "upload"
-    safe_suffix = os.path.basename(suffix).replace("/", "_") or "upload"
-    return os.path.join(temp_dir, f"{upload_id}_{safe_suffix}")
+def incoming_path(upload_id: str) -> str:
+    """Local path the PUT endpoint streams the request body to."""
+    return get_store().incoming_path(upload_id)
 
 
-def mark_received(upload_id: str, byte_count: int) -> None:
-    alloc = _allocations.get(upload_id)
-    if alloc:
-        alloc.received = True
-        logger.info(
-            "Drive upload staged: %s (%d bytes) for %s",
-            upload_id[:8],
-            byte_count,
-            alloc.user_email,
-        )
+async def commit_staged(payload: dict, incoming: str, byte_count: int) -> None:
+    """Publish a completed PUT so any replica's finalize call can find it."""
+    meta = {
+        "filename": payload.get("fn") or "upload",
+        "mime_type": payload.get("mt") or "application/octet-stream",
+        "folder_id": payload.get("fid") or "",
+        "custom_filename": payload.get("cfn"),
+        "size": byte_count,
+        "received_at": time.time(),
+    }
+    await asyncio.to_thread(get_store().commit, payload["k"], incoming, meta)
+    logger.info(
+        "Drive upload staged: %s (%d bytes)", str(payload["uid"])[:8], byte_count
+    )
 
 
-def read_staged_bytes(upload_id: str) -> Optional[bytes]:
-    """Read the staged bytes for a finalized upload."""
-    alloc = _allocations.get(upload_id)
-    if not alloc or not alloc.received:
-        return None
-    path = staged_path(upload_id)
-    resolved = os.path.realpath(path)
-    temp_dir = os.path.realpath(_get_temp_dir())
-    if not resolved.startswith(temp_dir):
-        return None
-    if not os.path.exists(resolved):
-        return None
-    with open(resolved, "rb") as f:
-        return f.read()
+# ---------------------------------------------------------------------------
+# Phase 2: finalize
+# ---------------------------------------------------------------------------
 
 
-def consume_allocation(upload_id: str) -> None:
-    """Remove allocation, session-index entry, and on-disk file."""
-    alloc = _allocations.pop(upload_id, None)
-    if alloc:
-        _session_index.pop((alloc.session_id, alloc.client_path), None)
-    path = staged_path(upload_id)
-    try:
-        if os.path.exists(path):
-            os.unlink(path)
-    except OSError as e:
-        logger.warning("Failed to clean up staged upload %s: %s", upload_id[:8], e)
-
-
-def _evict_expired() -> int:
-    """Drop allocations + files older than the configured TTL."""
+async def find_staged(owner: str, client_path: str) -> Optional[StagedUpload]:
+    """The bytes staged for ``(owner, client_path)``, if a PUT completed."""
     from config.settings import settings
 
-    ttl = settings.drive_upload_ttl_seconds
-    now = time.time()
-    expired = [
-        uid for uid, alloc in _allocations.items() if now - alloc.allocated_at > ttl
-    ]
-    for uid in expired:
-        consume_allocation(uid)
-    if expired:
-        logger.info(
-            "Drive upload cleanup: removed %d expired allocations", len(expired)
+    key = object_key(owner, client_path)
+    meta = await asyncio.to_thread(get_store().read_meta, key)
+    if not meta:
+        return None
+    try:
+        staged = StagedUpload(
+            key=key,
+            filename=meta["filename"],
+            mime_type=meta["mime_type"],
+            folder_id=meta.get("folder_id") or "",
+            custom_filename=meta.get("custom_filename"),
+            size=int(meta.get("size", 0)),
+            received_at=float(meta["received_at"]),
         )
-    return len(expired)
+    except (KeyError, TypeError, ValueError):
+        await discard_staged(key)
+        return None
+    if time.time() - staged.received_at > settings.drive_upload_ttl_seconds:
+        await discard_staged(key)
+        return None
+    return staged
+
+
+async def read_staged_bytes(key: str) -> Optional[bytes]:
+    if not _KEY_RE.match(key):
+        return None
+    return await asyncio.to_thread(get_store().read_bytes, key)
+
+
+async def discard_staged(key: str) -> None:
+    """Remove staged bytes and their meta."""
+    if _KEY_RE.match(key):
+        await asyncio.to_thread(get_store().delete, key)
+
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
 
 
 async def _cleanup_loop() -> None:
+    from config.settings import settings
+
     while True:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-            _evict_expired()
+            removed = await asyncio.to_thread(
+                get_store().evict_expired, settings.drive_upload_ttl_seconds
+            )
+            if removed:
+                logger.info("Drive upload cleanup: removed %d expired files", removed)
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -322,22 +552,27 @@ def start_cleanup_task() -> None:
 def reset_state() -> None:
     """Clear state (for testing)."""
     _consumed_uploads.clear()
-    _allocations.clear()
-    _session_index.clear()
-    global _hmac_key_cache
+    global _hmac_key_cache, _store
     _hmac_key_cache = None
+    _store = None
 
 
 __all__ = [
-    "allocate_upload",
-    "get_allocation",
-    "find_allocation_by_path",
-    "generate_upload_url",
+    "UploadTicket",
+    "StagedUpload",
+    "StagingStore",
+    "DirectoryStore",
+    "GcsStore",
+    "staging_owner",
+    "object_key",
+    "get_store",
+    "issue_upload",
     "verify_upload_url",
-    "staged_path",
-    "mark_received",
+    "incoming_path",
+    "commit_staged",
+    "find_staged",
     "read_staged_bytes",
-    "consume_allocation",
+    "discard_staged",
     "start_cleanup_task",
     "reset_state",
 ]

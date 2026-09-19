@@ -417,6 +417,26 @@ DRIVE_ENABLE_SHARED_DRIVES=true       # Enable shared drive support
 DRIVE_DEFAULT_FIELDS=*                # Default fields to return
 ```
 
+#### Client-filesystem uploads
+
+On a hosted server the `path` given to `upload_to_drive` or `upload_photos` is on the client's machine, not the server's. With `DRIVE_UPLOAD_CLIENT_FS=true` the tool returns a signed one-time `PUT /drive-upload` URL; the client sends the bytes there and calls the tool again with the same `path` to finish.
+
+| Variable | Type | Default | Description | Required |
+|----------|------|---------|-------------|----------|
+| `DRIVE_UPLOAD_CLIENT_FS` | boolean | `false` | Treat upload paths as client paths and use the signed-URL handshake. Leave `false` for stdio or when client and server share a filesystem. | No |
+| `DRIVE_UPLOAD_TEMP_DIR` | string | `/tmp/gw-mcp-drive-uploads` | Directory where bytes wait between the PUT and the finishing call. | No |
+| `DRIVE_UPLOAD_STAGING_URI` | string | - | `gs://bucket/prefix` to stage in Cloud Storage instead of the directory. Needs the `google-cloud-storage` package (not installed by default) and application default credentials. | No |
+| `DRIVE_UPLOAD_MAX_SIZE_MB` | integer | `100` | Largest accepted PUT body. | No |
+| `DRIVE_UPLOAD_TTL_SECONDS` | integer | `900` | Lifetime of a signed URL, and of staged bytes that are never finished. | No |
+
+Running more than one replica: the three requests of an upload (issue the URL, PUT, finish) can each reach a different replica, and no replica keeps upload state in memory. They must share:
+
+- `.auth_encryption_key` — it signs the URLs and names the staged objects. A replica without the file generates its own key and rejects URLs the others issued.
+- The staging store — point `DRIVE_UPLOAD_TEMP_DIR` at a volume every replica mounts, or set `DRIVE_UPLOAD_STAGING_URI`. With a bucket, add a lifecycle rule that deletes objects under the prefix after a day; the server deletes what it finishes but only the bucket can expire abandoned uploads.
+- Redis (`REDIS_IO_URL_STRING`) — so a signed URL is one-time across replicas, not once per replica.
+
+A single container needs none of this.
+
 ### Gmail
 
 ```bash

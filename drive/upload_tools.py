@@ -1029,8 +1029,8 @@ async def _handle_client_fs_upload(
 ) -> UploadFileResponse:
     """Two-phase client→server→Drive upload, no extra tool parameters.
 
-    Phase 1 (allocation): no staged bytes for ``(session_id, path)`` →
-    allocate, sign a PUT URL, return ``pendingUpload`` instructions.
+    Phase 1: no staged bytes for ``(owner, path)`` → sign a PUT URL, return
+    ``pendingUpload`` instructions.
 
     Phase 2 (finalize): staged bytes present → run them through the
     existing ``upload_content_to_drive_api`` and return the normal
@@ -1042,41 +1042,42 @@ async def _handle_client_fs_upload(
     re-target the destination folder after PUT-ing the bytes). If the
     caller passes the defaults, Phase-1 values are used.
     """
-    from auth.context import get_session_context
-
     from .upload_staging import (
-        allocate_upload,
-        consume_allocation,
-        find_allocation_by_path,
-        generate_upload_url,
+        discard_staged,
+        find_staged,
+        issue_upload,
         read_staged_bytes,
+        staging_owner,
     )
 
-    session_id = await get_session_context()
-    if not session_id:
+    # Keyed by who is calling, not by transport session: the finalize call
+    # arrives on a different session under MCP 2026-07-28 / Code Mode.
+    owner = await staging_owner(user_email)
+    if not owner:
         return UploadFileResponse(
             success=False,
             userEmail=user_email,
             message="",
             error=(
-                "Client-filesystem upload mode requires an MCP session "
-                "(none found in current context). Set DRIVE_UPLOAD_CLIENT_FS=false "
-                "for stdio / local-filesystem uploads."
+                "Client-filesystem upload mode requires an authenticated "
+                "caller or an MCP session (neither found in current context). "
+                "Set DRIVE_UPLOAD_CLIENT_FS=false for stdio / local-filesystem "
+                "uploads."
             ),
         )
 
-    # Phase 2: staged bytes already present for this (session, path) pair
-    existing = find_allocation_by_path(session_id, path)
-    if existing and existing.received:
-        staged = read_staged_bytes(existing.upload_id)
+    # Phase 2: staged bytes already present for this (owner, path) pair
+    existing = await find_staged(owner, path)
+    if existing:
+        staged = await read_staged_bytes(existing.key)
         if staged is None:
-            consume_allocation(existing.upload_id)
+            await discard_staged(existing.key)
             return UploadFileResponse(
                 success=False,
                 userEmail=user_email,
                 message="",
                 error=(
-                    "Staged upload could not be read from disk. Re-call "
+                    "Staged upload could not be read back. Re-call "
                     "upload_to_drive to retry the transfer."
                 ),
             )
@@ -1114,7 +1115,7 @@ async def _handle_client_fs_upload(
             ),
         }
 
-        consume_allocation(existing.upload_id)
+        await discard_staged(existing.key)
         logger.info(
             f"Client-FS upload finalized: {result['name']} (ID: {result['id']})"
         )
@@ -1125,22 +1126,18 @@ async def _handle_client_fs_upload(
             message=f"Successfully uploaded {result['name']} to Google Drive",
         )
 
-    # Phase 1: allocate + return signed PUT URL
-    alloc = allocate_upload(
-        session_id=session_id,
-        client_path=path,
-        user_email=user_email,
-        folder_id=folder_id,
-        custom_filename=custom_filename,
-    )
+    # Phase 1: return a signed PUT URL
     ttl = settings.drive_upload_ttl_seconds
-    url, exp_ts = generate_upload_url(settings.base_url, alloc.upload_id, ttl)
+    ticket = await issue_upload(
+        settings.base_url, owner, path, folder_id, custom_filename, ttl
+    )
+    url, exp_ts = ticket.url, ticket.expires_at
 
     safe_path = path.replace('"', '\\"')
     curl_example = f'curl -X PUT --data-binary @"{safe_path}" "{url}"'
 
     pending: PendingUploadInfo = {
-        "uploadId": alloc.upload_id,
+        "uploadId": ticket.upload_id,
         "uploadUrl": url,
         "method": "PUT",
         "expiresAt": exp_ts,

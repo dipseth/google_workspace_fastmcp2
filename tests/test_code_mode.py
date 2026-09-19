@@ -591,6 +591,51 @@ async def test_run_lambda_key_returns_error_not_raises():
     assert "lambda" in result.lower()
 
 
+@pytest.mark.asyncio
+async def test_run_sync_helpers_need_no_await_next_to_an_awaited_tool():
+    """The reason run() bypasses super().run(): helpers return plain values
+    while call_tool stays awaitable, and inputs bind by name."""
+
+    async def call_tool(name, params):
+        return {"tool": name, **params}
+
+    provider = EnhancedSandboxProvider()
+    result = await provider.run(
+        "r = await call_tool('t', {'a': n})\nreturn [r, unique([1, 1, 2]), today()[:2]]",
+        inputs={"n": 41},
+        external_functions={"call_tool": call_tool},
+    )
+    assert result == [{"tool": "t", "a": 41}, [1, 2], "20"]
+
+
+@pytest.mark.asyncio
+async def test_run_cancels_a_tool_call_the_block_never_awaited():
+    """Monty leaves callbacks running after the sandbox exits, and here a
+    callback is a real tool call: it must not finish behind the caller's back."""
+    import asyncio
+
+    seen = {"started": 0, "finished": 0, "cancelled": 0}
+
+    async def call_tool(name, params):
+        seen["started"] += 1
+        try:
+            await asyncio.sleep(0.3)
+            seen["finished"] += 1
+        except asyncio.CancelledError:
+            seen["cancelled"] += 1
+            raise
+
+    provider = EnhancedSandboxProvider()
+    result = await provider.run(
+        "f = call_tool('dangling', {})\nreturn 'returned early'",
+        external_functions={"call_tool": call_tool},
+    )
+    await asyncio.sleep(0.4)
+    assert result == "returned early"
+    assert seen["finished"] == 0
+    assert seen["started"] == seen["cancelled"]
+
+
 # =============================================================================
 # gather_tools() — sequential multi-call helper
 # =============================================================================
