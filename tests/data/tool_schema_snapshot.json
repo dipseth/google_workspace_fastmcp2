@@ -1,6 +1,7 @@
 {
   "add_questions_to_form": [
     "form_id",
+    "insert_index",
     "questions",
     "user_google_email"
   ],
