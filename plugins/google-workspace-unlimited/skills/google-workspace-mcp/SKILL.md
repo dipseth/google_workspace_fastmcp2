@@ -487,7 +487,7 @@ Use `manage_tools(action="list")` or `manage_tools(action="list", service_filter
 | **Docs** | `search_docs`, `get_doc_content`, `list_docs_in_folder`, `create_doc` |
 | **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `batch_modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range`, `batch_update_sheet` |
 | **Slides** | `create_presentation`, `get_presentation_info`, `add_slide`, `update_slide_content`, `export_and_download_presentation` |
-| **Forms** | `create_form`, `add_questions_to_form`, `get_form`, `set_form_publish_state`, `publish_form_publicly`, `get_form_response`, `list_form_responses`, `update_form_questions` |
+| **Forms** | `create_form`, `add_questions_to_form`, `get_form`, `set_form_publish_state`, `publish_form_publicly`, `get_form_response`, `list_form_responses`, `update_form_questions`, `update_form_settings` |
 | **Photos** | `list_photos_albums`, `search_photos`, `upload_photos`, `upload_folder_photos`, `photos_smart_search`, `photos_batch_details`, `create_photos_album`, `get_photo_details` |
 | **People** | `list_people_contact_labels`, `get_people_contact_group_members`, `manage_people_contact_labels` |
 | **Qdrant** | `qdrant_search`, `search_tool_history`, `get_tool_analytics`, `fetch`, `get_response_details`, `cleanup_qdrant_data` |

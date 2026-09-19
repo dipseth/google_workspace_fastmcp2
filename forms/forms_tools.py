@@ -16,7 +16,8 @@ TOOL RELATIONSHIPS:
 - get_form: Retrieves form details and structure for inspection
 - set_form_publish_state/publish_form_publicly: Controls access and sharing
 - list_form_responses/get_form_response: Retrieves submitted responses
-- update_form_questions: Modifies existing questions
+- update_form_questions: Modifies, reorders and deletes existing items
+- update_form_settings: Title, description, quiz mode, email collection
 
 AUTHENTICATION:
 All tools use unified authentication via user_google_email parameter.
@@ -42,25 +43,17 @@ Any question can also carry an image (image_url), and so can a choice option
 ({"value": "A", "image_url": "..."}). Image URLs must be publicly reachable -
 Google fetches them once when the item is created and stores its own copy.
 
-HTML FORMATTING SUPPORT:
-Google Forms API has LIMITED HTML support for rich content:
+- GRID_QUESTION: Rows x columns grid (rows, columns, multiple=True for checkboxes)
+Choice options can branch the form (go_to_action / go_to_section_id) and
+multiple choice / checkbox questions can carry an "Other" option ({"is_other": True}).
 
-SUPPORTED HTML ELEMENTS:
-- Form/Question Descriptions: Basic HTML tags like <b>, <i>, <u>, <br>, <p>
-- Links: <a href="...">text</a> for clickable links
-- Lists: <ul>, <ol>, <li> for bullet and numbered lists
-
-RICH CONTENT ALTERNATIVES:
-- Images: Use IMAGE_ITEM, or image_url on a question/option (not HTML <img> tags)
-- Videos: Use VIDEO_ITEM (YouTube videos)
-- Formatted Text: Use TEXT_ITEM for rich text sections
-- HTML limitations: No CSS, JavaScript, or complex HTML structures
-
-FORMATTING EXAMPLES:
-- Description with HTML: "Please fill out <b>all required</b> fields.<br>Visit <a href='https://example.com'>our website</a> for help."
-- Text Item HTML: "<p>Welcome to our survey!</p><ul><li>Be honest</li><li>Take your time</li></ul>"
-
-Note: Full HTML web forms require custom web development - Google Forms API is designed for structured surveys with limited formatting.
+FORMATTING AND THEMING LIMITS (Forms API v1):
+The API has no theme, colour, font, header-image or rich-text fields. Titles and
+descriptions are plain text - HTML and Markdown are shown literally. What the API
+does control: images and videos (width, alignment), sections, item order, quiz
+and email-collection settings. For a styled form, theme a form once in the
+editor and pass it as create_form's template_form_id: the Drive copy keeps the
+theme colour, header image and fonts.
 """
 
 import asyncio
@@ -116,6 +109,14 @@ CHOICE_QUESTION_TYPES = {
 
 IMAGE_ALIGNMENTS = {"LEFT", "CENTER", "RIGHT"}
 
+# Choice option branching (radio and dropdown questions only)
+GO_TO_ACTIONS = {"NEXT_SECTION", "RESTART_FORM", "SUBMIT_FORM"}
+BRANCHING_CHOICE_KINDS = {"RADIO", "DROP_DOWN"}
+
+RATING_ICON_TYPES = {"STAR", "HEART", "THUMB_UP"}
+
+EMAIL_COLLECTION_TYPES = {"DO_NOT_COLLECT", "VERIFIED", "RESPONDER_INPUT"}
+
 # Valid update fields for validation
 VALID_UPDATE_FIELDS = {
     "title",
@@ -127,6 +128,7 @@ VALID_UPDATE_FIELDS = {
     "image_alt_text",
     "image_width",
     "image_alignment",
+    "move_to_index",
     "delete",
 }
 
@@ -311,8 +313,29 @@ def validate_question_structure(question: Dict[str, Any]) -> bool:
         return "title" in question and "rating_scale_level" in question
     elif q_type == "FILE_UPLOAD_QUESTION":
         return "title" in question
+    elif q_type == "GRID_QUESTION":
+        return (
+            "title" in question
+            and bool(question.get("rows"))
+            and bool(question.get("columns"))
+        )
 
     return False
+
+
+def build_media_properties(source: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+    """Build Forms API MediaProperties from `<prefix>_width` / `<prefix>_alignment`."""
+    properties: Dict[str, Any] = {}
+    if f"{prefix}_width" in source:
+        properties["width"] = source[f"{prefix}_width"]
+    if f"{prefix}_alignment" in source:
+        alignment = str(source[f"{prefix}_alignment"]).upper()
+        if alignment not in IMAGE_ALIGNMENTS:
+            raise ValueError(
+                f"{prefix}_alignment must be one of {sorted(IMAGE_ALIGNMENTS)}: {alignment!r}"
+            )
+        properties["alignment"] = alignment
+    return properties
 
 
 def build_image(source: Dict[str, Any]) -> Dict[str, Any]:
@@ -337,41 +360,96 @@ def build_image(source: Dict[str, Any]) -> Dict[str, Any]:
     if source.get("image_alt_text"):
         image["altText"] = source["image_alt_text"]
 
-    properties: Dict[str, Any] = {}
-    if "image_width" in source:
-        properties["width"] = source["image_width"]
-    if "image_alignment" in source:
-        alignment = str(source["image_alignment"]).upper()
-        if alignment not in IMAGE_ALIGNMENTS:
-            raise ValueError(
-                f"image_alignment must be one of {sorted(IMAGE_ALIGNMENTS)}: {alignment!r}"
-            )
-        properties["alignment"] = alignment
+    properties = build_media_properties(source, "image")
     if properties:
         image["properties"] = properties
 
     return image
 
 
-def build_choice_options(options: List[Any]) -> List[Dict[str, Any]]:
+def build_choice_options(
+    options: List[Any], choice_kind: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Build Forms API choice options.
 
     Each option is either a plain string or a dict with `value` and optional
-    image_* keys (see build_image) to show a picture beside the option.
+    image_* keys (see build_image) to show a picture beside the option. A dict
+    may also branch the form - `go_to_action` (NEXT_SECTION / RESTART_FORM /
+    SUBMIT_FORM) or `go_to_section_id` (the itemId of a PAGE_BREAK_ITEM) - or be
+    the free-text "Other" option ({"is_other": True}, no value).
+
+    Args:
+        options: Simplified options
+        choice_kind: The question's API kind (RADIO / CHECKBOX / DROP_DOWN), used
+            to reject fields the kind does not support; None skips that check
     """
     built = []
     for opt in options:
         if isinstance(opt, dict):
-            if "value" not in opt:
+            if opt.get("is_other"):
+                if choice_kind == "DROP_DOWN":
+                    raise ValueError("Dropdown questions cannot have an 'Other' option")
+                option: Dict[str, Any] = {"isOther": True}
+            elif "value" not in opt:
                 raise ValueError(f"Choice option is missing 'value': {opt}")
-            option: Dict[str, Any] = {"value": opt["value"]}
+            else:
+                option = {"value": opt["value"]}
             if "image_url" in opt:
                 option["image"] = build_image(opt)
+            if "go_to_action" in opt and "go_to_section_id" in opt:
+                raise ValueError(
+                    f"Use go_to_action or go_to_section_id, not both: {opt}"
+                )
+            if "go_to_action" in opt or "go_to_section_id" in opt:
+                if (
+                    choice_kind is not None
+                    and choice_kind not in BRANCHING_CHOICE_KINDS
+                ):
+                    raise ValueError(
+                        "Branching only applies to multiple choice and dropdown questions"
+                    )
+            if "go_to_action" in opt:
+                action = str(opt["go_to_action"]).upper()
+                if action not in GO_TO_ACTIONS:
+                    raise ValueError(
+                        f"go_to_action must be one of {sorted(GO_TO_ACTIONS)}: {action!r}"
+                    )
+                option["goToAction"] = action
+            if "go_to_section_id" in opt:
+                option["goToSectionId"] = opt["go_to_section_id"]
             built.append(option)
         else:
             built.append({"value": opt})
     return built
+
+
+def build_grid_item(question: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a questionGroupItem grid: one row question per entry in `rows`, all
+    sharing the `columns` choices. `multiple` makes it a checkbox grid.
+    """
+    rows = question["rows"]
+    columns = question["columns"]
+    if not all(isinstance(value, str) and value for value in [*rows, *columns]):
+        raise ValueError("GRID_QUESTION rows and columns must be non-empty strings")
+
+    required = question.get("required", False)
+    grid: Dict[str, Any] = {
+        "columns": {
+            "type": "CHECKBOX" if question.get("multiple") else "RADIO",
+            "options": [{"value": column} for column in columns],
+        }
+    }
+    if question.get("shuffle_rows"):
+        grid["shuffleQuestions"] = True
+
+    return {
+        "questions": [
+            {"required": required, "rowQuestion": {"title": row}} for row in rows
+        ],
+        "grid": grid,
+    }
 
 
 def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,7 +457,7 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
     Build a Forms API item from a simplified item dict.
 
     Handles questions and the non-question items (IMAGE_ITEM, VIDEO_ITEM,
-    TEXT_ITEM, PAGE_BREAK_ITEM).
+    TEXT_ITEM, PAGE_BREAK_ITEM) and GRID_QUESTION.
 
     Args:
         question: Simplified item dictionary
@@ -404,6 +482,9 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
         return item
     elif q_type == "VIDEO_ITEM":
         item["videoItem"] = {"video": {"youtubeUri": question["youtube_url"]}}
+        properties = build_media_properties(question, "video")
+        if properties:
+            item["videoItem"]["video"]["properties"] = properties
         if "caption" in question:
             item["videoItem"]["caption"] = question["caption"]
         return item
@@ -412,6 +493,11 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
         return item
     elif q_type == "PAGE_BREAK_ITEM":
         item["pageBreakItem"] = {}
+        return item
+    elif q_type == "GRID_QUESTION":
+        item["questionGroupItem"] = build_grid_item(question)
+        if "image_url" in question:
+            item["questionGroupItem"]["image"] = build_image(question)
         return item
 
     item["questionItem"] = {"question": {"required": question.get("required", False)}}
@@ -427,7 +513,7 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
         options = question.get("options") or question["choiceQuestion"]["options"]
         q_obj["choiceQuestion"] = {
             "type": CHOICE_QUESTION_TYPES[q_type],
-            "options": build_choice_options(options),
+            "options": build_choice_options(options, CHOICE_QUESTION_TYPES[q_type]),
             "shuffle": question.get("shuffle", False),
         }
 
@@ -449,7 +535,15 @@ def build_question_item(question: Dict[str, Any]) -> Dict[str, Any]:
         q_obj["timeQuestion"] = {"duration": question.get("duration", False)}
 
     elif q_type == "RATING_QUESTION":
-        q_obj["ratingQuestion"] = {"ratingScaleLevel": question["rating_scale_level"]}
+        icon_type = str(question.get("icon_type", "STAR")).upper()
+        if icon_type not in RATING_ICON_TYPES:
+            raise ValueError(
+                f"icon_type must be one of {sorted(RATING_ICON_TYPES)}: {icon_type!r}"
+            )
+        q_obj["ratingQuestion"] = {
+            "ratingScaleLevel": question["rating_scale_level"],
+            "iconType": icon_type,
+        }
 
     elif q_type == "FILE_UPLOAD_QUESTION":
         q_obj["fileUploadQuestion"] = {
@@ -513,8 +607,9 @@ def build_batch_update_request(
 
     The Forms API addresses items by index, so each update's item_id is resolved
     against the form's current items. All fields for one item go into a single
-    updateItem. Deletes run last, highest index first, so earlier indexes stay
-    valid within the batch.
+    updateItem. Moves run after the updates, in the order given, each against the
+    order the previous moves left behind. Deletes run last, highest index first,
+    so earlier indexes stay valid within the batch.
 
     Args:
         updates: List of update dictionaries (item_id plus fields to change)
@@ -528,7 +623,8 @@ def build_batch_update_request(
     """
     index_by_id = {item.get("itemId"): idx for idx, item in enumerate(items)}
     update_requests: List[Dict[str, Any]] = []
-    delete_indexes: List[int] = []
+    moves: List[Tuple[str, int]] = []
+    delete_ids: List[str] = []
 
     for update in updates:
         item_id = update.get("item_id")
@@ -540,8 +636,20 @@ def build_batch_update_request(
         existing = items[index]
 
         if update.get("delete"):
-            delete_indexes.append(index)
+            delete_ids.append(item_id)
             continue
+
+        if "move_to_index" in update:
+            new_index = update["move_to_index"]
+            if (
+                not isinstance(new_index, int)
+                or isinstance(new_index, bool)
+                or not 0 <= new_index < len(items)
+            ):
+                raise ValueError(
+                    f"move_to_index must be between 0 and {len(items) - 1}: {new_index!r}"
+                )
+            moves.append((item_id, new_index))
 
         item: Dict[str, Any] = {"itemId": item_id}
         mask: List[str] = []
@@ -578,7 +686,9 @@ def build_batch_update_request(
                 "choiceQuestion", {"type": existing_choice.get("type", "RADIO")}
             )
             if "options" in update:
-                choice["options"] = build_choice_options(update["options"])
+                choice["options"] = build_choice_options(
+                    update["options"], choice["type"]
+                )
                 mask.append("questionItem.question.choiceQuestion.options")
             if "shuffle" in update:
                 choice["shuffle"] = update["shuffle"]
@@ -607,12 +717,73 @@ def build_batch_update_request(
                 }
             )
 
+    order = [item.get("itemId") for item in items]
+    move_requests: List[Dict[str, Any]] = []
+    for item_id, new_index in moves:
+        current_index = order.index(item_id)
+        if current_index == new_index:
+            continue
+        order.insert(new_index, order.pop(current_index))
+        move_requests.append(
+            {
+                "moveItem": {
+                    "originalLocation": {"index": current_index},
+                    "newLocation": {"index": new_index},
+                }
+            }
+        )
+
     delete_requests = [
         {"deleteItem": {"location": {"index": index}}}
-        for index in sorted(set(delete_indexes), reverse=True)
+        for index in sorted({order.index(i) for i in delete_ids}, reverse=True)
     ]
 
-    return {"requests": update_requests + delete_requests}
+    return {"requests": update_requests + move_requests + delete_requests}
+
+
+def build_settings_requests(
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    is_quiz: Optional[bool] = None,
+    email_collection_type: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Build updateFormInfo / updateSettings requests for the fields that are set.
+
+    Returns:
+        batchUpdate requests (empty when nothing was given)
+    """
+    requests: List[Dict[str, Any]] = []
+
+    info: Dict[str, Any] = {}
+    if title is not None:
+        info["title"] = title
+    if description is not None:
+        info["description"] = description
+    if info:
+        requests.append(
+            {"updateFormInfo": {"info": info, "updateMask": ",".join(info)}}
+        )
+
+    settings: Dict[str, Any] = {}
+    mask: List[str] = []
+    if is_quiz is not None:
+        settings["quizSettings"] = {"isQuiz": is_quiz}
+        mask.append("quizSettings.isQuiz")
+    if email_collection_type is not None:
+        collection = str(email_collection_type).upper()
+        if collection not in EMAIL_COLLECTION_TYPES:
+            raise ValueError(
+                f"email_collection_type must be one of {sorted(EMAIL_COLLECTION_TYPES)}: {collection!r}"
+            )
+        settings["emailCollectionType"] = collection
+        mask.append("emailCollectionType")
+    if settings:
+        requests.append(
+            {"updateSettings": {"settings": settings, "updateMask": ",".join(mask)}}
+        )
+
+    return requests
 
 
 def extract_item_type(item: Dict[str, Any]) -> str:
@@ -723,7 +894,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="create_form",
-        description="Create a new Google Form with customizable title, description, and document title. Returns form ID and URLs for editing and responses.",
+        description="Create a new Google Form with customizable title, description, and document title. Returns form ID and URLs for editing and responses. The Forms API cannot set theme colour, fonts or a header image: to get a styled form, pass template_form_id (a form already themed in the editor) and the copy keeps its look.",
         tags={"forms", "create", "google"},
         annotations={
             "title": "Create Google Form",
@@ -737,6 +908,12 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         title: str,
         description: Optional[str] = None,
         document_title: Optional[str] = None,
+        template_form_id: Annotated[
+            Optional[str],
+            Field(
+                description="ID of an existing form to copy instead of starting blank. The copy keeps the template's theme colour, header image, fonts AND its items - the only way to get a themed form, since the Forms API has no theme fields. Use update_form_questions to delete template items you don't want."
+            ),
+        ] = None,
         user_google_email: UserGoogleEmailForms = None,
     ) -> FormCreationResult:
         """
@@ -746,6 +923,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             title: Form title displayed at the top
             description: Optional description explaining the form's purpose
             document_title: Title shown in browser tab (defaults to main title)
+            template_form_id: Existing form to copy (keeps its theme and items)
             user_google_email: Google account for authentication
 
         Returns:
@@ -768,23 +946,36 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             if document_title:
                 form_data["info"]["documentTitle"] = document_title
 
-            # Create the form via the API
-            created_form = await asyncio.to_thread(
-                forms_service.forms().create(body=form_data).execute
-            )
+            if template_form_id:
+                # A Drive copy is the only way to carry a theme over; the copy's
+                # file name is its documentTitle, the form title is set below.
+                drive_service = await _get_drive_service_with_fallback(
+                    user_google_email
+                )
+                copied = await asyncio.to_thread(
+                    drive_service.files()
+                    .copy(
+                        fileId=template_form_id,
+                        body={"name": document_title or title},
+                        fields="id",
+                        supportsAllDrives=True,
+                    )
+                    .execute
+                )
+                created_form = {"formId": copied["id"]}
+                update_requests = build_settings_requests(
+                    title=title, description=description
+                )
+            else:
+                # Create the form via the API
+                created_form = await asyncio.to_thread(
+                    forms_service.forms().create(body=form_data).execute
+                )
+                # description can only be set after creation
+                update_requests = build_settings_requests(description=description)
 
-            # If description provided, update via batchUpdate (description can be updated later)
             form_id = created_form.get("formId")
-            if description:
-                update_requests = [
-                    {
-                        "updateFormInfo": {
-                            "info": {"description": description},
-                            "updateMask": "description",
-                        }
-                    }
-                ]
-
+            if update_requests:
                 batch_update_body = {"requests": update_requests}
                 await asyncio.to_thread(
                     forms_service.forms()
@@ -839,7 +1030,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="add_questions_to_form",
-        description="Add questions and content items to an existing Google Form. Supports all question types (text, multiple choice, checkbox, dropdown, scale, date, time, rating, file upload) plus images, YouTube videos, text blocks and section breaks. Questions and choice options can carry an image. Items are appended to the end of the form unless insert_index is given.",
+        description="Add questions and content items to an existing Google Form. Supports all question types (text, multiple choice, checkbox, dropdown, scale, date, time, rating, grid, file upload) plus images, YouTube videos, text blocks and section breaks. Questions and choice options can carry an image, and multiple choice / dropdown options can branch to a section. Text is plain: the Forms API renders no HTML, Markdown, colours or fonts. Items are appended to the end of the form unless insert_index is given.",
         tags={"forms", "questions", "images", "update", "google"},
         annotations={
             "title": "Add Questions to Form",
@@ -859,7 +1050,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         questions: Annotated[
             List[Dict[str, Any]],
             Field(
-                description="List of item dictionaries using SIMPLIFIED format, added in order. Questions: {'type': 'TEXT_QUESTION', 'title': 'Name', 'required': True} or {'type': 'MULTIPLE_CHOICE_QUESTION', 'title': 'Pick one', 'options': ['A', 'B', 'C'], 'required': True}. Any item takes an optional 'description'. Any question takes an optional 'image_url' (shown with the question), and a choice option may be {'value': 'A', 'image_url': 'https://...'} instead of a string. Content items: {'type': 'IMAGE_ITEM', 'image_url': 'https://...', 'title': 'Poster A'}, {'type': 'VIDEO_ITEM', 'youtube_url': 'https://www.youtube.com/watch?v=...'}, {'type': 'TEXT_ITEM', 'title': 'Heading', 'description': 'Body text'}, {'type': 'PAGE_BREAK_ITEM', 'title': 'Section 2'}. Images take optional 'image_alt_text', 'image_width' (pixels, max 740) and 'image_alignment' (LEFT/CENTER/RIGHT). image_url must be publicly reachable: Google fetches it once when the item is created and keeps its own copy."
+                description="List of item dictionaries using SIMPLIFIED format, added in order. Questions: {'type': 'TEXT_QUESTION', 'title': 'Name', 'required': True} or {'type': 'MULTIPLE_CHOICE_QUESTION', 'title': 'Pick one', 'options': ['A', 'B', 'C'], 'required': True}. Any item takes an optional 'description'. Any question takes an optional 'image_url' (shown with the question), and a choice option may be {'value': 'A', 'image_url': 'https://...'} instead of a string. Content items: {'type': 'IMAGE_ITEM', 'image_url': 'https://...', 'title': 'Poster A'}, {'type': 'VIDEO_ITEM', 'youtube_url': 'https://www.youtube.com/watch?v=...'}, {'type': 'TEXT_ITEM', 'title': 'Heading', 'description': 'Body text'}, {'type': 'PAGE_BREAK_ITEM', 'title': 'Section 2'}. Grid: {'type': 'GRID_QUESTION', 'title': 'Rate each', 'rows': ['Speed', 'Price'], 'columns': ['Bad', 'OK', 'Good'], 'multiple': False, 'shuffle_rows': False, 'required': True}. Rating: {'type': 'RATING_QUESTION', 'title': 'Stars', 'rating_scale_level': 5, 'icon_type': 'STAR'} (STAR/HEART/THUMB_UP). Branching (MULTIPLE_CHOICE_QUESTION and DROPDOWN_QUESTION only): an option may be {'value': 'No', 'go_to_action': 'SUBMIT_FORM'} (NEXT_SECTION/RESTART_FORM/SUBMIT_FORM) or {'value': 'Yes', 'go_to_section_id': '<itemId of a PAGE_BREAK_ITEM from get_form>'} - add the sections first, then set the options with update_form_questions. {'is_other': True} adds a free-text 'Other' option (not for dropdowns). Videos take optional 'video_width' and 'video_alignment'. Images take optional 'image_alt_text', 'image_width' (pixels, max 740) and 'image_alignment' (LEFT/CENTER/RIGHT). image_url must be publicly reachable: Google fetches it once when the item is created and keeps its own copy."
             ),
         ],
         insert_index: Annotated[
@@ -1099,7 +1290,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="set_form_publish_state",
-        description="Control whether a Google Form is accepting responses. Configures basic form settings and provides guidance for full response control via the Forms UI.",
+        description="Open or close a Google Form to responses (forms.setPublishSettings). The form stays published either way; closing it shows responders a 'no longer accepting responses' page. Forms created before Google's publish-settings rollout reject this call and must be toggled in the editor.",
         tags={"forms", "settings", "publish", "google"},
         annotations={
             "title": "Set Form Publish State",
@@ -1120,12 +1311,12 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         accepting_responses: Annotated[
             bool,
             Field(
-                description="Desired response acceptance state. True = Form should accept responses (default), False = Form should not accept responses. Note: Final control requires manual UI configuration."
+                description="True = accept responses (default), False = close the form to new responses."
             ),
         ] = True,
     ) -> FormPublishResult:
         """
-        Control whether a Google Form is accepting responses. Limited API control - manual UI steps may be needed.
+        Open or close a Google Form to responses via forms.setPublishSettings.
 
         Args:
             form_id: Form ID to configure
@@ -1133,35 +1324,24 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             accepting_responses: Whether form should accept responses (True by default)
 
         Returns:
-            FormPublishResult: Configuration status, URLs, and manual setup instructions
+            FormPublishResult: Resulting publish state and URLs
         """
 
         try:
             forms_service = await _get_forms_service_with_fallback(user_google_email)
 
-            # Update form settings
-            update_body = {
-                "requests": [
-                    {
-                        "updateSettings": {
-                            "settings": {
-                                "quizSettings": {
-                                    "isQuiz": False  # Ensure it's not a quiz
-                                }
-                            },
-                            "updateMask": "quizSettings.isQuiz",
-                        }
+            publish_body = {
+                "publishSettings": {
+                    "publishState": {
+                        "isPublished": True,
+                        "isAcceptingResponses": accepting_responses,
                     }
-                ]
+                },
+                "updateMask": "publishState",
             }
-
-            # Note: The Forms API doesn't directly support setting accepting_responses
-            # This is typically controlled through the form's settings in the UI
-            # We'll update what we can and provide instructions
-
             await asyncio.to_thread(
                 forms_service.forms()
-                .batchUpdate(formId=form_id, body=update_body)
+                .setPublishSettings(formId=form_id, body=publish_body)
                 .execute
             )
 
@@ -1178,7 +1358,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             title = form.get("info", {}).get("title", "Untitled")
             edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
             response_url = form.get("responderUri", "Not yet available")
-            success_msg = "✅ Form settings updated"
+            success_msg = f"✅ Form is now {state}"
 
             return FormPublishResult(
                 success=True,
@@ -1188,16 +1368,17 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 editUrl=edit_url,
                 responseUrl=response_url,
                 publishState=state,
-                sharingResults=[
-                    f"Desired state: {state}",
-                    "Note: To fully control response acceptance, visit the form editor and use Settings > Responses",
-                ],
+                sharingResults=[f"Publish state: {state}"],
                 publicAccess=accepting_responses,
                 sharedWith=[],
             )
 
         except HttpError as e:
-            error_msg = f"❌ Failed to update form settings: {e}"
+            error_msg = (
+                f"❌ Failed to set publish state: {e}. Forms created before Google's "
+                "publish-settings rollout reject this call - toggle 'Accepting "
+                "responses' in the editor's Responses tab instead."
+            )
             logger.error(f"[set_form_publish_state] HTTP error: {e}")
             return FormPublishResult(
                 success=False,
@@ -1231,7 +1412,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="publish_form_publicly",
-        description="Make a Google Form publicly accessible without sign-in requirements and share with specific users. Uses both Forms and Drive APIs for comprehensive permission management.",
+        description="Let anyone with the link respond to a Google Form without signing in (responder-only access to the published form; the editor stays private), publish it, and optionally share edit access with specific users.",
         tags={"forms", "share", "publish", "google", "permissions"},
         annotations={
             "title": "Publish Form Publicly",
@@ -1291,11 +1472,35 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             # Set public access if requested
             if anyone_can_respond:
                 try:
-                    permission = {"type": "anyone", "role": "writer"}
+                    # Responder access is a reader permission on the *published*
+                    # view; any other anyone-permission would expose the editor.
+                    permission = {
+                        "type": "anyone",
+                        "role": "reader",
+                        "view": "published",
+                    }
 
                     await asyncio.to_thread(
                         drive_service.permissions()
                         .create(fileId=form_id, body=permission, fields="id")
+                        .execute
+                    )
+
+                    # Copies and newer forms start unpublished
+                    await asyncio.to_thread(
+                        forms_service.forms()
+                        .setPublishSettings(
+                            formId=form_id,
+                            body={
+                                "publishSettings": {
+                                    "publishState": {
+                                        "isPublished": True,
+                                        "isAcceptingResponses": True,
+                                    }
+                                },
+                                "updateMask": "publishState",
+                            },
+                        )
                         .execute
                     )
 
@@ -1677,8 +1882,131 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             )
 
     @mcp.tool(
+        name="update_form_settings",
+        description="Change a Google Form's title, description, quiz mode and email collection. Only the fields you pass are changed. The Forms API has no theme, colour, font or header-image settings - those are editor-only (see create_form's template_form_id).",
+        tags={"forms", "settings", "update", "google"},
+        annotations={
+            "title": "Update Form Settings",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def update_form_settings(
+        form_id: Annotated[
+            str,
+            Field(description="The unique ID of the form to configure."),
+        ],
+        title: Annotated[
+            Optional[str], Field(description="New form title (plain text).")
+        ] = None,
+        description: Annotated[
+            Optional[str],
+            Field(description="New form description (plain text; '' clears it)."),
+        ] = None,
+        is_quiz: Annotated[
+            Optional[bool],
+            Field(
+                description="True makes the form a quiz (enables points/correct_answers on questions). Turning it off drops existing grading."
+            ),
+        ] = None,
+        email_collection_type: Annotated[
+            Optional[str],
+            Field(
+                description="DO_NOT_COLLECT, VERIFIED (responder's signed-in Google account) or RESPONDER_INPUT (responder types an address)."
+            ),
+        ] = None,
+        user_google_email: UserGoogleEmailForms = None,
+    ) -> FormUpdateResult:
+        """
+        Change a form's title, description, quiz mode and email collection.
+
+        Args:
+            form_id: Form ID to configure
+            title: New form title
+            description: New form description
+            is_quiz: Whether the form is a quiz
+            email_collection_type: DO_NOT_COLLECT / VERIFIED / RESPONDER_INPUT
+            user_google_email: Google account for authentication
+
+        Returns:
+            FormUpdateResult: Success status and form URLs
+        """
+        edit_url = f"https://docs.google.com/forms/d/{form_id}/edit"
+
+        try:
+            requests = build_settings_requests(
+                title=title,
+                description=description,
+                is_quiz=is_quiz,
+                email_collection_type=email_collection_type,
+            )
+            if not requests:
+                error_msg = "❌ No settings given to change"
+                return FormUpdateResult(
+                    success=False,
+                    message=error_msg,
+                    formId=form_id,
+                    title=None,
+                    editUrl=edit_url,
+                    error=error_msg,
+                )
+
+            forms_service = await _get_forms_service_with_fallback(user_google_email)
+            result = await asyncio.to_thread(
+                forms_service.forms()
+                .batchUpdate(
+                    formId=form_id,
+                    body={"requests": requests, "includeFormInResponse": True},
+                )
+                .execute
+            )
+
+            changed = [
+                name
+                for name, value in {
+                    "title": title,
+                    "description": description,
+                    "is_quiz": is_quiz,
+                    "email_collection_type": email_collection_type,
+                }.items()
+                if value is not None
+            ]
+            return FormUpdateResult(
+                success=True,
+                message=f"✅ Updated form settings: {', '.join(changed)}",
+                formId=form_id,
+                title=result.get("form", {}).get("info", {}).get("title"),
+                editUrl=edit_url,
+            )
+
+        except HttpError as e:
+            error_msg = f"❌ Failed to update form settings: {e}"
+            logger.error(f"[update_form_settings] HTTP error: {e}")
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=edit_url,
+                error=str(e),
+            )
+        except Exception as e:
+            error_msg = f"❌ Unexpected error: {str(e)}"
+            logger.error(f"[update_form_settings] {error_msg}")
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=edit_url,
+                error=str(e),
+            )
+
+    @mcp.tool(
         name="update_form_questions",
-        description="Modify or delete existing items in a Google Form: titles, descriptions, required status, choice options (with optional per-option images), question/image-item images, and item deletion. Uses one batch operation for all updates.",
+        description="Modify or delete existing items in a Google Form: titles, descriptions, required status, choice options (with optional per-option images), question/image-item images, option branching, item reordering, and item deletion. Uses one batch operation for all updates.",
         tags={"forms", "update", "questions", "google"},
         annotations={
             "title": "Update Form Questions",
@@ -1698,7 +2026,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         questions_to_update: Annotated[
             List[Dict[str, Any]],
             Field(
-                description="List of update dictionaries. Each must include item_id (from get_form) and one or more of: 'title', 'description', 'required' (questions), 'options' (choice questions; REPLACES the option list - each option is a string or {'value': 'A', 'image_url': 'https://...'}), 'shuffle' (choice questions), 'image_url' (sets the image on a question or replaces an image item's image; takes optional 'image_alt_text', 'image_width', 'image_alignment'), or 'delete': True to remove the item. Image URLs must be publicly reachable. Examples: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}], [{'item_id': '12345', 'options': [{'value': 'A', 'image_url': 'https://example.com/a.png'}, 'None of them']}], [{'item_id': '67890', 'delete': True}]"
+                description="List of update dictionaries. Each must include item_id (from get_form) and one or more of: 'title', 'description', 'required' (questions), 'options' (choice questions; REPLACES the option list - each option is a string or {'value': 'A', 'image_url': 'https://...'}), 'shuffle' (choice questions), 'image_url' (sets the image on a question or replaces an image item's image; takes optional 'image_alt_text', 'image_width', 'image_alignment'), 'move_to_index' (new 0-based position among all items; moves apply in the order given), or 'delete': True to remove the item. Options on multiple choice / dropdown questions may branch: {'value': 'Yes', 'go_to_section_id': '<PAGE_BREAK_ITEM itemId>'} or {'value': 'No', 'go_to_action': 'SUBMIT_FORM'}. Image URLs must be publicly reachable. Examples: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}], [{'item_id': '12345', 'options': [{'value': 'A', 'image_url': 'https://example.com/a.png'}, 'None of them']}], [{'item_id': '67890', 'delete': True}]"
             ),
         ],
         user_google_email: UserGoogleEmailForms = None,
@@ -1707,7 +2035,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         Modify existing questions in a Google Form using efficient batch operations.
 
         Use get_form first to get item_ids. Supported updates: title, description,
-        required, options (with per-option images), shuffle, image_url, delete.
+        required, options (with per-option images and branching), shuffle,
+        image_url, move_to_index, delete.
 
         Args:
             form_id: Form ID containing questions to update
@@ -1774,6 +2103,17 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                 questionsUpdated=len(valid_updates),
             )
 
+        except ValueError as e:
+            error_msg = f"❌ Invalid update: {e}"
+            logger.warning(f"[update_form_questions] {error_msg}")
+            return FormUpdateResult(
+                success=False,
+                message=error_msg,
+                formId=form_id,
+                title=None,
+                editUrl=f"https://docs.google.com/forms/d/{form_id}/edit",
+                error=str(e),
+            )
         except HttpError as e:
             error_msg = f"❌ Failed to update questions: {e}"
             logger.error(f"[update_form_questions] HTTP error: {e}")
@@ -1798,7 +2138,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
             )
 
     # Log successful setup
-    tool_count = 8  # Total number of Forms tools
+    tool_count = 9  # Total number of Forms tools
     logger.info(
         f"Successfully registered {tool_count} Google Forms tools with enhanced documentation"
     )
