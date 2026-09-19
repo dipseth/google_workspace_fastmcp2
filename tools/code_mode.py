@@ -6,6 +6,7 @@ so that server.py stays focused on wiring, not implementation details.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Annotated, Any
@@ -90,7 +91,6 @@ class EnhancedSandboxProvider(MontySandboxProvider):
         if EnhancedSandboxProvider._HELPERS:
             return EnhancedSandboxProvider._HELPERS
 
-        import asyncio
         import datetime
         import hashlib
         import json
@@ -233,22 +233,48 @@ class EnhancedSandboxProvider(MontySandboxProvider):
 
             extra["gather_tools"] = gather_tools
 
-        # Key insight from pydantic-monty's run_monty_async:
-        #   - If ext_function(...) returns a coroutine → async future path (needs `await`)
-        #   - If ext_function(...) returns a plain value → direct return_value path (no await needed)
+        # Monty calls an external function and looks at what comes back:
+        #   - a coroutine → the sandbox code has to `await` it
+        #   - a plain value → it is the result, no `await` needed
         #
-        # _ensure_async wraps sync lambdas in `async def wrapper`, making them return
-        # coroutines even when called without `await`, which causes helpers to show as
-        # `<coroutine external_future(N)>` in output instead of their actual values.
+        # super().run() wraps every function in `async def`, so sync helpers
+        # would return coroutines and show up as `<coroutine external_future(N)>`
+        # unless the LLM awaited `now()`. So run() is bypassed: sync helpers are
+        # registered as-is, and only the truly async functions (call_tool,
+        # gather_tools) are wrapped.
         #
-        # Fix: bypass super().run() and call pydantic_monty directly.
-        # Sync helpers are registered as-is (return plain values → direct path).
-        # Only truly async functions (call_tool, gather_tools) get _ensure_async.
+        # The sandbox itself still runs through the parent's _run_monty, so
+        # FastMCP — which pins the pydantic-monty it supports — owns that API.
+        # (Calling pydantic_monty directly broke here at 0.0.21, which replaced
+        # Monty()/run_monty_async with AsyncMonty sessions.)
         import importlib
 
+        import anyio
         from fastmcp.experimental.transforms.code_mode import _ensure_async
 
         pydantic_monty = importlib.import_module("pydantic_monty")
+
+        # Monty leaves Python callbacks running when a sandbox exits
+        # (pydantic/monty#821), and here a callback is a real tool call. As in
+        # super().run(): keep their tasks, cancel and join them on the way out.
+        pending: set[asyncio.Task] = set()
+        finished = False
+
+        def track(fn):
+            async_fn = _ensure_async(fn)
+
+            async def wrapped(*args, **kwargs):
+                # A callback queued by the native bridge may start after exit.
+                if finished:
+                    raise asyncio.CancelledError
+                task = asyncio.current_task()
+                pending.add(task)
+                try:
+                    return await async_fn(*args, **kwargs)
+                finally:
+                    pending.discard(task)
+
+            return wrapped
 
         helpers = self._build_helpers()
         async_ef = {**ef, **extra}  # call_tool + gather_tools (truly async)
@@ -256,30 +282,33 @@ class EnhancedSandboxProvider(MontySandboxProvider):
         # Build final external_functions dict: sync helpers as-is, async ones wrapped.
         all_external = {
             **helpers,  # sync lambdas — return plain values, use direct path
-            **{
-                k: _ensure_async(v) for k, v in async_ef.items()
-            },  # async — use future path
+            **{k: track(v) for k, v in async_ef.items()},  # async — use future path
         }
 
-        try:
-            # pydantic-monty >=0.0.8 removed external_functions from Monty()
-            # constructor; external_functions are now only passed to run_monty_async.
-            monty = pydantic_monty.Monty(
-                code,
-                inputs=list((inputs or {}).keys()),
+        future = asyncio.ensure_future(
+            self._run_monty(
+                pydantic_monty,
+                code=code,
+                inputs=inputs or None,
+                external_functions=all_external,
             )
-        except Exception as exc:
-            return _format_sandbox_error(exc)
-
-        run_kwargs: dict = {"external_functions": all_external}
-        if inputs:
-            run_kwargs["inputs"] = inputs
-        if self.limits is not None:
-            run_kwargs["limits"] = self.limits
+        )
         try:
-            return await pydantic_monty.run_monty_async(monty, **run_kwargs)
+            return await future
+        except asyncio.CancelledError:
+            # Awaiting alone does not stop the sandbox worker when the request
+            # is cancelled (client disconnect); cancel it explicitly.
+            future.cancel()
+            raise
         except Exception as exc:
             return _format_sandbox_error(exc)
+        finally:
+            finished = True
+            tasks = tuple(pending)
+            for task in tasks:
+                task.cancel()
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # Description shown to LLMs for the execute tool — documents every available helper.
