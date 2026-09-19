@@ -381,6 +381,21 @@ def test_sweep_removes_only_expired_files_it_owns(tmp_path):
     assert os.listdir(root) == ["someone-elses-file.txt"]
 
 
+def test_staged_files_are_owner_only_even_in_a_loose_directory(tmp_path):
+    root = tmp_path / "shared-volume"
+    root.mkdir(mode=0o755)
+    store = upload_staging.DirectoryStore(str(root))
+    incoming = store.incoming_path("b" * 32)
+    with open(incoming, "wb") as f:
+        f.write(b"x")
+    os.chmod(incoming, 0o644)
+    store.commit("a" * 64, incoming, {"filename": "x"})
+    modes = {
+        name: oct(os.stat(root / name).st_mode & 0o777) for name in os.listdir(root)
+    }
+    assert modes == {"a" * 64 + ".bin": "0o600", "a" * 64 + ".json": "0o600"}
+
+
 def test_unsupported_staging_uri_is_an_error(monkeypatch):
     monkeypatch.setattr(
         upload_tools.settings, "drive_upload_staging_uri", "s3://bucket/x"

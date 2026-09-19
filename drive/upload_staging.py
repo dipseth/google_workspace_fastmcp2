@@ -32,7 +32,7 @@ Security:
     - One-time use via ``ConsumedTokenStore``
     - Object names are hex digests the client cannot choose; validated before
       they touch a path
-    - Staging dir with ``0o700`` permissions
+    - Staging dir ``0o700``, staged files ``0o600``
     - Eager + lazy cleanup; staged bytes older than the TTL are never served
 """
 
@@ -229,9 +229,13 @@ class DirectoryStore:
         return self._path(f".incoming-{upload_id}")
 
     def commit(self, key: str, incoming: str, meta: dict) -> None:
+        # Owner-only, whatever the umask: on a shared volume the directory may
+        # predate this process and not be 0o700.
+        os.chmod(incoming, 0o600)
         os.replace(incoming, self._path(f"{key}.bin"))
         tmp = self._path(f".meta-{uuid.uuid4().hex}")
-        with open(tmp, "w") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(meta, f)
         os.replace(tmp, self._path(f"{key}.json"))
 
