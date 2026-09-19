@@ -3,10 +3,12 @@
 import pytest
 
 from forms.forms_tools import (
+    build_batch_update_request,
     build_create_item_requests,
     build_image,
     build_question_item,
     validate_question_structure,
+    validate_update_request,
 )
 
 IMG = "https://example.com/poster.png"
@@ -173,3 +175,118 @@ class TestCreateItemRequests:
         )
         assert [r["createItem"]["location"]["index"] for r in requests] == [0, 1]
         assert len(skipped) == 1 and skipped[0].startswith("#1:")
+
+
+FORM_ITEMS = [
+    {"itemId": "img1", "title": "Poster A", "imageItem": {"image": {}}},
+    {
+        "itemId": "q1",
+        "title": "Pick one",
+        "questionItem": {
+            "question": {
+                "required": True,
+                "choiceQuestion": {"type": "CHECKBOX", "options": [{"value": "A"}]},
+            }
+        },
+    },
+    {
+        "itemId": "q2",
+        "title": "Name",
+        "questionItem": {"question": {"textQuestion": {}}},
+    },
+    {"itemId": "txt1", "title": "Heading", "textItem": {}},
+]
+
+
+class TestBatchUpdate:
+    def test_fields_merge_into_one_update_with_location(self):
+        body = build_batch_update_request(
+            [{"item_id": "q2", "title": "Your name", "required": True}], FORM_ITEMS
+        )
+        assert body["requests"] == [
+            {
+                "updateItem": {
+                    "item": {
+                        "itemId": "q2",
+                        "title": "Your name",
+                        "questionItem": {"question": {"required": True}},
+                    },
+                    "location": {"index": 2},
+                    "updateMask": "title,questionItem.question.required",
+                }
+            }
+        ]
+
+    def test_options_with_images_keep_the_choice_type(self):
+        body = build_batch_update_request(
+            [
+                {
+                    "item_id": "q1",
+                    "options": [{"value": "A", "image_url": IMG}, "None of them"],
+                }
+            ],
+            FORM_ITEMS,
+        )
+        update = body["requests"][0]["updateItem"]
+        choice = update["item"]["questionItem"]["question"]["choiceQuestion"]
+        assert choice["type"] == "CHECKBOX"
+        assert choice["options"] == [
+            {"value": "A", "image": {"sourceUri": IMG}},
+            {"value": "None of them"},
+        ]
+        assert update["updateMask"] == "questionItem.question.choiceQuestion.options"
+        assert update["location"] == {"index": 1}
+
+    def test_image_url_targets_question_or_image_item(self):
+        body = build_batch_update_request(
+            [
+                {"item_id": "q2", "image_url": IMG},
+                {"item_id": "img1", "image_url": IMG, "image_alignment": "center"},
+            ],
+            FORM_ITEMS,
+        )
+        first, second = [r["updateItem"] for r in body["requests"]]
+        assert first["item"]["questionItem"]["image"] == {"sourceUri": IMG}
+        assert first["updateMask"] == "questionItem.image"
+        assert second["item"]["imageItem"]["image"]["properties"] == {
+            "alignment": "CENTER"
+        }
+        assert second["updateMask"] == "imageItem.image"
+
+    def test_deletes_run_last_from_the_highest_index(self):
+        body = build_batch_update_request(
+            [
+                {"item_id": "img1", "delete": True},
+                {"item_id": "q2", "title": "Your name"},
+                {"item_id": "txt1", "delete": True},
+            ],
+            FORM_ITEMS,
+        )
+        assert [list(r)[0] for r in body["requests"]] == [
+            "updateItem",
+            "deleteItem",
+            "deleteItem",
+        ]
+        assert [r["deleteItem"]["location"]["index"] for r in body["requests"][1:]] == [
+            3,
+            0,
+        ]
+
+    @pytest.mark.parametrize(
+        "update",
+        [
+            {"item_id": "missing", "title": "x"},
+            {"item_id": "q2", "options": ["A"]},
+            {"item_id": "txt1", "required": True},
+            {"item_id": "txt1", "image_url": IMG},
+        ],
+    )
+    def test_mismatched_updates_raise(self, update):
+        with pytest.raises(ValueError):
+            build_batch_update_request([update], FORM_ITEMS)
+
+    def test_validator_accepts_new_fields_and_rejects_unknown(self):
+        assert validate_update_request({"item_id": "q1", "required": True})[0]
+        assert validate_update_request({"item_id": "q1", "delete": True})[0]
+        assert not validate_update_request({"item_id": "q1", "bogus": 1})[0]
+        assert not validate_update_request({"item_id": "q1"})[0]

@@ -120,12 +120,14 @@ IMAGE_ALIGNMENTS = {"LEFT", "CENTER", "RIGHT"}
 VALID_UPDATE_FIELDS = {
     "title",
     "description",
-    "question",
-    "questionGroupItem",
-    "imageItem",
-    "videoItem",
-    "pageBreakItem",
-    "textItem",
+    "required",
+    "options",
+    "shuffle",
+    "image_url",
+    "image_alt_text",
+    "image_width",
+    "image_alignment",
+    "delete",
 }
 
 # Item type mappings for detection
@@ -487,51 +489,114 @@ def build_create_item_requests(
     return requests, skipped
 
 
-def build_batch_update_request(updates: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build_batch_update_request(
+    updates: List[Dict[str, Any]], items: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
     Build a batch update request from a list of updates.
 
+    The Forms API addresses items by index, so each update's item_id is resolved
+    against the form's current items. All fields for one item go into a single
+    updateItem. Deletes run last, highest index first, so earlier indexes stay
+    valid within the batch.
+
     Args:
-        updates: List of update dictionaries
+        updates: List of update dictionaries (item_id plus fields to change)
+        items: The form's current items, in order (from forms.get)
 
     Returns:
         Batch update request body
+
+    Raises:
+        ValueError: If an item_id is unknown or a field does not fit the item type
     """
-    requests = []
+    index_by_id = {item.get("itemId"): idx for idx, item in enumerate(items)}
+    update_requests: List[Dict[str, Any]] = []
+    delete_indexes: List[int] = []
 
     for update in updates:
         item_id = update.get("item_id")
         if not item_id:
             continue
+        if item_id not in index_by_id:
+            raise ValueError(f"item_id not found in form: {item_id!r}")
+        index = index_by_id[item_id]
+        existing = items[index]
 
-        request = {}
+        if update.get("delete"):
+            delete_indexes.append(index)
+            continue
 
-        # Handle different update types
+        item: Dict[str, Any] = {"itemId": item_id}
+        mask: List[str] = []
+
         if "title" in update:
-            request["updateItem"] = {
-                "item": {"itemId": item_id, "title": update["title"]},
-                "updateMask": "title",
-            }
+            item["title"] = update["title"]
+            mask.append("title")
 
         if "description" in update:
-            request["updateItem"] = {
-                "item": {"itemId": item_id, "description": update["description"]},
-                "updateMask": "description",
-            }
+            item["description"] = update["description"]
+            mask.append("description")
+
+        question_fields = {"required", "options", "shuffle"} & set(update)
+        if question_fields and "questionItem" not in existing:
+            raise ValueError(
+                f"{sorted(question_fields)} only apply to questions: {item_id!r}"
+            )
 
         if "required" in update:
-            request["updateItem"] = {
-                "item": {
-                    "itemId": item_id,
-                    "questionItem": {"question": {"required": update["required"]}},
-                },
-                "updateMask": "questionItem.question.required",
-            }
+            question = item.setdefault("questionItem", {}).setdefault("question", {})
+            question["required"] = update["required"]
+            mask.append("questionItem.question.required")
 
-        if request:
-            requests.append(request)
+        if "options" in update or "shuffle" in update:
+            existing_choice = (
+                existing["questionItem"].get("question", {}).get("choiceQuestion")
+            )
+            if not existing_choice:
+                raise ValueError(
+                    f"options/shuffle only apply to choice questions: {item_id!r}"
+                )
+            question = item.setdefault("questionItem", {}).setdefault("question", {})
+            choice = question.setdefault(
+                "choiceQuestion", {"type": existing_choice.get("type", "RADIO")}
+            )
+            if "options" in update:
+                choice["options"] = build_choice_options(update["options"])
+                mask.append("questionItem.question.choiceQuestion.options")
+            if "shuffle" in update:
+                choice["shuffle"] = update["shuffle"]
+                mask.append("questionItem.question.choiceQuestion.shuffle")
 
-    return {"requests": requests}
+        if "image_url" in update:
+            if "questionItem" in existing:
+                item.setdefault("questionItem", {})["image"] = build_image(update)
+                mask.append("questionItem.image")
+            elif "imageItem" in existing:
+                item["imageItem"] = {"image": build_image(update)}
+                mask.append("imageItem.image")
+            else:
+                raise ValueError(
+                    f"image_url only applies to questions and image items: {item_id!r}"
+                )
+
+        if mask:
+            update_requests.append(
+                {
+                    "updateItem": {
+                        "item": item,
+                        "location": {"index": index},
+                        "updateMask": ",".join(mask),
+                    }
+                }
+            )
+
+    delete_requests = [
+        {"deleteItem": {"location": {"index": index}}}
+        for index in sorted(set(delete_indexes), reverse=True)
+    ]
+
+    return {"requests": update_requests + delete_requests}
 
 
 def extract_item_type(item: Dict[str, Any]) -> str:
@@ -1597,7 +1662,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="update_form_questions",
-        description="Modify existing questions in a Google Form including titles, descriptions, required status, and other settings. Uses efficient batch operations for multiple updates.",
+        description="Modify or delete existing items in a Google Form: titles, descriptions, required status, choice options (with optional per-option images), question/image-item images, and item deletion. Uses one batch operation for all updates.",
         tags={"forms", "update", "questions", "google"},
         annotations={
             "title": "Update Form Questions",
@@ -1617,7 +1682,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         questions_to_update: Annotated[
             List[Dict[str, Any]],
             Field(
-                description="List of update dictionaries. Each dictionary must include: item_id (the ID of the question to update from get_form), and one or more fields to update (title, description, required). Example: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}]"
+                description="List of update dictionaries. Each must include item_id (from get_form) and one or more of: 'title', 'description', 'required' (questions), 'options' (choice questions; REPLACES the option list - each option is a string or {'value': 'A', 'image_url': 'https://...'}), 'shuffle' (choice questions), 'image_url' (sets the image on a question or replaces an image item's image; takes optional 'image_alt_text', 'image_width', 'image_alignment'), or 'delete': True to remove the item. Image URLs must be publicly reachable. Examples: [{'item_id': '12345', 'title': 'Updated Question', 'required': True}], [{'item_id': '12345', 'options': [{'value': 'A', 'image_url': 'https://example.com/a.png'}, 'None of them']}], [{'item_id': '67890', 'delete': True}]"
             ),
         ],
         user_google_email: UserGoogleEmailForms = None,
@@ -1625,7 +1690,8 @@ def setup_forms_tools(mcp: FastMCP) -> None:
         """
         Modify existing questions in a Google Form using efficient batch operations.
 
-        Use get_form first to get item_ids. Supported updates: title, description, required status.
+        Use get_form first to get item_ids. Supported updates: title, description,
+        required, options (with per-option images), shuffle, image_url, delete.
 
         Args:
             form_id: Form ID containing questions to update
@@ -1659,8 +1725,13 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     error=error_msg,
                 )
 
-            # Build batch update request
-            batch_update_body = build_batch_update_request(valid_updates)
+            # Build batch update request (the Forms API addresses items by index)
+            current = await asyncio.to_thread(
+                forms_service.forms().get(formId=form_id).execute
+            )
+            batch_update_body = build_batch_update_request(
+                valid_updates, current.get("items", [])
+            )
 
             # Execute the update
             result = await asyncio.to_thread(
