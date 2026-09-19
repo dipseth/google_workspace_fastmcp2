@@ -1029,7 +1029,7 @@ async def _handle_client_fs_upload(
 ) -> UploadFileResponse:
     """Two-phase client→server→Drive upload, no extra tool parameters.
 
-    Phase 1 (allocation): no staged bytes for ``(session_id, path)`` →
+    Phase 1 (allocation): no staged bytes for ``(owner, path)`` →
     allocate, sign a PUT URL, return ``pendingUpload`` instructions.
 
     Phase 2 (finalize): staged bytes present → run them through the
@@ -1042,31 +1042,33 @@ async def _handle_client_fs_upload(
     re-target the destination folder after PUT-ing the bytes). If the
     caller passes the defaults, Phase-1 values are used.
     """
-    from auth.context import get_session_context
-
     from .upload_staging import (
         allocate_upload,
         consume_allocation,
         find_allocation_by_path,
         generate_upload_url,
         read_staged_bytes,
+        staging_owner,
     )
 
-    session_id = await get_session_context()
-    if not session_id:
+    # Keyed by who is calling, not by transport session: the finalize call
+    # arrives on a different session under MCP 2026-07-28 / Code Mode.
+    owner = await staging_owner(user_email)
+    if not owner:
         return UploadFileResponse(
             success=False,
             userEmail=user_email,
             message="",
             error=(
-                "Client-filesystem upload mode requires an MCP session "
-                "(none found in current context). Set DRIVE_UPLOAD_CLIENT_FS=false "
-                "for stdio / local-filesystem uploads."
+                "Client-filesystem upload mode requires an authenticated "
+                "caller or an MCP session (neither found in current context). "
+                "Set DRIVE_UPLOAD_CLIENT_FS=false for stdio / local-filesystem "
+                "uploads."
             ),
         )
 
-    # Phase 2: staged bytes already present for this (session, path) pair
-    existing = find_allocation_by_path(session_id, path)
+    # Phase 2: staged bytes already present for this (owner, path) pair
+    existing = find_allocation_by_path(owner, path)
     if existing and existing.received:
         staged = read_staged_bytes(existing.upload_id)
         if staged is None:
@@ -1127,7 +1129,7 @@ async def _handle_client_fs_upload(
 
     # Phase 1: allocate + return signed PUT URL
     alloc = allocate_upload(
-        session_id=session_id,
+        owner=owner,
         client_path=path,
         user_email=user_email,
         folder_id=folder_id,

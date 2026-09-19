@@ -159,7 +159,8 @@ async def _stage_client_fs_photos(
 
     Mirrors upload_to_drive's client-filesystem mode and reuses the same
     staging store and ``PUT /drive-upload`` endpoint (the transport is not
-    Drive-specific: bytes are staged keyed by (session, client path)).
+    Drive-specific: bytes are staged keyed by (owner, client path), where
+    owner is the authenticated principal — see ``staging_owner``).
 
     Phase 1: any path without staged bytes gets an HMAC-signed one-time PUT
     URL; ``pending_response`` is set and the tool returns it.
@@ -169,18 +170,18 @@ async def _stage_client_fs_photos(
     """
     import tempfile
 
-    from auth.context import get_session_context
     from config.settings import settings
     from drive.upload_staging import (
         allocate_upload,
         find_allocation_by_path,
         generate_upload_url,
         read_staged_bytes,
+        staging_owner,
     )
 
     ctx = _ClientFsStaging()
-    session_id = await get_session_context()
-    if not session_id:
+    owner = await staging_owner(user_email)
+    if not owner:
         ctx.pending_response = PhotoUploadResponse(
             success=False,
             total_count=len(file_list),
@@ -199,12 +200,12 @@ async def _stage_client_fs_photos(
     staged = []
     pending = []
     for path in file_list:
-        alloc = find_allocation_by_path(session_id, path)
+        alloc = find_allocation_by_path(owner, path)
         if alloc and alloc.received:
             staged.append((path, alloc))
             continue
         new_alloc = allocate_upload(
-            session_id=session_id,
+            owner=owner,
             client_path=path,
             user_email=user_email or "",
             folder_id="",

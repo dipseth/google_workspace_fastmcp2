@@ -15,8 +15,12 @@ Security:
     - Path traversal protection via ``os.path.realpath()``
     - Temp dir with ``0o700`` permissions
     - Eager + lazy file cleanup
-    - Allocations bound to ``(session_id, client_path)`` so phase 2 of the
-      tool call can locate the staged bytes without an extra parameter
+    - Allocations bound to ``(owner, client_path)`` so phase 2 of the tool
+      call can locate the staged bytes without an extra parameter. ``owner``
+      is the authenticated principal, not the transport session: under MCP
+      2026-07-28 (and Code Mode through the claude.ai connector) every
+      request is its own session, so a session-keyed allocation is never
+      found again by the finalize call.
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ _cleanup_task: Optional[asyncio.Task] = None
 @dataclass
 class _Allocation:
     upload_id: str
-    session_id: str
+    owner: str
     client_path: str
     filename: str
     mime_type: str
@@ -62,8 +66,28 @@ class _Allocation:
 
 # upload_id -> _Allocation
 _allocations: dict[str, _Allocation] = {}
-# (session_id, client_path) -> upload_id
-_session_index: dict[tuple[str, str], str] = {}
+# (owner, client_path) -> upload_id
+_owner_index: dict[tuple[str, str], str] = {}
+
+
+async def staging_owner(user_email: Optional[str]) -> Optional[str]:
+    """Who a staged upload belongs to, stable across the two tool calls.
+
+    A per-user token (OAuth JWT, per-user API key) → its principal, which the
+    caller cannot choose. The shared ``MCP_API_KEY`` is one principal for every
+    holder, so the target account splits it. With no token at all (legacy
+    no-auth HTTP) the transport session is the only handle there is.
+    """
+    from auth.context import get_session_context
+    from auth.user_state import SHARED_KEY_PRINCIPAL, principal_id
+
+    principal = principal_id()
+    if principal and principal != SHARED_KEY_PRINCIPAL:
+        return principal
+    if principal:
+        return f"{principal}:{(user_email or '').lower().strip()}"
+    session_id = await get_session_context()
+    return f"session:{session_id}" if session_id else None
 
 
 def _get_server_secret() -> str:
@@ -116,13 +140,13 @@ def _get_temp_dir() -> str:
 
 
 def allocate_upload(
-    session_id: str,
+    owner: str,
     client_path: str,
     user_email: str,
     folder_id: str,
     custom_filename: Optional[str],
 ) -> _Allocation:
-    """Reserve an upload slot for a (session_id, client_path) tuple.
+    """Reserve an upload slot for an (owner, client_path) tuple.
 
     If an allocation already exists for the same tuple and hasn't received
     bytes yet, it is returned as-is (idempotent re-issue). If it already
@@ -133,8 +157,8 @@ def allocate_upload(
 
     _evict_expired()
 
-    key = (session_id, client_path)
-    existing_id = _session_index.get(key)
+    key = (owner, client_path)
+    existing_id = _owner_index.get(key)
     if existing_id and existing_id in _allocations:
         return _allocations[existing_id]
 
@@ -143,7 +167,7 @@ def allocate_upload(
     mime_type, _ = mimetypes.guess_type(filename)
     alloc = _Allocation(
         upload_id=upload_id,
-        session_id=session_id,
+        owner=owner,
         client_path=client_path,
         filename=filename,
         mime_type=mime_type or "application/octet-stream",
@@ -152,7 +176,7 @@ def allocate_upload(
         custom_filename=custom_filename,
     )
     _allocations[upload_id] = alloc
-    _session_index[key] = upload_id
+    _owner_index[key] = upload_id
 
     try:
         start_cleanup_task()
@@ -165,9 +189,9 @@ def get_allocation(upload_id: str) -> Optional[_Allocation]:
     return _allocations.get(upload_id)
 
 
-def find_allocation_by_path(session_id: str, client_path: str) -> Optional[_Allocation]:
-    """Look up an allocation by (session_id, client_path)."""
-    upload_id = _session_index.get((session_id, client_path))
+def find_allocation_by_path(owner: str, client_path: str) -> Optional[_Allocation]:
+    """Look up an allocation by (owner, client_path)."""
+    upload_id = _owner_index.get((owner, client_path))
     if not upload_id:
         return None
     return _allocations.get(upload_id)
@@ -265,10 +289,10 @@ def read_staged_bytes(upload_id: str) -> Optional[bytes]:
 
 
 def consume_allocation(upload_id: str) -> None:
-    """Remove allocation, session-index entry, and on-disk file."""
+    """Remove allocation, owner-index entry, and on-disk file."""
     alloc = _allocations.pop(upload_id, None)
     if alloc:
-        _session_index.pop((alloc.session_id, alloc.client_path), None)
+        _owner_index.pop((alloc.owner, alloc.client_path), None)
     path = staged_path(upload_id)
     try:
         if os.path.exists(path):
@@ -323,12 +347,13 @@ def reset_state() -> None:
     """Clear state (for testing)."""
     _consumed_uploads.clear()
     _allocations.clear()
-    _session_index.clear()
+    _owner_index.clear()
     global _hmac_key_cache
     _hmac_key_cache = None
 
 
 __all__ = [
+    "staging_owner",
     "allocate_upload",
     "get_allocation",
     "find_allocation_by_path",
