@@ -429,6 +429,8 @@ On a hosted server the `path` given to `upload_to_drive` or `upload_photos` is o
 | `DRIVE_UPLOAD_MAX_SIZE_MB` | integer | `100` | Largest accepted PUT body. | No |
 | `DRIVE_UPLOAD_TTL_SECONDS` | integer | `900` | Lifetime of a signed URL, and of staged bytes that are never finished. | No |
 
+Sandboxed clients: the PUT is made by the client, not the server, so the client must be able to reach the server's host. Clients that run code in a network-restricted sandbox block it by default. In Claude Desktop, add the server's host (for example `mcp.example.com`) under Settings → Capabilities → Domain allowlist → Additional allowed domains; "Package managers only" plus that one entry is enough. A blocked request shows up as a proxy denial (an `x-deny-reason` response header) rather than an error from this server. The host only has to be reachable from the sandbox's egress, so a publicly routable URL needs no further network changes.
+
 Running more than one replica: the three requests of an upload (issue the URL, PUT, finish) can each reach a different replica, and no replica keeps upload state in memory. They must share:
 
 - `.auth_encryption_key` — it signs the URLs and names the staged objects. A replica without the file generates its own key and rejects URLs the others issued.

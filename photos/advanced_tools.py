@@ -228,7 +228,10 @@ async def _stage_client_fs_photos(
             text_summary=(
                 "Upload pending: client filesystem mode is active. PUT each "
                 "file's bytes to its uploadUrl (one-time use, expires), then "
-                "re-call upload_photos with the same file_paths to finalize."
+                "re-call upload_photos with the same file_paths to finalize. "
+                "If the PUT is blocked by a sandbox network policy, ask the "
+                "user to add this server's host to their client's allowed "
+                "domains."
             ),
         )
         return ctx
@@ -1050,7 +1053,9 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
                     }
             else:
                 # For multiple photos, use batch processing
-                results = await client.upload_photos_batch(file_list, target_album_id)
+                results = await client.upload_photos_batch(
+                    file_list, target_album_id, description
+                )
 
             if staging is not None:
                 staging.remap(results)

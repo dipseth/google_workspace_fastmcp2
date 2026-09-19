@@ -1148,6 +1148,8 @@ async def _handle_client_fs_upload(
             f"Then re-invoke upload_to_drive with path='{path}' to finalize.",
             "The URL is one-time-use and expires; a fresh tool call always "
             "issues a new URL.",
+            "If the PUT is blocked by a sandbox network policy, ask the user "
+            "to add this server's host to their client's allowed domains.",
         ],
         "curlExample": curl_example,
     }
