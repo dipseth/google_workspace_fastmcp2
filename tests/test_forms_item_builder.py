@@ -7,6 +7,8 @@ from forms.forms_tools import (
     build_create_item_requests,
     build_image,
     build_question_item,
+    extract_question_type,
+    format_question_details,
     validate_question_structure,
     validate_update_request,
 )
@@ -290,3 +292,56 @@ class TestBatchUpdate:
         assert validate_update_request({"item_id": "q1", "delete": True})[0]
         assert not validate_update_request({"item_id": "q1", "bogus": 1})[0]
         assert not validate_update_request({"item_id": "q1"})[0]
+
+
+class TestReadingQuestionsBack:
+    """get_form reported every question as "Unknown": the API's Question has no
+    "type" field, the kind is whichever *Question key is present."""
+
+    def _item(self, question, **question_item):
+        return {
+            "itemId": "q1",
+            "title": "Pick",
+            "questionItem": {"question": question, **question_item},
+        }
+
+    def test_kind_comes_from_the_question_key(self):
+        assert extract_question_type(self._item({"textQuestion": {}})) == "TEXT"
+        assert extract_question_type(self._item({"scaleQuestion": {}})) == "SCALE"
+        assert (
+            extract_question_type(self._item({"fileUploadQuestion": {}}))
+            == "FILE_UPLOAD"
+        )
+        assert extract_question_type({"textItem": {}}) == "NOT_A_QUESTION"
+
+    def test_choice_details_list_kind_options_and_images(self):
+        item = self._item(
+            {
+                "required": True,
+                "choiceQuestion": {
+                    "type": "DROP_DOWN",
+                    "shuffle": True,
+                    "options": [
+                        {"value": "Blue", "image": {"contentUri": "https://x"}},
+                        {"value": "Yellow"},
+                    ],
+                },
+            },
+            image={"contentUri": "https://y"},
+        )
+        details = format_question_details(item)
+        assert "Type: MULTIPLE_CHOICE" in details
+        assert "Required: Yes" in details
+        assert "Kind: Dropdown" in details
+        assert "Options: Blue, Yellow" in details
+        assert "Option images: 1" in details
+        assert "Shuffled: Yes" in details
+        assert "Image: Yes" in details
+        assert "Unknown" not in details
+
+    def test_text_question_details(self):
+        details = format_question_details(
+            self._item({"textQuestion": {"paragraph": True}})
+        )
+        assert "Type: TEXT" in details and "Paragraph: Yes" in details
+        assert "Image" not in details

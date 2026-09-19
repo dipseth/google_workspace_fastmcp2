@@ -148,7 +148,10 @@ QUESTION_TYPE_DETECTORS = {
     "dateQuestion": "DATE",
     "timeQuestion": "TIME",
     "ratingQuestion": "RATING",
+    "fileUploadQuestion": "FILE_UPLOAD",
 }
+
+CHOICE_KIND_LABELS = {"RADIO": "Radio", "CHECKBOX": "Checkbox", "DROP_DOWN": "Dropdown"}
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -168,7 +171,9 @@ def format_question_details(question: Dict[str, Any]) -> str:
     question_item = question.get("questionItem", {})
     q_question = question_item.get("question", {})
 
-    q_type = q_question.get("type", "Unknown")
+    # The API's Question has no "type" field; the kind is whichever
+    # *Question key is present.
+    q_type = extract_question_type(question)
     q_text = question.get("title", "No title")
     q_id = question.get("itemId", "No ID")
     required = q_question.get("required", False)
@@ -176,19 +181,30 @@ def format_question_details(question: Dict[str, Any]) -> str:
     # Extract additional details based on question type
     details = []
 
-    if q_type == "CHOICE_QUESTION":
+    if q_type == "MULTIPLE_CHOICE":
         choice_q = q_question.get("choiceQuestion", {})
         options = choice_q.get("options", [])
-        details.append(f"Options: {len(options)}")
+        kind = choice_q.get("type", "")
+        details.append(f"Kind: {CHOICE_KIND_LABELS.get(kind, kind or 'Unknown')}")
         details.append(
-            f"Type: {'Radio' if choice_q.get('type') == 'RADIO' else 'Checkbox'}"
+            "Options: " + ", ".join(str(o.get("value", "")) for o in options)
+            if options
+            else "Options: none"
         )
+        with_image = sum(1 for o in options if "image" in o)
+        if with_image:
+            details.append(f"Option images: {with_image}")
+        if choice_q.get("shuffle"):
+            details.append("Shuffled: Yes")
     elif q_type == "SCALE":
         scale_q = q_question.get("scaleQuestion", {})
         details.append(f"Scale: {scale_q.get('low', 1)} to {scale_q.get('high', 5)}")
     elif q_type == "TEXT":
         text_q = q_question.get("textQuestion", {})
         details.append(f"Paragraph: {'Yes' if text_q.get('paragraph') else 'No'}")
+
+    if "image" in question_item:
+        details.append("Image: Yes")
 
     # Build the formatted string
     parts = [
@@ -1028,7 +1044,7 @@ def setup_forms_tools(mcp: FastMCP) -> None:
                     form_question = FormQuestion(
                         itemId=item.get("itemId", ""),
                         title=item.get("title", "No title"),
-                        type=q_question.get("type", "Unknown"),
+                        type=extract_question_type(item),
                         required=q_question.get("required", False),
                         details=format_question_details(item),
                     )
