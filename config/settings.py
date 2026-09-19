@@ -60,7 +60,14 @@ class Settings(BaseSettings):
     # sent/drafted email can later be saved as a re-parametrisable template
     # (manage_email_templates action="save" with draft_id/message_id).
     gmail_embed_email_spec: bool = True
+    # Where client-filesystem uploads are staged between the PUT and the
+    # finalize call. Running more than one replica: point this at a volume
+    # every replica mounts, or set drive_upload_staging_uri. Replicas must also
+    # share .auth_encryption_key (see drive/upload_staging.py).
     drive_upload_temp_dir: str = "/tmp/gw-mcp-drive-uploads"
+    # Optional gs://bucket/prefix to stage in Cloud Storage instead (needs
+    # google-cloud-storage). drive_upload_temp_dir then only holds in-flight PUTs.
+    drive_upload_staging_uri: str = ""
     drive_upload_max_size_mb: int = 100
     drive_upload_ttl_seconds: int = 900
 

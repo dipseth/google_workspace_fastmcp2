@@ -128,7 +128,7 @@ class _ClientFsStaging:
         self.pending_response: Optional[PhotoUploadResponse] = None
         self.local_paths: List[str] = []
         self.path_map: Dict[str, str] = {}  # temp path -> original client path
-        self.upload_ids: List[str] = []
+        self.staged_keys: List[str] = []
         self.temp_dir: Optional[str] = None
 
     def remap(self, results: Dict) -> None:
@@ -137,14 +137,14 @@ class _ClientFsStaging:
             for entry in results.get(bucket, []):
                 entry["file"] = self.path_map.get(entry.get("file"), entry.get("file"))
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         import shutil
 
-        from drive.upload_staging import consume_allocation
+        from drive.upload_staging import discard_staged
 
-        for uid in self.upload_ids:
+        for key in self.staged_keys:
             try:
-                consume_allocation(uid)
+                await discard_staged(key)
             except Exception:
                 pass
         if self.temp_dir:
@@ -172,9 +172,8 @@ async def _stage_client_fs_photos(
 
     from config.settings import settings
     from drive.upload_staging import (
-        allocate_upload,
-        find_allocation_by_path,
-        generate_upload_url,
+        find_staged,
+        issue_upload,
         read_staged_bytes,
         staging_owner,
     )
@@ -200,24 +199,18 @@ async def _stage_client_fs_photos(
     staged = []
     pending = []
     for path in file_list:
-        alloc = find_allocation_by_path(owner, path)
-        if alloc and alloc.received:
+        alloc = await find_staged(owner, path)
+        if alloc:
             staged.append((path, alloc))
             continue
-        new_alloc = allocate_upload(
-            owner=owner,
-            client_path=path,
-            user_email=user_email or "",
-            folder_id="",
-            custom_filename=None,
-        )
         ttl = settings.drive_upload_ttl_seconds
-        url, exp_ts = generate_upload_url(settings.base_url, new_alloc.upload_id, ttl)
+        ticket = await issue_upload(settings.base_url, owner, path, "", None, ttl)
+        url, exp_ts = ticket.url, ticket.expires_at
         safe_path = path.replace('"', '\\"')
         pending.append(
             {
                 "file": path,
-                "uploadId": new_alloc.upload_id,
+                "uploadId": ticket.upload_id,
                 "uploadUrl": url,
                 "method": "PUT",
                 "expiresAt": exp_ts,
@@ -244,9 +237,9 @@ async def _stage_client_fs_photos(
     # Google Photos records the real filename.
     ctx.temp_dir = tempfile.mkdtemp(prefix="photos-clientfs-")
     for path, alloc in staged:
-        data = read_staged_bytes(alloc.upload_id)
+        data = await read_staged_bytes(alloc.key)
         if data is None:
-            ctx.cleanup()
+            await ctx.cleanup()
             ctx.pending_response = PhotoUploadResponse(
                 success=False,
                 total_count=len(file_list),
@@ -254,10 +247,10 @@ async def _stage_client_fs_photos(
                 failed=[{"file": path, "error": "staged bytes unreadable"}],
                 user_email=user_email,
                 text_summary=(
-                    f"Staged upload for '{path}' could not be read from disk. "
+                    f"Staged upload for '{path}' could not be read back. "
                     "Re-call upload_photos to restart the transfer."
                 ),
-                error="Staged upload could not be read from disk.",
+                error="Staged upload could not be read back.",
             )
             return ctx
         local = os.path.join(ctx.temp_dir, os.path.basename(path))
@@ -265,7 +258,7 @@ async def _stage_client_fs_photos(
             fh.write(data)
         ctx.local_paths.append(local)
         ctx.path_map[local] = path
-        ctx.upload_ids.append(alloc.upload_id)
+        ctx.staged_keys.append(alloc.key)
 
     return ctx
 
@@ -1215,7 +1208,7 @@ def setup_advanced_photos_tools(mcp: FastMCP) -> None:
             )
         finally:
             if staging is not None:
-                staging.cleanup()
+                await staging.cleanup()
 
     @mcp.tool(
         name="upload_folder_photos",
