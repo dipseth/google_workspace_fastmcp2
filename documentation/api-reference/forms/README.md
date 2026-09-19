@@ -91,8 +91,47 @@ Add multiple interactive questions to an existing Google Form using efficient ba
 
 **Parameters:**
 - `form_id` (string, required): The ID of the form to add questions to
-- `questions` (List[Dict], required): List of question dictionaries with type and configuration
+- `questions` (List[Dict], required): List of item dictionaries (questions and content items) with type and configuration, added in order
+- `insert_index` (int, optional): Position of the first new item, `0` = top of the form. Positions count every item, not just questions — `get_form` returns them in `items`. Default: append after the last existing item
 - `user_google_email` (UserGoogleEmailForms, optional): Google account email
+
+Invalid items are skipped, and the result `message` names each one that was.
+
+**Images and Content Items:**
+
+Image URLs must be publicly reachable. Google fetches the URL once, when the item is created, and stores its own copy — the URL does not have to stay up afterwards.
+
+```python
+# A standalone image
+{
+  "type": "IMAGE_ITEM",
+  "image_url": "https://example.com/poster-a.png",
+  "title": "Poster A",               # optional
+  "description": "The Wall",         # optional
+  "image_alt_text": "Dark poster",   # optional
+  "image_width": 600,                # optional, pixels, max 740
+  "image_alignment": "CENTER"        # optional: LEFT, CENTER, RIGHT
+}
+
+# An image on a question, and images on its options (radio / checkbox only)
+{
+  "type": "MULTIPLE_CHOICE_QUESTION",
+  "title": "Which poster would you scan?",
+  "image_url": "https://example.com/all-posters.png",
+  "options": [
+    {"value": "A", "image_url": "https://example.com/poster-a.png"},
+    {"value": "B", "image_url": "https://example.com/poster-b.png"},
+    "Neither"
+  ]
+}
+
+# A YouTube video, a text block, and a section break
+{"type": "VIDEO_ITEM", "youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID", "caption": "Watch first"}
+{"type": "TEXT_ITEM", "title": "Before you start", "description": "Takes about 2 minutes."}
+{"type": "PAGE_BREAK_ITEM", "title": "Section 2", "description": "About you"}
+```
+
+Every item type also accepts an optional `description`. `DROPDOWN_QUESTION` takes the same fields as `MULTIPLE_CHOICE_QUESTION` (string options only).
 
 **Comprehensive Question Examples:**
 
@@ -321,9 +360,9 @@ Google Forms API has **LIMITED** HTML support for rich content:
 - **Lists**: `<ul>`, `<ol>`, `<li>` for bullet and numbered lists
 
 ### **RICH CONTENT ALTERNATIVES:**
-- **Images**: Use imageItem type (not HTML `<img>` tags)
-- **Videos**: Use videoItem type (YouTube videos)
-- **Formatted Text**: Use textItem type for rich text sections
+- **Images**: Use an `IMAGE_ITEM`, or `image_url` on a question or option (not HTML `<img>` tags)
+- **Videos**: Use a `VIDEO_ITEM` (YouTube videos)
+- **Formatted Text**: Use a `TEXT_ITEM` for rich text sections
 - **HTML limitations**: No CSS, JavaScript, or complex HTML structures
 
 ### **FORMATTING EXAMPLES:**

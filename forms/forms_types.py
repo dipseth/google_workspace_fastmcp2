@@ -74,6 +74,17 @@ class FormQuestion(TypedDict):
     details: str  # Formatted question details
 
 
+class FormItemSummary(TypedDict):
+    """Position and kind of any form item, question or not."""
+
+    index: (
+        int  # Position in the form - what add_questions_to_form's insert_index counts
+    )
+    itemId: str
+    title: str
+    itemType: str  # questionItem, imageItem, videoItem, textItem, pageBreakItem, ...
+
+
 class FormDetails(TypedDict):
     """Response structure for get_form tool."""
 
@@ -86,6 +97,7 @@ class FormDetails(TypedDict):
     responseUrl: Optional[str]
     questions: List[FormQuestion]
     questionCount: int
+    items: NotRequired[List[FormItemSummary]]  # Every item in form order
     userEmail: NotRequired[str]
     error: NotRequired[Optional[str]]
 
