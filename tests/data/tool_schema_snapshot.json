@@ -96,6 +96,7 @@
   "create_form": [
     "description",
     "document_title",
+    "template_form_id",
     "title",
     "user_google_email"
   ],
@@ -687,6 +688,14 @@
   "update_form_questions": [
     "form_id",
     "questions_to_update",
+    "user_google_email"
+  ],
+  "update_form_settings": [
+    "description",
+    "email_collection_type",
+    "form_id",
+    "is_quiz",
+    "title",
     "user_google_email"
   ],
   "update_slide_content": [

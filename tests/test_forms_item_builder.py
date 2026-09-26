@@ -7,6 +7,7 @@ from forms.forms_tools import (
     build_create_item_requests,
     build_image,
     build_question_item,
+    build_settings_requests,
     extract_question_type,
     format_question_details,
     validate_question_structure,
@@ -345,3 +346,194 @@ class TestReadingQuestionsBack:
         )
         assert "Type: TEXT" in details and "Paragraph: Yes" in details
         assert "Image" not in details
+
+
+class TestBranchingAndOther:
+    def test_options_branch_by_action_or_section(self):
+        item = build_question_item(
+            {
+                "type": "MULTIPLE_CHOICE_QUESTION",
+                "title": "Attending?",
+                "options": [
+                    {"value": "Yes", "go_to_section_id": "sec2"},
+                    {"value": "No", "go_to_action": "submit_form"},
+                    {"is_other": True},
+                ],
+            }
+        )
+        assert item["questionItem"]["question"]["choiceQuestion"]["options"] == [
+            {"value": "Yes", "goToSectionId": "sec2"},
+            {"value": "No", "goToAction": "SUBMIT_FORM"},
+            {"isOther": True},
+        ]
+
+    @pytest.mark.parametrize(
+        "q_type, option",
+        [
+            ("CHECKBOX_QUESTION", {"value": "A", "go_to_action": "NEXT_SECTION"}),
+            ("DROPDOWN_QUESTION", {"is_other": True}),
+            ("MULTIPLE_CHOICE_QUESTION", {"value": "A", "go_to_action": "NOWHERE"}),
+            (
+                "MULTIPLE_CHOICE_QUESTION",
+                {"value": "A", "go_to_action": "SUBMIT_FORM", "go_to_section_id": "s"},
+            ),
+        ],
+    )
+    def test_unsupported_option_fields_raise(self, q_type, option):
+        with pytest.raises(ValueError):
+            build_question_item({"type": q_type, "title": "Q", "options": [option]})
+
+    def test_update_checks_branching_against_the_existing_kind(self):
+        branching = [{"value": "A", "go_to_action": "SUBMIT_FORM"}]
+        # q1 is a checkbox question, which cannot branch
+        with pytest.raises(ValueError):
+            build_batch_update_request(
+                [{"item_id": "q1", "options": branching}], FORM_ITEMS
+            )
+
+        radio = {
+            "itemId": "r1",
+            "questionItem": {"question": {"choiceQuestion": {"type": "RADIO"}}},
+        }
+        body = build_batch_update_request(
+            [{"item_id": "r1", "options": branching}], [radio]
+        )
+        choice = body["requests"][0]["updateItem"]["item"]["questionItem"]["question"][
+            "choiceQuestion"
+        ]
+        assert choice["options"] == [{"value": "A", "goToAction": "SUBMIT_FORM"}]
+
+
+class TestGridRatingVideo:
+    def test_grid(self):
+        item = build_question_item(
+            {
+                "type": "GRID_QUESTION",
+                "title": "Rate each",
+                "rows": ["Speed", "Price"],
+                "columns": ["Bad", "Good"],
+                "multiple": True,
+                "shuffle_rows": True,
+                "required": True,
+            }
+        )
+        assert item == {
+            "title": "Rate each",
+            "questionGroupItem": {
+                "questions": [
+                    {"required": True, "rowQuestion": {"title": "Speed"}},
+                    {"required": True, "rowQuestion": {"title": "Price"}},
+                ],
+                "grid": {
+                    "columns": {
+                        "type": "CHECKBOX",
+                        "options": [{"value": "Bad"}, {"value": "Good"}],
+                    },
+                    "shuffleQuestions": True,
+                },
+            },
+        }
+
+    @pytest.mark.parametrize(
+        "grid", [{"rows": [], "columns": ["A"]}, {"rows": ["R"]}, {"columns": ["A"]}]
+    )
+    def test_grid_needs_rows_and_columns(self, grid):
+        assert not validate_question_structure(
+            {"type": "GRID_QUESTION", "title": "G", **grid}
+        )
+
+    def test_rating_icon_defaults_to_star(self):
+        rating = {"type": "RATING_QUESTION", "title": "R", "rating_scale_level": 5}
+        built = build_question_item(rating)["questionItem"]["question"]
+        assert built["ratingQuestion"] == {"ratingScaleLevel": 5, "iconType": "STAR"}
+        built = build_question_item({**rating, "icon_type": "heart"})
+        assert (
+            built["questionItem"]["question"]["ratingQuestion"]["iconType"] == "HEART"
+        )
+        with pytest.raises(ValueError):
+            build_question_item({**rating, "icon_type": "SMILEY"})
+
+    def test_video_properties(self):
+        item = build_question_item(
+            {
+                "type": "VIDEO_ITEM",
+                "youtube_url": "https://www.youtube.com/watch?v=abc",
+                "video_width": 480,
+                "video_alignment": "center",
+            }
+        )
+        assert item["videoItem"]["video"]["properties"] == {
+            "width": 480,
+            "alignment": "CENTER",
+        }
+
+
+class TestMoves:
+    def test_moves_track_the_order_left_by_earlier_moves(self):
+        ids = [item["itemId"] for item in FORM_ITEMS]
+        first, last = ids[0], ids[-1]
+        body = build_batch_update_request(
+            [
+                {"item_id": last, "move_to_index": 0},
+                {"item_id": first, "move_to_index": 0},
+            ],
+            FORM_ITEMS,
+        )
+        n = len(ids) - 1
+        assert [r["moveItem"] for r in body["requests"]] == [
+            {"originalLocation": {"index": n}, "newLocation": {"index": 0}},
+            {"originalLocation": {"index": 1}, "newLocation": {"index": 0}},
+        ]
+
+    def test_delete_index_follows_a_move(self):
+        ids = [item["itemId"] for item in FORM_ITEMS]
+        body = build_batch_update_request(
+            [
+                {"item_id": ids[0], "delete": True},
+                {"item_id": ids[-1], "move_to_index": 0},
+            ],
+            FORM_ITEMS,
+        )
+        assert [list(r)[0] for r in body["requests"]] == ["moveItem", "deleteItem"]
+        assert body["requests"][1]["deleteItem"]["location"]["index"] == 1
+
+    def test_noop_move_is_dropped_and_bad_index_raises(self):
+        ids = [item["itemId"] for item in FORM_ITEMS]
+        assert build_batch_update_request(
+            [{"item_id": ids[0], "move_to_index": 0}], FORM_ITEMS
+        ) == {"requests": []}
+        with pytest.raises(ValueError):
+            build_batch_update_request(
+                [{"item_id": ids[0], "move_to_index": len(ids)}], FORM_ITEMS
+            )
+
+
+class TestSettingsRequests:
+    def test_only_given_fields_are_masked(self):
+        assert build_settings_requests() == []
+        assert build_settings_requests(description="") == [
+            {
+                "updateFormInfo": {
+                    "info": {"description": ""},
+                    "updateMask": "description",
+                }
+            }
+        ]
+        assert build_settings_requests(
+            title="T", is_quiz=True, email_collection_type="verified"
+        ) == [
+            {"updateFormInfo": {"info": {"title": "T"}, "updateMask": "title"}},
+            {
+                "updateSettings": {
+                    "settings": {
+                        "quizSettings": {"isQuiz": True},
+                        "emailCollectionType": "VERIFIED",
+                    },
+                    "updateMask": "quizSettings.isQuiz,emailCollectionType",
+                }
+            },
+        ]
+
+    def test_bad_email_collection_type_raises(self):
+        with pytest.raises(ValueError):
+            build_settings_requests(email_collection_type="ALWAYS")

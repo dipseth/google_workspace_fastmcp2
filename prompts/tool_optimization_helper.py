@@ -109,6 +109,7 @@ class ToolOptimizationHelper:
             "get_form_response",
             "list_form_responses",
             "update_form_questions",
+            "update_form_settings",
         ],
         "slides": [
             "create_presentation",
@@ -212,7 +213,12 @@ class ToolOptimizationHelper:
         },
         "forms": {
             "Create": ["create_form", "add_questions_to_form", "update_form_questions"],
-            "Manage": ["get_form", "set_form_publish_state", "publish_form_publicly"],
+            "Manage": [
+                "get_form",
+                "update_form_settings",
+                "set_form_publish_state",
+                "publish_form_publicly",
+            ],
             "Responses": ["get_form_response", "list_form_responses"],
         },
         "slides": {

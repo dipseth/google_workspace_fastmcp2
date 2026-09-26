@@ -10,7 +10,7 @@ The Google Forms service provides a complete form lifecycle management system wi
 - **Structured TypedDict Responses**: 6 specialized response classes for reliable data handling
 - **Multi-Service Integration**: Seamless Forms + Drive + Gmail coordination
 - **Enhanced LLM Documentation**: Detailed examples, parameter descriptions, and workflow guidance
-- **HTML Formatting Support**: Clear guidance on Forms API capabilities and limitations
+- **Formatting and Theming Limits**: What the Forms API can and cannot style, and the template-copy route to themed forms
 - **Authentication Flexibility**: Supports both explicit email and middleware injection patterns
 
 ## Key Features
@@ -47,11 +47,12 @@ All tools now return structured TypedDict responses instead of strings:
 | [`create_form`](#create_form) | Create new Google Forms with customizable title, description, and document title | `FormCreationResult` |
 | [`add_questions_to_form`](#add_questions_to_form) | Add multiple interactive questions with comprehensive formatting options | `FormUpdateResult` |
 | [`get_form`](#get_form) | Retrieve comprehensive form details including metadata and all questions | `FormDetails` |
-| [`set_form_publish_state`](#set_form_publish_state) | Control form response acceptance with basic settings configuration | `FormPublishResult` |
+| [`set_form_publish_state`](#set_form_publish_state) | Open or close a form to responses (`forms.setPublishSettings`) | `FormPublishResult` |
 | [`publish_form_publicly`](#publish_form_publicly) | Make forms publicly accessible using Forms + Drive APIs | `FormPublishResult` |
 | [`get_form_response`](#get_form_response) | Retrieve detailed individual response with answer-question mapping | `FormResponseDetails` |
 | [`list_form_responses`](#list_form_responses) | List all responses with efficient pagination and structured data | `FormResponsesListResponse` |
-| [`update_form_questions`](#update_form_questions) | Modify existing questions using efficient batch operations | `FormUpdateResult` |
+| [`update_form_questions`](#update_form_questions) | Modify, reorder, branch or delete existing items in one batch | `FormUpdateResult` |
+| [`update_form_settings`](#update_form_settings) | Change title, description, quiz mode and email collection | `FormUpdateResult` |
 
 ---
 
@@ -69,7 +70,8 @@ Create a new Google Form with customizable properties and automatic document tit
 
 **Enhanced Features:**
 - Automatic documentTitle handling (read-only after creation)
-- HTML formatting support in descriptions
+- `template_form_id` (string, optional): copy an existing form instead of starting blank. The copy keeps the template's theme colour, header image, fonts and items - the only way to get a themed form
+- Descriptions are plain text (the Forms API renders no HTML or Markdown)
 - Structured FormCreationResult response
 - Immediate edit and response URLs
 
@@ -145,11 +147,11 @@ Every item type also accepts an optional `description`. `DROPDOWN_QUESTION` take
 }
 ```
 
-**Multiple Choice with HTML:**
+**Multiple Choice:**
 ```python
 {
   "type": "MULTIPLE_CHOICE_QUESTION", 
-  "title": "Which <b>best describes</b> your role?",
+  "title": "Which best describes your role?",
   "options": ["Manager", "Developer", "Designer", "Other"],
   "required": True,
   "shuffle": False
@@ -213,14 +215,14 @@ Retrieve comprehensive details and structure of a Google Form with complete ques
 
 ### `set_form_publish_state`
 
-Control basic form settings and response acceptance state with guidance for complete configuration.
+Open or close a form to responses via `forms.setPublishSettings`. The form stays published either way.
 
 **Parameters:**
 - `form_id` (string, required): The unique ID of the form to configure
 - `accepting_responses` (boolean, optional): Desired response acceptance state (default: True)
 - `user_google_email` (UserGoogleEmailForms, optional): Google account email
 
-**Important:** Complete response control requires manual configuration in the Google Forms web interface under Settings > Responses.
+**Important:** Forms created before Google's publish-settings rollout reject this call; toggle *Accepting responses* in the editor's Responses tab for those.
 
 ### `publish_form_publicly`
 
@@ -350,33 +352,64 @@ questions_to_update = [
 
 ---
 
-## HTML Formatting Support
+### `update_form_settings`
 
-Google Forms API has **LIMITED** HTML support for rich content:
+Change form-level settings. Only the fields you pass are changed.
 
-### **SUPPORTED HTML ELEMENTS:**
-- **Form/Question Descriptions**: Basic HTML tags like `<b>`, `<i>`, `<u>`, `<br>`, `<p>`
-- **Links**: `<a href="...">text</a>` for clickable links
-- **Lists**: `<ul>`, `<ol>`, `<li>` for bullet and numbered lists
+**Parameters:**
+- `form_id` (string, required): The unique ID of the form to configure
+- `title` / `description` (string, optional): Plain text; `description=""` clears it
+- `is_quiz` (boolean, optional): Quiz mode (enables `points` / `correct_answers` on questions)
+- `email_collection_type` (string, optional): `DO_NOT_COLLECT`, `VERIFIED` or `RESPONDER_INPUT`
+- `user_google_email` (UserGoogleEmailForms, optional): Google account email
 
-### **RICH CONTENT ALTERNATIVES:**
-- **Images**: Use an `IMAGE_ITEM`, or `image_url` on a question or option (not HTML `<img>` tags)
-- **Videos**: Use a `VIDEO_ITEM` (YouTube videos)
-- **Formatted Text**: Use a `TEXT_ITEM` for rich text sections
-- **HTML limitations**: No CSS, JavaScript, or complex HTML structures
+---
 
-### **FORMATTING EXAMPLES:**
+## Branching, Grids and Reordering
+
 ```python
-# Description with HTML
-description = "Please fill out <b>all required</b> fields.<br>Visit <a href='https://example.com'>our website</a> for help."
+# 1. Add the sections, then read their itemIds with get_form
+[{"type": "PAGE_BREAK_ITEM", "title": "Attending"}, {"type": "PAGE_BREAK_ITEM", "title": "Not attending"}]
 
-# Question with HTML formatting
-{
-    "type": "TEXT_QUESTION",
-    "title": "Please provide your <b>full legal name</b> as it appears on your ID",
-    "description": "<i>Note:</i> This information will be used for verification.<br>Visit <a href='https://help.company.com'>our help page</a> for guidelines."
-}
+# 2. Branch a multiple choice / dropdown question (checkboxes cannot branch)
+{"item_id": "q1", "options": [
+    {"value": "Yes", "go_to_section_id": "<Attending itemId>"},
+    {"value": "No", "go_to_action": "SUBMIT_FORM"},  # or NEXT_SECTION / RESTART_FORM
+]}
+
+# A grid: one row question per row, shared columns
+{"type": "GRID_QUESTION", "title": "Rate each", "rows": ["Speed", "Price"],
+ "columns": ["Bad", "OK", "Good"], "multiple": False, "shuffle_rows": False, "required": True}
+
+# A free-text "Other" option (multiple choice / checkbox)
+{"type": "MULTIPLE_CHOICE_QUESTION", "title": "Role", "options": ["Dev", {"is_other": True}]}
+
+# Rating icon and video sizing
+{"type": "RATING_QUESTION", "title": "Stars", "rating_scale_level": 5, "icon_type": "HEART"}
+{"type": "VIDEO_ITEM", "youtube_url": "https://www.youtube.com/watch?v=...", "video_width": 480, "video_alignment": "CENTER"}
+
+# Reorder: moves apply in the order given, deletes run last
+[{"item_id": "q9", "move_to_index": 0}]
 ```
+
+---
+
+## Formatting and Theming Limits
+
+Checked against the live Forms API v1 discovery document (revision 20260913): the
+API has **no** theme, colour, font, header-image or rich-text fields. `Info` is
+`title` / `description` / `documentTitle`, `TextItem` has no fields of its own, and
+`FormSettings` is `emailCollectionType` + `quizSettings`. Titles and descriptions
+are plain text - HTML and Markdown are shown to responders literally.
+
+What the API does control: images and videos (`*_width`, `*_alignment`), sections,
+branching, item order, quiz mode and email collection.
+
+**Themed forms:** style a form once in the editor (theme colour, header image,
+fonts) and pass its ID as `create_form(template_form_id=...)`. The Drive copy keeps
+the look; delete or replace the template's items with `update_form_questions`.
+
+---
 
 ## Authentication & Scopes
 
@@ -442,7 +475,7 @@ responses = list_form_responses(form_id=form.formId)
 
 ## Best Practices
 
-1. **Form Structure**: Design clear, logical question flow with proper HTML formatting
+1. **Form Structure**: Design clear, logical question flow with plain-text titles and descriptions
 2. **Question Types**: Choose appropriate input types for effective data collection
 3. **Response Handling**: Implement proper pagination for large response datasets
 4. **Public Publishing**: Use Drive integration for maximum accessibility
@@ -480,7 +513,7 @@ All tools return structured error responses with meaningful messages:
 - ✅ 6 new TypedDict response classes for structured data handling
 - ✅ Fixed all field validation errors (publishState, sharedWith, answerCount)
 - ✅ Enhanced parameter descriptions with Field annotations
-- ✅ HTML formatting guidance and limitations documentation
+- ✅ Branching, grids, item reordering, form settings, and themed forms via `template_form_id`
 - ✅ Complete workflow integration examples
 - ✅ Live testing validation with MCP server compatibility
 

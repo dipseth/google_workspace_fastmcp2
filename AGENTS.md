@@ -178,7 +178,8 @@ return {"messages_found": len(messages), "event_created": event}
 | `create_form` | Create a new form |
 | `get_form` | Get form details |
 | `add_questions_to_form` | Add questions |
-| `update_form_questions` | Modify existing questions |
+| `update_form_questions` | Modify, reorder or delete existing items |
+| `update_form_settings` | Title, description, quiz mode, email collection |
 | `set_form_publish_state` | Toggle publish state |
 | `publish_form_publicly` | Make form publicly accessible |
 | `get_form_response` | Get a specific response |
