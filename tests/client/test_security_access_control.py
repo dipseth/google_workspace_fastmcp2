@@ -56,7 +56,7 @@ class TestAccessControlLayer1:
             "scope": "openid email profile",
         }
 
-        with patch("auth.token_validator.requests.get") as mock_get:
+        with patch("auth.token_validator.requests.post") as mock_get:
             # Mock successful Google token validation
             mock_response = Mock()
             mock_response.status_code = 200
@@ -88,7 +88,7 @@ class TestAccessControlLayer1:
             os.getenv("MCP_REQUIRE_EXISTING_CREDENTIALS", "false").lower() == "true"
         )
 
-        with patch("auth.token_validator.requests.get") as mock_get:
+        with patch("auth.token_validator.requests.post") as mock_get:
             # Mock successful Google token validation
             mock_response = Mock()
             mock_response.status_code = 200
@@ -117,7 +117,7 @@ class TestAccessControlLayer1:
 
     async def test_token_validation_invalid_token(self):
         """🚫 Test that invalid tokens are rejected."""
-        with patch("auth.token_validator.requests.get") as mock_get:
+        with patch("auth.token_validator.requests.post") as mock_get:
             # Mock failed Google token validation
             mock_response = Mock()
             mock_response.status_code = 401
@@ -145,7 +145,7 @@ class TestAccessControlLayer1:
             "scope": "openid email profile",
         }
 
-        with patch("auth.token_validator.requests.get") as mock_get:
+        with patch("auth.token_validator.requests.post") as mock_get:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.json.return_value = mock_token_info

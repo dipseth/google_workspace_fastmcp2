@@ -312,9 +312,10 @@ def create_sso_google_provider(
                 import httpx as _httpx
 
                 async with _httpx.AsyncClient(timeout=10) as _http:
-                    _resp = await _http.get(
+                    # POST body keeps the token out of URLs/logs
+                    _resp = await _http.post(
                         "https://www.googleapis.com/oauth2/v1/tokeninfo",
-                        params={"access_token": token},
+                        data={"access_token": token},
                     )
                 if _resp.status_code == 200:
                     _info = _resp.json()
