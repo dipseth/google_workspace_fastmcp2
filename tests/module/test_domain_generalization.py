@@ -7,7 +7,8 @@ system work correctly across multiple domains (gchat, email) without Qdrant.
 import importlib.util
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")  # optional [ml] extra
 
 from adapters.domain_config import (
     EMAIL_DOMAIN,

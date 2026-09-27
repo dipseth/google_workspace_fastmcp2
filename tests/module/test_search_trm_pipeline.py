@@ -5,7 +5,8 @@ without requiring Qdrant or real embeddings.
 """
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")  # optional [ml] extra
 
 from adapters.domain_config import EMAIL_DOMAIN, GCHAT_DOMAIN
 from adapters.unified_trn import (

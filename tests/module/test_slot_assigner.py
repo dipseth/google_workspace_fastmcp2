@@ -1,7 +1,8 @@
 """Unit tests for SlotAffinityNet, DomainConfig, and slot_assignment inference."""
 
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")  # optional [ml] extra
 
 from adapters.domain_config import (
     EMAIL_DOMAIN,

@@ -67,6 +67,18 @@ The fastest way to get started - install directly from PyPI:
 
 > ⚡ **That's it!** The server runs in stdio mode by default, perfect for MCP clients like Claude Desktop, Cursor, Roo, etc. [Code Mode](#-code-mode-default) is on out of the box, so your client sees 7 lean meta-tools instead of 90+ schemas.
 
+**Optional extras.** The base install covers every Google Workspace tool. Heavier features are opt-in, and the server logs a hint and carries on without them:
+
+| Extra | Adds | Without it |
+|---|---|---|
+| `ml` | PyTorch: learned card/email slot scoring | Rule-based slot routing |
+| `sampling` | LiteLLM: Venice / OpenAI-compatible sampling, cache keepalive | Native Anthropic sampling only (`ANTHROPIC_API_KEY`) |
+| `payment` | x402 USDC tool gating | `PAYMENT_ENABLED=true` refuses to start |
+| `observability` | Langfuse tracing | No tracing |
+| `all` | Everything above | — |
+
+Use e.g. `"args": ["google-workspace-unlimited[all]"]` to install them.
+
 #### Method 1b: Claude Code Plugin (server + skills)
 
 Claude Code users can install the server **and** the skills that teach Claude its card/email DSL, code mode, and Qdrant search in two commands:
@@ -86,7 +98,7 @@ For development or customization:
    ```bash
    git clone https://github.com/dipseth/google_workspace_fastmcp2.git
    cd google_workspace_fastmcp2
-   uv sync
+   uv sync --all-extras
    ```
 
 2. **Start the server:**

@@ -1473,7 +1473,14 @@ def setup_code_mode(mcp: FastMCP) -> None:
 
             # Use LiteLLM directly (same as keepalive engine) since we
             # don't have a SamplingContext inside the sandbox.
-            import litellm
+            try:
+                import litellm
+            except ImportError:
+                logger.debug(
+                    "Argument recovery skipped for %s: litellm not installed",
+                    tool_name,
+                )
+                return None
 
             from config.settings import settings as _settings
 

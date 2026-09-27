@@ -904,7 +904,12 @@ def reassign_supply_map(
         Reassigned supply_map (new dict, original unchanged).
         On any error, returns the original supply_map.
     """
-    import torch
+    try:
+        import torch
+    except ImportError:
+        # torch ships in the optional [ml] extra; without it the rule-based
+        # pool routing stands.
+        return supply_map
 
     VOCAB, COMP_TO_POOL, SPEC_ORDER = _get_constants(domain_config)
 

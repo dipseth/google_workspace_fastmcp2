@@ -74,6 +74,16 @@ class LiteLLMSamplingHandler:
         api_key: str | None = None,
         api_base: str | None = None,
     ):
+        # Fail at construction, not mid-request: callers catch this and fall
+        # back to the Anthropic provider or no sampling.
+        import importlib.util
+
+        if importlib.util.find_spec("litellm") is None:
+            raise ImportError(
+                "LiteLLM sampling requires the sampling extra: "
+                "google-workspace-unlimited[sampling]"
+            )
+
         self.default_model = default_model
         self.api_key = api_key
         self.api_base = api_base
