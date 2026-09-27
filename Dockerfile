@@ -29,8 +29,8 @@ COPY pyproject.toml uv.lock README.md ./
 # Copy application code (needed before uv sync for hatchling build)
 COPY . .
 
-# Install Python dependencies using uv
-RUN uv sync --frozen
+# Install Python dependencies using uv (all optional feature extras)
+RUN uv sync --frozen --extra all
 
 # Create credentials directory
 RUN mkdir -p /app/credentials && \

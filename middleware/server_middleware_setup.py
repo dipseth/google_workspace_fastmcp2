@@ -390,6 +390,15 @@ def setup_all_middleware(
 
     # ─── 11. X402 Payment Middleware ───
     if settings.payment_enabled:
+        import importlib.util
+
+        # Fail closed: starting without the SDK would leave gated tools open.
+        if importlib.util.find_spec("x402") is None:
+            raise RuntimeError(
+                "PAYMENT_ENABLED=true but the x402 SDK is not installed. "
+                "Install the payment extra: google-workspace-unlimited[payment]"
+            )
+
         from middleware.payment import X402PaymentMiddleware, get_resource_server
 
         try:

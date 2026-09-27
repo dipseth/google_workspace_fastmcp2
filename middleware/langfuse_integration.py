@@ -216,6 +216,15 @@ def configure_langfuse() -> bool:
             logger.debug("Langfuse not configured — skipping")
             return False
 
+        import importlib.util
+
+        if importlib.util.find_spec("langfuse") is None:
+            logger.warning(
+                "Langfuse keys are set but langfuse is not installed; tracing "
+                "disabled. Install google-workspace-unlimited[observability]"
+            )
+            return False
+
         # Core credentials
         os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
         os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
@@ -355,7 +364,9 @@ def wrap_anthropic_handler_with_langfuse(handler: Any) -> Any:
                         else ""
                     )
 
-                    _lf.update_current_observation(
+                    # v4 has no update_current_observation; @observe creates
+                    # a span by default.
+                    _lf.update_current_span(
                         input=_input_text,
                         output=_output_text,
                         name=obs_name,

@@ -781,6 +781,16 @@ async def cache_keepalive_lifespan(server: Any):
         yield {"cache_keepalive_engine": None}
         return
 
+    import importlib.util
+
+    if importlib.util.find_spec("litellm") is None:
+        logger.warning(
+            "Cache keepalive: skipped (litellm not installed; install "
+            "google-workspace-unlimited[sampling])"
+        )
+        yield {"cache_keepalive_engine": None}
+        return
+
     try:
         from middleware.cache_keepalive import (
             CacheKeepaliveEngine,
@@ -827,6 +837,16 @@ async def model_artifact_lifespan(server: Any):
 
     if not settings.model_artifact_enabled:
         logger.info("Model artifacts: disabled (MODEL_ARTIFACT_ENABLED=false)")
+        yield {"model_artifact_provider": None, "model_artifact_paths": {}}
+        return
+
+    import importlib.util
+
+    if importlib.util.find_spec("torch") is None:
+        logger.warning(
+            "Model artifacts: skipped (torch not installed; install "
+            "google-workspace-unlimited[ml])"
+        )
         yield {"model_artifact_provider": None, "model_artifact_paths": {}}
         return
 
