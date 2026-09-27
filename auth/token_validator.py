@@ -45,9 +45,10 @@ def validate_google_token_with_access_control(token: str) -> Optional[Dict[str, 
         Token info dict if valid and authorized, None otherwise
     """
     try:
-        # Step 1: Validate token with Google
-        response = requests.get(
-            f"https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={token}",
+        # Step 1: Validate token with Google (POST body keeps the token out of URLs/logs)
+        response = requests.post(
+            "https://www.googleapis.com/oauth2/v1/tokeninfo",
+            data={"access_token": token},
             timeout=5,
         )
 
