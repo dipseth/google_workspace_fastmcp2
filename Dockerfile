@@ -7,6 +7,10 @@ ENV PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     PATH="/root/.local/bin:$PATH"
 
+# server.py defaults to stdio; the container serves HTTP on :8002
+# (HEALTHCHECK below depends on it). Override at runtime if needed.
+ENV MCP_TRANSPORT=http
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
@@ -44,5 +48,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 # (Docker sends STOPSIGNAL to PID 1 — uv must forward it to the child process)
 STOPSIGNAL SIGTERM
 
-# Run the server using uv with exec form for proper signal handling
-CMD ["uv", "run", "python", "-u", "server.py"]
+# Run the server using uv with exec form for proper signal handling.
+# --no-sync: deps are installed at build time; re-syncing on every start
+# rebuilds the package and slows cold starts.
+CMD ["uv", "run", "--no-sync", "python", "-u", "server.py"]
