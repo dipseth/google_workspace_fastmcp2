@@ -19,7 +19,9 @@ Dependencies:
 """
 
 import asyncio
+import base64
 import io
+import os
 import re
 
 import httpx
@@ -27,7 +29,7 @@ from fastmcp import FastMCP
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from pydantic import Field
-from typing_extensions import Annotated, Any, Dict, List, Optional
+from typing_extensions import Annotated, Any, Dict, List, Literal, Optional
 
 from auth.service_helpers import get_injected_service, get_service, request_service
 from config.enhanced_logging import setup_logger
@@ -37,6 +39,7 @@ from .drive_enums import MimeTypeFilter
 from .drive_search_types import DriveFileInfo, DriveSearchResponse
 from .drive_types import (
     CreateDriveFileResponse,
+    DownloadDriveFileResponse,
     DriveItemInfo,
     DriveItemsResponse,
     MakeDriveFilesPublicResponse,
@@ -553,6 +556,274 @@ async def search_drive_files(
         )
 
 
+# Formats a native Google file can be exported to: format -> MIME type
+DRIVE_EXPORT_FORMATS = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "csv": "text/csv",
+    "txt": "text/plain",
+    "html": "text/html",
+    "md": "text/markdown",
+    "png": "image/png",
+    "svg": "image/svg+xml",
+}
+
+# Export format used for a native Google file when none is requested
+DRIVE_DEFAULT_EXPORT_FORMAT = {
+    "application/vnd.google-apps.document": "pdf",
+    "application/vnd.google-apps.spreadsheet": "xlsx",
+    "application/vnd.google-apps.presentation": "pdf",
+    "application/vnd.google-apps.drawing": "png",
+}
+
+DRIVE_SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut"
+GOOGLE_APPS_MIME_PREFIX = "application/vnd.google-apps."
+
+# Base64 is returned inline in the tool result, so it gets a tighter cap
+MAX_DRIVE_BASE64_BYTES = 10 * 1024 * 1024
+DRIVE_DOWNLOAD_CHUNK_BYTES = 5 * 1024 * 1024
+
+DEFAULT_DRIVE_DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+class _DriveDownloadTooLarge(Exception):
+    """Raised when a download passes the size limit mid-stream."""
+
+
+async def _stream_drive_media(request_obj: Any, fh: Any, max_bytes: int) -> int:
+    """Stream a Drive media request into ``fh``, enforcing ``max_bytes``.
+
+    Exports report no size up front, so the limit is checked per chunk.
+
+    Returns:
+        Number of bytes written.
+    """
+    downloader = MediaIoBaseDownload(
+        fh, request_obj, chunksize=DRIVE_DOWNLOAD_CHUNK_BYTES
+    )
+    done = False
+    while not done:
+        _, done = await asyncio.to_thread(downloader.next_chunk)
+        if fh.tell() > max_bytes:
+            raise _DriveDownloadTooLarge()
+    return fh.tell()
+
+
+def _unique_path(file_path: str) -> str:
+    """Return ``file_path``, or a ``name (n).ext`` variant if it already exists."""
+    base, ext = os.path.splitext(file_path)
+    counter = 1
+    while os.path.exists(file_path):
+        file_path = f"{base} ({counter}){ext}"
+        counter += 1
+    return file_path
+
+
+# Define download_drive_file at module level so it can be imported
+async def download_drive_file(
+    file_id: Annotated[
+        str,
+        Field(description="Google Drive file ID (from search_drive_files)"),
+    ],
+    export_format: Annotated[
+        Optional[
+            Literal[
+                "pdf", "docx", "xlsx", "pptx", "csv", "txt", "html", "md", "png", "svg"
+            ]
+        ],
+        Field(
+            description="Format to export native Google files to. Defaults: Docs and Slides to pdf, Sheets to xlsx, Drawings to png. Ignored for uploaded files (PDFs, images, Office files), which download as stored."
+        ),
+    ] = None,
+    return_url: Annotated[
+        bool,
+        Field(
+            description="If true (default), return a temporary signed download URL (15 min, one-time use). Best for remote clients. Set to false to use save_dir or return_content instead."
+        ),
+    ] = True,
+    return_content: Annotated[
+        bool,
+        Field(
+            description="If true, return base64-encoded file content (10 MB limit). Only used when return_url is false."
+        ),
+    ] = False,
+    save_dir: Annotated[
+        str,
+        Field(
+            description="Directory on the server's filesystem to save the file to. Defaults to ~/Downloads. Only used when return_url and return_content are both false."
+        ),
+    ] = "",
+    user_google_email: UserGoogleEmailDrive = None,
+) -> DownloadDriveFileResponse:
+    """
+    Download a Drive file's bytes.
+
+    By default, returns a temporary signed download URL (expires in 15 minutes,
+    one-time use). Set return_url=False to save to disk instead, or use
+    return_content=True for base64.
+
+    Args:
+        file_id: Google Drive file ID
+        export_format: Export format for native Google files
+        return_url: If True, return a signed download URL
+        return_content: If True, return base64 data instead of saving to disk
+        save_dir: Directory to save the file to. Defaults to ~/Downloads.
+        user_google_email: User's Google email address
+
+    Returns:
+        DownloadDriveFileResponse: Response with download_url, file_path (disk)
+        or data (base64)
+    """
+    from config.settings import settings
+
+    logger.info(
+        f"[download_drive_file] File ID: '{file_id}', Export: {export_format}, "
+        f"Return URL: {return_url}, Return content: {return_content}"
+    )
+
+    def _error(message: str, **fields: Any) -> DownloadDriveFileResponse:
+        return DownloadDriveFileResponse(
+            success=False,
+            fileId=file_id,
+            userEmail=user_google_email or "",
+            error=message,
+            **fields,
+        )
+
+    written_path: Optional[str] = None
+
+    try:
+        drive_service = await _get_drive_service_with_fallback(user_google_email)
+
+        metadata_fields = (
+            "id, name, mimeType, size, webViewLink, shortcutDetails(targetId)"
+        )
+        file_metadata = await asyncio.to_thread(
+            drive_service.files()
+            .get(fileId=file_id, fields=metadata_fields, supportsAllDrives=True)
+            .execute
+        )
+
+        # A shortcut has no content of its own; download what it points to
+        if file_metadata.get("mimeType") == DRIVE_SHORTCUT_MIME_TYPE:
+            target_id = file_metadata.get("shortcutDetails", {}).get("targetId")
+            if not target_id:
+                return _error("Shortcut has no target file")
+            file_metadata = await asyncio.to_thread(
+                drive_service.files()
+                .get(fileId=target_id, fields=metadata_fields, supportsAllDrives=True)
+                .execute
+            )
+
+        source_id = file_metadata.get("id", file_id)
+        source_mime_type = file_metadata.get("mimeType", "")
+        file_name = os.path.basename(file_metadata.get("name", "")) or source_id
+        described = {
+            "fileName": file_name,
+            "sourceMimeType": source_mime_type,
+            "webViewLink": file_metadata.get("webViewLink", ""),
+        }
+
+        max_bytes = settings.drive_download_max_size_mb * 1024 * 1024
+        if return_content and not return_url:
+            max_bytes = min(max_bytes, MAX_DRIVE_BASE64_BYTES)
+        limit_mb = max_bytes / (1024 * 1024)
+
+        if source_mime_type.startswith(GOOGLE_APPS_MIME_PREFIX):
+            fmt = export_format or DRIVE_DEFAULT_EXPORT_FORMAT.get(source_mime_type)
+            if not fmt:
+                return _error(
+                    f"Files of type '{source_mime_type}' have no downloadable content",
+                    **described,
+                )
+            mime_type = DRIVE_EXPORT_FORMATS[fmt]
+            if not file_name.lower().endswith(f".{fmt}"):
+                file_name = f"{file_name}.{fmt}"
+            request_obj = drive_service.files().export_media(
+                fileId=source_id, mimeType=mime_type
+            )
+        else:
+            mime_type = source_mime_type
+            size = int(file_metadata.get("size") or 0)
+            if size > max_bytes:
+                return _error(
+                    f"File too large ({size / (1024 * 1024):.1f} MB). "
+                    f"Limit is {limit_mb:.0f} MB.",
+                    size=size,
+                    **described,
+                )
+            request_obj = drive_service.files().get_media(
+                fileId=source_id, supportsAllDrives=True
+            )
+
+        response = DownloadDriveFileResponse(
+            success=True,
+            fileId=source_id,
+            fileName=file_name,
+            mimeType=mime_type,
+            sourceMimeType=source_mime_type,
+            webViewLink=file_metadata.get("webViewLink", ""),
+            userEmail=user_google_email or "",
+        )
+
+        if return_url:
+            # Stream to the attachment temp dir and return a signed URL
+            from gmail.attachment_server import (
+                allocate_attachment,
+                generate_attachment_url,
+            )
+
+            attachment_id, written_path = allocate_attachment(file_name)
+            with open(written_path, "wb") as fh:
+                response["size"] = await _stream_drive_media(request_obj, fh, max_bytes)
+            response["download_url"] = generate_attachment_url(
+                settings.base_url, attachment_id, file_name
+            )
+        elif return_content:
+            # Return base64 data for remote clients
+            buffer = io.BytesIO()
+            response["size"] = await _stream_drive_media(request_obj, buffer, max_bytes)
+            response["data"] = base64.b64encode(buffer.getvalue()).decode("ascii")
+        else:
+            # Save to disk for local clients
+            save_dir = save_dir or DEFAULT_DRIVE_DOWNLOAD_DIR
+            os.makedirs(save_dir, exist_ok=True)
+            written_path = _unique_path(os.path.join(save_dir, file_name))
+            with open(written_path, "wb") as fh:
+                response["size"] = await _stream_drive_media(request_obj, fh, max_bytes)
+            response["file_path"] = written_path
+
+        logger.info(
+            f"[download_drive_file] Downloaded '{file_name}' ({response['size']} bytes)"
+        )
+        return response
+
+    except _DriveDownloadTooLarge:
+        _remove_partial_download(written_path)
+        return _error(f"File too large. Limit is {limit_mb:.0f} MB.", **described)
+
+    except HttpError as e:
+        _remove_partial_download(written_path)
+        logger.error(f"Drive API error in download_drive_file: {e}")
+        return _error(f"Drive API error: {e}")
+
+    except Exception as e:
+        _remove_partial_download(written_path)
+        logger.error(f"Unexpected error in download_drive_file: {e}")
+        return _error(f"Unexpected error: {e}")
+
+
+def _remove_partial_download(file_path: Optional[str]) -> None:
+    """Delete a file left behind by a failed download."""
+    if file_path and os.path.exists(file_path):
+        try:
+            os.unlink(file_path)
+        except OSError as e:
+            logger.warning(f"Failed to remove partial download {file_path}: {e}")
+
+
 def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
     """
     Register comprehensive Google Drive tools with the FastMCP server.
@@ -564,6 +835,7 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
     4. create_drive_file: File creation
     5. share_drive_files: Share files with specific people
     6. make_drive_files_public: Make files publicly accessible
+    7. download_drive_file: File download as bytes
 
     Args:
         mcp: FastMCP server instance to register tools with
@@ -600,15 +872,34 @@ def setup_drive_comprehensive_tools(mcp: FastMCP) -> None:
         },
     )(search_drive_files)
 
+    # Register the download_drive_file tool (module-level function)
+    mcp.tool(
+        name="download_drive_file",
+        description=(
+            "Download any Drive file as its original bytes: uploaded files (PDFs, scans, images, Office files, archives) come back as stored, native Docs/Sheets/Slides/Drawings are exported (pdf, docx, xlsx, pptx, ...).\n"
+            "Use when: you need the file itself, e.g. a PDF or image that get_drive_file_content reports as binary. To read a file's text, get_drive_file_content is simpler; find ids first with search_drive_files.\n"
+            "Behavior: read-only on Drive; supports shared drives and shortcuts. The default signed URL needs the server reachable over HTTP; on a local stdio server set return_url=false and use save_dir.\n"
+            "Returns: download_url (15 min, one-time use), or file_path / base64 data, plus name, mime type and size. Errors: file not found / no access; folders and Forms have no content; size limit 100 MB (10 MB for base64; Google caps exports at 10 MB)."
+        ),
+        tags={"drive", "file", "download", "export", "binary"},
+        annotations={
+            "title": "Download Drive File",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )(download_drive_file)
+
     @mcp.tool(
         name="get_drive_file_content",
         description=(
             "Read any Drive file's content as text: native Docs/Sheets/Slides are exported (text/CSV), Office files are parsed, other types are UTF-8 decoded or flagged as binary.\n"
-            "Use when: reading arbitrary Drive files by id. For Google Docs/.docx specifically, get_doc_content returns structured metadata; find ids first with search_drive_files.\n"
+            "Use when: reading arbitrary Drive files by id. For Google Docs/.docx specifically, get_doc_content returns structured metadata; for the bytes of a PDF, image or other binary file, use download_drive_file; find ids first with search_drive_files.\n"
             "Behavior: read-only; supports shared drives.\n"
-            "Returns: plain text with a metadata header (name, mime type, link). Errors: file not found / no access; binary formats yield a notation instead of content."
+            "Returns: plain text with a metadata header (name, mime type, link). Errors: file not found / no access; binary formats yield a notation instead of content (use download_drive_file for those)."
         ),
-        tags={"drive", "file", "content", "download", "read"},
+        tags={"drive", "file", "content", "read"},
         annotations={
             "title": "Get Drive File Content",
             "readOnlyHint": True,

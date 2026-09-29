@@ -158,6 +158,14 @@
     "filter_id",
     "user_google_email"
   ],
+  "download_drive_file": [
+    "export_format",
+    "file_id",
+    "return_content",
+    "return_url",
+    "save_dir",
+    "user_google_email"
+  ],
   "download_gmail_attachment": [
     "filename",
     "message_id",

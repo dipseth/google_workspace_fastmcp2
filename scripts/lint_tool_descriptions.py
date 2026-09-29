@@ -55,6 +55,7 @@ ENFORCED_TOOLS: set[str] = {
     # Drive
     "search_drive_files",
     "get_drive_file_content",
+    "download_drive_file",
     # Chat
     "manage_space",
     "send_message",
