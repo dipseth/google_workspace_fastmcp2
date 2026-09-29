@@ -361,7 +361,7 @@ to see currently active tools.
 
 | Service | Key Tools |
 |---------|-----------|
-| **Drive** | `upload_to_drive`, `search_drive_files`, `list_drive_items`, `create_drive_file`, `share_drive_files`, `manage_drive_files`, `get_drive_file_content`, `make_drive_files_public` |
+| **Drive** | `upload_to_drive`, `search_drive_files`, `list_drive_items`, `create_drive_file`, `share_drive_files`, `manage_drive_files`, `get_drive_file_content`, `download_drive_file`, `make_drive_files_public` |
 | **Gmail** | `compose_dynamic_email`, `search_gmail_messages`, `send_gmail_message`, `draft_gmail_message`, `reply_to_gmail_message`, `list_gmail_labels`, `manage_gmail_label`, `list_gmail_filters`, `create_gmail_filter`, `manage_gmail_allow_list` |
 | **Chat** | `send_dynamic_card`, `list_spaces`, `list_messages`, `send_message`, `search_messages` |
 | **Chat Cards** | `send_simple_card`, `send_rich_card`, `send_enhanced_card`, `send_interactive_card`, `send_smart_card`, `preview_card_from_description`, `validate_card`, `find_card_templates`, `save_card_template` |

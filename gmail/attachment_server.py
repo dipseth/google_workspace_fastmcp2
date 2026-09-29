@@ -1,7 +1,7 @@
 """Secure temporary attachment storage with HMAC-signed download URLs.
 
-Downloads Gmail attachments to a secure temp directory and generates
-one-time-use signed URLs for retrieval. URLs expire after a configurable
+Downloads Gmail attachments and Drive files to a secure temp directory and
+generates one-time-use signed URLs for retrieval. URLs expire after a configurable
 TTL (default 15 minutes).
 
 Security:
@@ -94,6 +94,31 @@ def _get_secure_temp_dir() -> str:
     return temp_dir
 
 
+def allocate_attachment(filename: str) -> tuple[str, str]:
+    """Reserve a temp-dir path for a file the caller will write itself.
+
+    Lets large downloads stream to disk instead of being held in memory.
+
+    Args:
+        filename: Original filename (sanitized).
+
+    Returns:
+        Tuple of (file_id, file_path).
+    """
+    temp_dir = _get_secure_temp_dir()
+    file_id = uuid.uuid4().hex
+    safe_name = os.path.basename(filename) or "attachment"
+    disk_name = f"{file_id}_{safe_name}"
+    file_path = os.path.join(temp_dir, disk_name)
+
+    # Ensure cleanup task is running
+    try:
+        start_cleanup_task()
+    except RuntimeError:
+        pass  # No event loop yet — cleanup will happen on next save
+    return file_id, file_path
+
+
 def save_attachment(raw_bytes: bytes, filename: str) -> str:
     """Save attachment bytes to temp dir with UUID prefix.
 
@@ -104,21 +129,12 @@ def save_attachment(raw_bytes: bytes, filename: str) -> str:
     Returns:
         file_id: UUID string used to retrieve the file.
     """
-    temp_dir = _get_secure_temp_dir()
-    file_id = uuid.uuid4().hex
-    safe_name = os.path.basename(filename) or "attachment"
-    disk_name = f"{file_id}_{safe_name}"
-    file_path = os.path.join(temp_dir, disk_name)
+    file_id, file_path = allocate_attachment(filename)
 
     with open(file_path, "wb") as f:
         f.write(raw_bytes)
 
     logger.info("Attachment saved: %s (%d bytes)", file_id[:8], len(raw_bytes))
-    # Ensure cleanup task is running
-    try:
-        start_cleanup_task()
-    except RuntimeError:
-        pass  # No event loop yet — cleanup will happen on next save
     return file_id
 
 
@@ -254,6 +270,7 @@ def reset_state() -> None:
 
 
 __all__ = [
+    "allocate_attachment",
     "save_attachment",
     "get_attachment_path",
     "cleanup_attachment",

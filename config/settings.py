@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # Attachment download temp directory (for signed URL mode)
     attachment_temp_dir: str = "/tmp/gw-mcp-attachments"
+    # Largest file download_drive_file will fetch (signed URL / save_dir modes)
+    drive_download_max_size_mb: int = 100
 
     # Drive upload — client filesystem mode
     # When False (default), `path` is interpreted as the server's local

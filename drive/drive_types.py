@@ -98,3 +98,20 @@ class MakeDriveFilesPublicResponse(TypedDict):
     userEmail: str
     message: str
     error: NotRequired[Optional[str]]
+
+
+class DownloadDriveFileResponse(TypedDict):
+    """Response structure for download_drive_file tool."""
+
+    success: bool
+    fileId: str
+    fileName: NotRequired[str]  # Name of the downloaded file (export extension applied)
+    mimeType: NotRequired[str]  # MIME type of the downloaded bytes
+    sourceMimeType: NotRequired[str]  # MIME type of the file in Drive
+    size: NotRequired[int]
+    download_url: NotRequired[str]
+    file_path: NotRequired[str]
+    data: NotRequired[str]
+    webViewLink: NotRequired[str]
+    userEmail: str
+    error: NotRequired[Optional[str]]

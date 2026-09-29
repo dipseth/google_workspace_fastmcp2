@@ -8,7 +8,8 @@ Complete API documentation for all Google Drive tools in the FastMCP Google MCP 
 |-----------|-------------|
 | [`upload_file_to_drive`](#upload_file_to_drive) | Upload local files to Google Drive |
 | [`search_drive_files`](#search_drive_files) | Search for files and folders using query syntax |
-| [`get_drive_file_content`](#get_drive_file_content) | Retrieve content of any Drive file |
+| [`get_drive_file_content`](#get_drive_file_content) | Read a Drive file's content as text |
+| [`download_drive_file`](#download_drive_file) | Download a Drive file's bytes (signed URL, base64, or disk) |
 | [`list_drive_items`](#list_drive_items) | List files and folders in a directory |
 | [`create_drive_file`](#create_drive_file) | Create new files directly in Drive |
 | [`manage_drive_files`](#manage_drive_files) | Move, copy, rename, or delete files (unified file operations) |
@@ -189,23 +190,17 @@ Content format varies by file type:
 ```
 
 **Binary files (PDFs, images):**
-```json
-{
-  "content_type": "binary",
-  "download_url": "https://drive.google.com/uc?export=download&id=...",
-  "web_view_link": "https://drive.google.com/file/d/.../view",
-  "metadata": {...}
-}
-```
+
+Returned as the notation `[Binary or unsupported text encoding - N bytes]`.
+This tool is text-only; use [`download_drive_file`](#download_drive_file) for
+the bytes.
 
 ### Supported File Types
 
 - **Google Workspace**: Docs, Sheets, Slides, Forms (exported as text/HTML)
 - **Microsoft Office**: .docx, .xlsx, .pptx (converted and extracted)
 - **Text files**: .txt, .md, .csv, .json, .xml, .yaml
-- **PDFs**: Metadata returned with download link
-- **Images**: Metadata with view/download links
-- **Other**: Binary files return download links
+- **PDFs, images, other binary files**: Not readable as text; use `download_drive_file`
 
 ### Example Usage
 
@@ -215,6 +210,60 @@ content = await get_drive_file_content(
     user_google_email="user@gmail.com",
     file_id="1ABC2DEF3GHI4JKL"
 )
+```
+
+---
+
+## download_drive_file
+
+Download a Drive file's bytes. Uploaded files (PDFs, scans, images, Office
+files, archives) come back as stored; native Google files are exported.
+Shortcuts resolve to their target. Folders, Forms and other types with no
+content return an error.
+
+### Parameters
+
+| Parameter | Type | Required | Description | Default |
+|-----------|------|----------|-------------|---------|
+| `file_id` | string | Yes | Google Drive file ID | - |
+| `export_format` | string | No | Export format for native Google files: `pdf`, `docx`, `xlsx`, `pptx`, `csv`, `txt`, `html`, `md`, `png`, `svg`. Ignored for uploaded files | Docs/Slides `pdf`, Sheets `xlsx`, Drawings `png` |
+| `return_url` | boolean | No | Return a signed download URL (15 min, one-time use) | `true` |
+| `return_content` | boolean | No | Return base64 content; only used when `return_url` is false | `false` |
+| `save_dir` | string | No | Directory on the server to save to; only used when `return_url` and `return_content` are false | `~/Downloads` |
+| `user_google_email` | string | No | User's Google email address | authenticated user |
+
+### Returns
+
+```json
+{
+  "success": true,
+  "fileId": "1ABC2DEF3GHI4JKL",
+  "fileName": "scan.pdf",
+  "mimeType": "application/pdf",
+  "sourceMimeType": "application/pdf",
+  "size": 7234567,
+  "download_url": "https://server.example.com/attachment-download?fid=...&sig=...",
+  "webViewLink": "https://drive.google.com/file/d/.../view",
+  "userEmail": "user@gmail.com"
+}
+```
+
+`download_url` is replaced by `data` (base64) or `file_path` in the other modes.
+
+### Limits and deployment
+
+- **Size**: 100 MB (`DRIVE_DOWNLOAD_MAX_SIZE_MB`); 10 MB for base64. Google caps exports of native files at 10 MB.
+- **Signed URL**: served by the server's `/attachment-download` endpoint, so the server must be reachable over HTTP at `BASE_URL`. On a local stdio server, set `return_url=false`.
+- **Multiple replicas**: the file is staged in `ATTACHMENT_TEMP_DIR` on the replica that handled the tool call. Point it at a volume every replica mounts, and share `.auth_encryption_key`.
+
+### Example Usage
+
+```python
+# Signed URL for a scanned PDF
+result = await download_drive_file(file_id="1ABC2DEF3GHI4JKL")
+
+# Google Doc exported as Word
+result = await download_drive_file(file_id="1XYZ...", export_format="docx")
 ```
 
 ---

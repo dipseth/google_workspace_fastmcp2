@@ -109,7 +109,8 @@ return {"messages_found": len(messages), "event_created": event}
 | Tool | Description |
 |------|-------------|
 | `search_drive` | Search files across Drive |
-| `get_drive_file_content` | Read file content |
+| `get_drive_file_content` | Read file content as text |
+| `download_drive_file` | Download file bytes (signed URL, base64, or disk) |
 | `list_drive_files` | List files in a folder |
 | `upload_to_drive` | Upload a file |
 | `create_drive_folder` | Create a folder |
