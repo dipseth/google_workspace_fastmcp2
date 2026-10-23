@@ -1068,11 +1068,17 @@ def setup_code_mode(mcp: FastMCP) -> None:
     # too tight for execute blocks that chain several real tool calls (e.g. a
     # macro create + full MJML compose). Passing a limits dict replaces the
     # baseline entirely, so max_memory must be restated alongside the duration.
+    # Monty 1.1 (FastMCP 4.1) renamed ``max_duration_secs`` to
+    # ``max_feed_duration_secs`` and now measures only sandbox execution time,
+    # excluding time spent inside external functions such as call_tool.
     max_duration = float(os.getenv("CODE_MODE_MAX_DURATION_SECS", "90"))
     tasks_available = _ensure_tasks_extension(mcp)
     code_mode = CodeMode(
         sandbox_provider=EnhancedSandboxProvider(
-            limits={"max_duration_secs": max_duration, "max_memory": 100 * 1024 * 1024}
+            limits={
+                "max_feed_duration_secs": max_duration,
+                "max_memory": 100 * 1024 * 1024,
+            }
         ),
         discovery_tools=get_discovery_tool_factories(),
         execute_description=EXECUTE_DESCRIPTION,
