@@ -17,6 +17,7 @@ import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import make_msgid
+from html.parser import HTMLParser
 
 from typing_extensions import Dict, List, Literal, Optional, Union
 
@@ -278,45 +279,60 @@ def _format_label_color_info(color_obj: Optional[Dict]) -> str:
     return f"🎨 Text: {text_color} | Background: {bg_color}"
 
 
+def _decode_part(part: dict) -> str:
+    """Decode a MIME part body using its declared charset (UTF-8 fallback)."""
+    raw = base64.urlsafe_b64decode(part["body"]["data"])
+    charset = "utf-8"
+    for header in part.get("headers") or []:
+        if header.get("name", "").lower() == "content-type":
+            m = re.search(r'charset\s*=\s*"?([^";\s]+)', header.get("value", ""), re.I)
+            if m:
+                charset = m.group(1)
+            break
+    try:
+        return raw.decode(charset, errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")
+
+
+def _find_part_data(payload: dict, mime_type: str) -> str:
+    """Return the first decoded body of ``mime_type`` (BFS over MIME parts)."""
+    parts = [payload] if "parts" not in payload else payload.get("parts", [])
+    part_queue = list(parts)
+    while part_queue:
+        part = part_queue.pop(0)
+        if part.get("mimeType") == mime_type and part.get("body", {}).get("data"):
+            return _decode_part(part)
+        if part.get("mimeType", "").startswith("multipart/") and "parts" in part:
+            part_queue.extend(part.get("parts", []))
+    if payload.get("mimeType") == mime_type and payload.get("body", {}).get("data"):
+        return _decode_part(payload)
+    return ""
+
+
 def _extract_message_body(payload):
     """
-    Helper function to extract plain text body from a Gmail message payload.
+    Extract the message body as text — what the recipient actually sees.
+
+    Mail clients render the text/html alternative when there is one, so
+    that is the source of truth: it is converted to text with
+    :func:`_html_to_plain_text`. The text/plain part is used only when there
+    is no HTML or the HTML has no readable text (e.g. an image-only email).
+    Sender-written plain parts are often stubs ("View in an HTML-capable
+    client") or stale conversions, so they are not trusted over the HTML.
 
     Args:
         payload (dict): The message payload from Gmail API
 
     Returns:
-        str: The plain text body content, or empty string if not found
+        str: The body as plain text, or empty string if not found
     """
-    body_data = ""
-    parts = [payload] if "parts" not in payload else payload.get("parts", [])
-
-    part_queue = list(parts)  # Use a queue for BFS traversal of parts
-    while part_queue:
-        part = part_queue.pop(0)
-        if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
-            data = base64.urlsafe_b64decode(part["body"]["data"])
-            body_data = data.decode("utf-8", errors="ignore")
-            break  # Found plain text body
-        elif part.get("mimeType", "").startswith("multipart/") and "parts" in part:
-            part_queue.extend(part.get("parts", []))  # Add sub-parts to the queue
-
-    # If no plain text found, check the main payload body if it exists
-    if (
-        not body_data
-        and payload.get("mimeType") == "text/plain"
-        and payload.get("body", {}).get("data")
-    ):
-        data = base64.urlsafe_b64decode(payload["body"]["data"])
-        body_data = data.decode("utf-8", errors="ignore")
-
-    # Fallback: extract HTML body and convert to plain text
-    if not body_data:
-        html_body = _extract_html_body(payload)
-        if html_body:
-            body_data = _html_to_plain_text(html_body)
-
-    return body_data
+    html_body = _find_part_data(payload, "text/html")
+    if html_body:
+        html_text = _html_to_plain_text(html_body)
+        if html_text:
+            return html_text
+    return _find_part_data(payload, "text/plain")
 
 
 def _extract_attachment_metadata(payload: dict) -> List[dict]:
@@ -484,7 +500,6 @@ def _prepare_forward_subject(subject: str) -> str:
 def _extract_html_body(payload):
     """
     Helper function to extract HTML body from a Gmail message payload.
-    Prioritizes HTML content over plain text to preserve formatting.
 
     Args:
         payload (dict): The message payload from Gmail API
@@ -492,29 +507,7 @@ def _extract_html_body(payload):
     Returns:
         str: The HTML body content, or empty string if not found
     """
-    html_body = ""
-    parts = [payload] if "parts" not in payload else payload.get("parts", [])
-
-    part_queue = list(parts)  # Use a queue for BFS traversal of parts
-    while part_queue:
-        part = part_queue.pop(0)
-        if part.get("mimeType") == "text/html" and part.get("body", {}).get("data"):
-            data = base64.urlsafe_b64decode(part["body"]["data"])
-            html_body = data.decode("utf-8", errors="ignore")
-            break  # Found HTML body
-        elif part.get("mimeType", "").startswith("multipart/") and "parts" in part:
-            part_queue.extend(part.get("parts", []))  # Add sub-parts to the queue
-
-    # If no HTML found, check the main payload body if it exists
-    if (
-        not html_body
-        and payload.get("mimeType") == "text/html"
-        and payload.get("body", {}).get("data")
-    ):
-        data = base64.urlsafe_b64decode(payload["body"]["data"])
-        html_body = data.decode("utf-8", errors="ignore")
-
-    return html_body
+    return _find_part_data(payload, "text/html")
 
 
 def _format_forward_content(
@@ -670,12 +663,170 @@ def extract_email_addresses(header_value: str) -> List[str]:
     return unique_emails
 
 
+_VOID_TAGS = frozenset(
+    "area base br col embed hr img input link meta param source track wbr".split()
+)
+_SKIP_TAGS = frozenset(
+    "head style script title noscript template svg math object".split()
+)
+_BLOCK_TAGS = frozenset(
+    (
+        "p div h1 h2 h3 h4 h5 h6 tr table thead tbody tfoot ul ol dl dt dd "
+        "blockquote section article header footer nav aside main figure "
+        "figcaption address center form fieldset"
+    ).split()
+)
+_HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden", re.IGNORECASE)
+_INVISIBLE_CHARS = re.compile(r"[\u034f\u00ad\u200b-\u200d\u2060\ufeff]")
+
+
+class _HtmlTextExtractor(HTMLParser):
+    """Turn HTML into readable text the way a mail client would show it.
+
+    Skips non-content elements and anything hidden with ``display:none`` /
+    ``visibility:hidden`` / ``hidden`` (e.g. preheaders), keeps image alt
+    text, keeps ``<pre>`` whitespace, and writes links as ``text (url)``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: List[str] = []
+        self.pre_blocks: List[str] = []
+        # Open non-void elements: (tag, hidden_here)
+        self.stack: List[tuple] = []
+        self.hidden_depth = 0
+        self.pre_depth = 0
+        self.links: List[tuple] = []  # (href, chunks)
+
+    # -- output helpers --
+    def _emit(self, text: str) -> None:
+        if self.hidden_depth or not text:
+            return
+        target = self.links[-1][1] if self.links else self.out
+        # Keep a bullet on the same line as a block that opens inside its <li>.
+        if text == "\n" and target and target[-1].endswith("• "):
+            return
+        target.append(text)
+
+    def _close_to(self, tag: str) -> None:
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                for t, hid in reversed(self.stack[i:]):
+                    if hid:  # its start effects were skipped too
+                        self.hidden_depth -= 1
+                    else:
+                        self._end_effects(t)
+                del self.stack[i:]
+                return
+
+    # -- parser callbacks --
+    def handle_starttag(self, tag, attrs):
+        attr = {k: (v or "") for k, v in attrs}
+        if tag in _VOID_TAGS:
+            if self.hidden_depth:
+                return
+            if tag == "br":
+                self._emit("\n")
+            elif tag == "hr":
+                self._emit("\n---\n")
+            elif tag == "img":
+                alt = " ".join(attr.get("alt", "").split())
+                if alt:
+                    self._emit(f" {alt} ")
+            return
+
+        # An open <p>/<li> ends where the next one starts (HTML's implied end tag).
+        if tag in ("p", "li") and self.stack and self.stack[-1][0] == tag:
+            self._close_to(tag)
+
+        hidden = (
+            tag in _SKIP_TAGS
+            or "hidden" in attr
+            or bool(_HIDDEN_STYLE.search(attr.get("style", "")))
+        )
+        self.stack.append((tag, hidden))
+        if hidden:
+            self.hidden_depth += 1
+            return
+        if tag == "li":
+            self._emit("\n• ")
+        elif tag in _BLOCK_TAGS:
+            self._emit("\n")
+        elif tag == "pre":
+            self.pre_depth += 1
+            self._emit("\n")
+        elif tag == "a":
+            self.links.append((attr.get("href", "").strip(), []))
+        elif tag in ("td", "th"):
+            self._emit(" ")
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in _VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        if tag in _VOID_TAGS:
+            return
+        self._close_to(tag)
+
+    def _end_effects(self, tag: str) -> None:
+        if tag == "a" and self.links:
+            href, chunks = self.links.pop()
+            self._emit(_format_link(href, "".join(chunks)))
+        elif tag == "pre" and self.pre_depth:
+            self.pre_depth -= 1
+            self._emit("\n")
+        elif tag in _BLOCK_TAGS:
+            self._emit("\n")
+        elif tag in ("td", "th"):
+            self._emit(" ")
+
+    def handle_data(self, data):
+        if self.hidden_depth:
+            return
+        if self.pre_depth:
+            self.pre_blocks.append(data)
+            self._emit(f"\x00{len(self.pre_blocks) - 1}\x00")
+        else:
+            # Source whitespace (including newlines) renders as one space.
+            self._emit(re.sub(r"\s+", " ", data))
+
+    def text(self) -> str:
+        self.close()
+        if self.stack:  # unclosed elements
+            self._close_to(self.stack[0][0])
+        while self.links:  # unclosed <a>
+            href, chunks = self.links.pop()
+            self._emit(_format_link(href, "".join(chunks)))
+        text = _INVISIBLE_CHARS.sub("", "".join(self.out))
+        text = re.sub(r"[^\S\n]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        return re.sub(
+            r"\x00(\d+)\x00", lambda m: self.pre_blocks[int(m.group(1))], text
+        )
+
+
+def _format_link(href: str, label: str) -> str:
+    label = " ".join(label.split())
+    if not href.lower().startswith(("http://", "https://", "mailto:")):
+        return label
+    if not label:
+        return href
+    bare = href.split(":", 1)[-1].lstrip("/")
+    if label in (href, bare, bare.rstrip("/")):
+        return label
+    return f"{label} ({href})"
+
+
 def _html_to_plain_text(html_content: str) -> str:
     """
-    Convert HTML content to plain text for Gmail API compliance.
+    Convert HTML content to readable plain text.
 
-    Gmail API requires both HTML and plain text versions in multipart/alternative
-    structure for proper HTML rendering.
+    Used both to build the text/plain alternative for outgoing mail and to
+    read HTML-only (or stub-plain) incoming mail. Parsed with the stdlib
+    :class:`html.parser.HTMLParser` (see :class:`_HtmlTextExtractor`).
 
     Args:
         html_content: HTML content string
@@ -685,33 +836,9 @@ def _html_to_plain_text(html_content: str) -> str:
     """
     if not html_content:
         return ""
-
-    # Unescape HTML entities first
-    text = html.unescape(html_content)
-
-    # Remove HTML tags with regex (simple approach)
-    # This handles basic HTML to text conversion
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)  # <br> to newline
-    text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)  # <p> to newline
-    text = re.sub(r"</p>", "\n", text, flags=re.IGNORECASE)  # </p> to newline
-    text = re.sub(r"<div[^>]*>", "\n", text, flags=re.IGNORECASE)  # <div> to newline
-    text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)  # </div> to newline
-    text = re.sub(
-        r"<h[1-6][^>]*>", "\n", text, flags=re.IGNORECASE
-    )  # Headers to newline
-    text = re.sub(
-        r"</h[1-6]>", "\n", text, flags=re.IGNORECASE
-    )  # Header close to newline
-    text = re.sub(r"<li[^>]*>", "\n• ", text, flags=re.IGNORECASE)  # List items
-    text = re.sub(r"</li>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)  # Remove all remaining HTML tags
-
-    # Clean up multiple newlines and whitespace
-    text = re.sub(r"\n\s*\n", "\n\n", text)  # Multiple newlines to double newline
-    text = re.sub(r"^\s+|\s+$", "", text, flags=re.MULTILINE)  # Trim lines
-    text = text.strip()
-
-    return text
+    parser = _HtmlTextExtractor()
+    parser.feed(html_content)
+    return parser.text()
 
 
 def _create_mime_message(
