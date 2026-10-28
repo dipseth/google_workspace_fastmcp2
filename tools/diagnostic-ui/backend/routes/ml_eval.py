@@ -1731,62 +1731,19 @@ def _load_unified_model():
     ckpt = torch.load(
         str(_UNIFIED_CHECKPOINT_PATH), map_location="cpu", weights_only=False
     )
-    structural_dim = ckpt.get("structural_dim", 17)
-    content_dim = ckpt.get("content_dim", 384)
-    hidden = ckpt.get("hidden", 64)
-    n_pools = ckpt.get("n_pools", 5)
-    dropout = ckpt.get("dropout", 0.15)
-    enc_dim = 32
-    head_dim = hidden // 2
+    # The architecture lives in adapters/unified_trn.py; a hand-copied class
+    # here drifted (halt_head LayerNorm placement) and stopped loading
+    # checkpoints. Import the single definition instead.
+    from adapters.unified_trn import UnifiedTRN
 
-    class _UnifiedTRN(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.structural_enc = nn.Sequential(
-                nn.Linear(structural_dim, enc_dim), nn.SiLU()
-            )
-            self.content_enc = nn.Sequential(nn.Linear(content_dim, enc_dim), nn.SiLU())
-            self.backbone = nn.Sequential(
-                nn.Linear(enc_dim * 2, hidden),
-                nn.SiLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden, hidden),
-                nn.SiLU(),
-                nn.Dropout(dropout),
-            )
-            self.form_head = nn.Sequential(
-                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1)
-            )
-            self.content_head = nn.Sequential(
-                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, 1)
-            )
-            self.pool_head = nn.Sequential(
-                nn.Linear(hidden, head_dim), nn.SiLU(), nn.Linear(head_dim, n_pools)
-            )
-            self.halt_head = nn.Sequential(
-                nn.Linear(hidden, 16),
-                nn.SiLU(),
-                nn.Linear(16, 1),
-                nn.LayerNorm(1),
-                nn.Sigmoid(),
-            )
-
-        def forward(self, structural, content_emb, mode="search"):
-            s = self.structural_enc(structural)
-            c = self.content_enc(content_emb)
-            shared = self.backbone(torch.cat([s, c], dim=-1))
-            if mode == "build":
-                return {"pool_logits": self.pool_head(shared)}
-            result = {
-                "form_score": self.form_head(shared),
-                "content_score": self.content_head(shared),
-                "halt_prob": self.halt_head(shared),
-            }
-            if mode == "all":
-                result["pool_logits"] = self.pool_head(shared)
-            return result
-
-    model = _UnifiedTRN()
+    model = UnifiedTRN(
+        structural_dim=ckpt.get("structural_dim", 17),
+        content_dim=ckpt.get("content_dim", 384),
+        hidden=ckpt.get("hidden", 64),
+        n_pools=ckpt.get("n_pools", 5),
+        dropout=0.0,
+        mode_flag=ckpt.get("mode_flag", False),
+    )
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
     _unified_model = model
@@ -2204,6 +2161,7 @@ async def model_comparison():
                 hidden=ckpt.get("hidden", 64),
                 n_pools=ckpt.get("n_pools", 5),
                 dropout=0.0,
+                mode_flag=ckpt.get("mode_flag", False),
             )
             unified_model.load_state_dict(ckpt["model_state_dict"])
             unified_model.eval()

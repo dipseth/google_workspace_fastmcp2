@@ -1,6 +1,6 @@
 # ImageComponent
 
-**Symbol:** `□`
+**Symbol:** `■`
 
 ## Description
 
@@ -9,4 +9,4 @@ ImageComponent(image_uri: 'str' = None, alt_text: 'str' = None, crop_style: 'Ima
 ## Valid Children
 
 - `β` BorderStyle
-- `I_0` ImageCropStyle
+- `◘` ImageCropStyle

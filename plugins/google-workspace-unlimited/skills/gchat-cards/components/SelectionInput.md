@@ -1,6 +1,6 @@
 # SelectionInput
 
-**Symbol:** `◄`
+**Symbol:** `►`
 
 ## Description
 
@@ -11,5 +11,5 @@ SelectionInput
 
 - `ă` Action
 - `¶` PlatformDataSource
-- `◙` SelectionItem
-- `◘` SelectionType
+- `▫` SelectionItem
+- `◙` SelectionType

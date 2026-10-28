@@ -8,4 +8,4 @@ SelectionItems(items: List[card_framework.v2.widgets.selection_item.SelectionIte
 
 ## Valid Children
 
-- `◙` SelectionItem
+- `▫` SelectionItem

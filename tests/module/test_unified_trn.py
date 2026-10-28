@@ -306,3 +306,76 @@ class TestBackwardCompatibility:
     def test_structural_dim_matches_features(self):
         model = UnifiedTRN()
         assert model.structural_dim == len(FEATURE_NAMES_V5)
+
+
+# --- Feature normalization + mode flag (group z-score transfer work) ---
+
+
+def test_normalize_feature_group_none_is_identity():
+    from adapters.unified_trn import normalize_feature_group
+
+    x = [[1.0, 0.5], [3.0, 0.5]]
+    out = normalize_feature_group(x, "none")
+    assert torch.equal(out, torch.tensor(x))
+
+
+def test_normalize_feature_group_zscore_is_scale_free():
+    """Within-group z-score must be invariant to a global shift/scale of the
+    features — that is the whole point for cross-module transfer."""
+    from adapters.unified_trn import normalize_feature_group
+
+    x = torch.rand(25, 17)
+    z1 = normalize_feature_group(x, "group_zscore")
+    z2 = normalize_feature_group(x * 0.3 - 2.0, "group_zscore")
+    assert torch.allclose(z1, z2, atol=1e-5)
+    assert torch.allclose(z1.mean(0), torch.zeros(17), atol=1e-5)
+    assert torch.allclose(z1.std(0, unbiased=False), torch.ones(17), atol=1e-4)
+
+
+def test_normalize_feature_group_constant_feature_becomes_zero():
+    from adapters.unified_trn import normalize_feature_group
+
+    x = torch.tensor([[1.0, 7.0], [2.0, 7.0], [3.0, 7.0]])
+    z = normalize_feature_group(x, "group_zscore")
+    assert torch.equal(z[:, 1], torch.zeros(3))
+    assert torch.allclose(z[:, 0], torch.tensor([-1.2247, 0.0, 1.2247]), atol=1e-3)
+
+
+def test_normalize_feature_group_mask_excludes_padding():
+    from adapters.unified_trn import normalize_feature_group
+
+    real = torch.tensor([[1.0], [3.0]])
+    padded = torch.cat([real, torch.full((3, 1), 99.0)])
+    z_real = normalize_feature_group(real, "group_zscore")
+    z_pad = normalize_feature_group(padded, "group_zscore", mask=[1, 1, 0, 0, 0])
+    assert torch.allclose(z_pad[:2], z_real)
+    assert torch.equal(z_pad[2:], torch.zeros(3, 1))
+
+
+def test_normalize_feature_group_rejects_unknown_norm():
+    from adapters.unified_trn import normalize_feature_group
+
+    with pytest.raises(ValueError):
+        normalize_feature_group([[1.0]], "bogus")
+
+
+def test_mode_flag_changes_input_dim_and_distinguishes_modes():
+    from adapters.unified_trn import UnifiedTRN
+
+    m = UnifiedTRN(mode_flag=True, dropout=0.0).eval()
+    assert m.structural_enc[0].in_features == 18
+    s = torch.zeros(4, 17)
+    c = torch.rand(4, 384)
+    with torch.no_grad():
+        build = m(s, c, mode="build")["pool_logits"]
+        all_ = m(s, c, mode="all")["pool_logits"]
+    # Same inputs, different mode bit -> different pool logits.
+    assert not torch.allclose(build, all_)
+
+
+def test_mode_flag_absent_keeps_legacy_shape():
+    from adapters.unified_trn import UnifiedTRN
+
+    m = UnifiedTRN()
+    assert m.structural_enc[0].in_features == 17
+    assert m.mode_flag is False

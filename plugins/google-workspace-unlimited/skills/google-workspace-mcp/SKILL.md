@@ -228,8 +228,8 @@ Sends a card to Google Chat using DSL notation for structure control.
 | `τ` | TextInput |
 | `ǐ` | Image |
 | `ɨ` | Icon |
-| `◄` | SelectionInput |
-| `▪` | DateTimePicker |
+| `►` | SelectionInput |
+| `□` | DateTimePicker |
 | `◆` | CardHeader |
 | `¢` | Columns |
 | `ç` | Column |

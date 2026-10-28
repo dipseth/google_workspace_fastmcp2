@@ -500,6 +500,7 @@ def _create_wrapper(ensure_text_indices: bool = True) -> "ModuleWrapper":
             _hook_post_pipeline_qdrant_writes,
         ],
         domain_label="Google Chat Cards",
+        domain_id="gchat",
         cache_priority_components=[
             "Section",
             "DecoratedText",

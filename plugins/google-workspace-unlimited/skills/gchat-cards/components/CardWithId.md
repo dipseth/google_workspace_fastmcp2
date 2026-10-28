@@ -11,6 +11,6 @@ CardWithId(header: 'Optional[CardHeader]' = None, name: 'Optional[str]' = None, 
 - `◦` CardAction
 - `C_1` CardFixedFooter
 - `◆` CardHeader
-- `▲` DisplayStyle
-- `▼` DividerStyle
+- `◄` DisplayStyle
+- `▲` DividerStyle
 - `§` Section

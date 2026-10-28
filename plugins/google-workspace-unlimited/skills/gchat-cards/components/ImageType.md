@@ -1,6 +1,6 @@
 # ImageType
 
-**Symbol:** `ι`
+**Symbol:** `ı`
 
 ## Description
 

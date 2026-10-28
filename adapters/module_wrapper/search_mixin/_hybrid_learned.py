@@ -35,6 +35,8 @@ def search_hybrid_learned(
 
     try:
         import torch
+
+        from adapters.unified_trn import normalize_feature_group
     except ImportError:
         logger.warning("torch not installed, falling back to multidim")
         return self.search_hybrid_multidim(
@@ -50,8 +52,11 @@ def search_hybrid_learned(
         )
 
     # Load model with domain awareness
+    # Must be the machine id: comparing the human-readable domain_label
+    # ("Google Chat Cards") to the checkpoint's domain_id ("gchat") never matched,
+    # so learned mode silently fell back to multidim on every domain wrapper.
     wrapper_domain = getattr(
-        getattr(self, "domain_config", None), "domain_label", None
+        getattr(self, "domain_config", None), "domain_id", None
     ) or getattr(self, "_domain_id", None)
     model = self._load_learned_model(domain=wrapper_domain)
     if model is None:
@@ -135,7 +140,11 @@ def search_hybrid_learned(
             query_content_minilm=query_content_minilm,
         )
 
-        features_tensor = torch.tensor(features_list, dtype=torch.float32)
+        # One query's candidates form the normalization group — the same unit
+        # the trainer normalizes over (adapters.unified_trn.normalize_feature_group).
+        features_tensor = normalize_feature_group(
+            features_list, self._learned_feature_norm
+        )
         is_unified = self._learned_model_type == "unified"
         is_dual = self._learned_model_type == "dual_head"
 
@@ -152,14 +161,18 @@ def search_hybrid_learned(
                 result = model(features_tensor, content_tensor, mode="search")
                 form_scores = result["form_score"].squeeze(-1).tolist()
                 content_scores = result["content_score"].squeeze(-1).tolist()
-                # Alpha blend
-                alpha = 1.0 if not content_text else 0.6
-                try:
-                    from config.settings import Settings as _S
+                # Alpha blend. Without content_text the content head scores a
+                # query-vs-itself embedding (pure noise), so it must get zero
+                # weight; the configured weight only applies when content exists.
+                alpha = 1.0
+                if content_text:
+                    alpha = 0.6
+                    try:
+                        from config.settings import Settings as _S
 
-                    alpha = _S().dual_head_form_weight
-                except Exception:
-                    pass
+                        alpha = _S().dual_head_form_weight
+                    except Exception:
+                        pass
                 learned_scores = [
                     alpha * f + (1 - alpha) * c
                     for f, c in zip(form_scores, content_scores)
@@ -169,13 +182,15 @@ def search_hybrid_learned(
                 form_t, content_t = model(features_tensor)
                 form_scores = form_t.squeeze(-1).tolist()
                 content_scores = content_t.squeeze(-1).tolist()
-                alpha = 1.0 if not content_text else 0.6
-                try:
-                    from config.settings import Settings as _S
+                alpha = 1.0
+                if content_text:
+                    alpha = 0.6
+                    try:
+                        from config.settings import Settings as _S
 
-                    alpha = _S().dual_head_form_weight
-                except Exception:
-                    pass
+                        alpha = _S().dual_head_form_weight
+                    except Exception:
+                        pass
                 learned_scores = [
                     alpha * f + (1 - alpha) * c
                     for f, c in zip(form_scores, content_scores)

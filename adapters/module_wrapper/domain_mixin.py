@@ -43,6 +43,9 @@ class DomainConfig:
     post_init_hooks: List[Callable] = field(default_factory=list)
     post_pipeline_hooks: List[Callable] = field(default_factory=list)
     domain_label: str = ""  # human-readable label, e.g. "Google Chat Cards"
+    # Machine id matching a learned checkpoint's ``domain_id`` ("gchat", "email").
+    # The learned scorer keys checkpoint lookup and its domain guard on this.
+    domain_id: Optional[str] = None
 
     # Cache warm-up: which components to pre-populate in the component cache
     cache_priority_components: Optional[List[str]] = None

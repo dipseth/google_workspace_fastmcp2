@@ -9,7 +9,7 @@ Message(name: 'str' = None, sender: 'User' = None, create_time: 'str' = None, la
 ## Valid Children
 
 - `A_1` AccessoryWidget
-- `■` ActionResponse
+- `○` ActionResponse
 - `ą` Annotation
 - `★` AttachedGif
 - `Å` Attachment

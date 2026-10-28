@@ -1,6 +1,6 @@
 # SwitchControl
 
-**Symbol:** `►`
+**Symbol:** `♦`
 
 ## Description
 

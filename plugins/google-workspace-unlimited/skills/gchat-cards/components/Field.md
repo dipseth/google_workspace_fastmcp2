@@ -1,3 +1,0 @@
-# Field
-
-**Symbol:** `ƒ`
