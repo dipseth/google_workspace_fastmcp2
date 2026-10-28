@@ -57,6 +57,8 @@ def search_hybrid_recursive(
 
     try:
         import torch
+
+        from adapters.unified_trn import normalize_feature_group
     except ImportError:
         logger.warning("torch not installed, falling back to learned")
         return self.search_hybrid_learned(
@@ -71,7 +73,9 @@ def search_hybrid_recursive(
             content_text=content_text,
         )
 
-    model = self._load_learned_model()
+    model = self._load_learned_model(
+        domain=getattr(getattr(self, "domain_config", None), "domain_id", None)
+    )
     if model is None:
         return self.search_hybrid_learned(
             description=description,
@@ -167,7 +171,11 @@ def search_hybrid_recursive(
             if not features_list:
                 break
 
-            features_tensor = torch.tensor(features_list, dtype=torch.float32)
+            # One query's candidates form the normalization group — the same unit
+            # the trainer normalizes over (adapters.unified_trn.normalize_feature_group).
+            features_tensor = normalize_feature_group(
+                features_list, self._learned_feature_norm
+            )
 
             # --- Model inference (architecture-dependent) ---
             with torch.no_grad():
@@ -185,7 +193,13 @@ def search_hybrid_recursive(
                     halt_probs = result["halt_prob"].squeeze(-1)
 
                     # Adaptive alpha: form-dominant early, content grows
-                    cycle_alpha = max(0.3, alpha_init - (cycle * alpha_decay))
+                    # Without content_text the content head scores the query
+                    # against itself (noise) — keep the blend form-only.
+                    cycle_alpha = (
+                        max(0.3, alpha_init - (cycle * alpha_decay))
+                        if content_text
+                        else 1.0
+                    )
                     scores_tensor = (
                         cycle_alpha * form_scores_t
                         + (1.0 - cycle_alpha) * content_scores_t
@@ -198,7 +212,13 @@ def search_hybrid_recursive(
                     form_t, content_t = model(features_tensor)
                     form_scores_t = form_t.squeeze(-1)
                     content_scores_t = content_t.squeeze(-1)
-                    cycle_alpha = max(0.3, alpha_init - (cycle * alpha_decay))
+                    # Without content_text the content head scores the query
+                    # against itself (noise) — keep the blend form-only.
+                    cycle_alpha = (
+                        max(0.3, alpha_init - (cycle * alpha_decay))
+                        if content_text
+                        else 1.0
+                    )
                     scores_tensor = (
                         cycle_alpha * form_scores_t
                         + (1.0 - cycle_alpha) * content_scores_t

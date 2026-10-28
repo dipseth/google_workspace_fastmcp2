@@ -471,6 +471,7 @@ def _create_email_wrapper() -> "ModuleWrapper":
         ],
         post_pipeline_hooks=[],
         domain_label="Email Blocks (MJML)",
+        domain_id="email",
         symbol_filter=EMAIL_WIDGET_TYPES | {"EmailSpec", "Column"},
         dsl_categories={
             "Container": ["EmailSpec"],

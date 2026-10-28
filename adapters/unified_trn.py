@@ -59,6 +59,57 @@ STRUCTURAL_DIM = len(FEATURE_NAMES_V5)  # 17
 CONTENT_DIM = 384  # MiniLM
 DEFAULT_N_POOLS = 5  # Override via constructor or DomainConfig
 
+# Feature normalization modes. Stored in the checkpoint as ``feature_norm`` so
+# inference applies exactly what training saw. Absent key == "none" (legacy).
+FEATURE_NORM_NONE = "none"
+FEATURE_NORM_GROUP_ZSCORE = "group_zscore"
+FEATURE_NORMS = (FEATURE_NORM_NONE, FEATURE_NORM_GROUP_ZSCORE)
+_ZSCORE_EPS = 1e-6
+
+
+def normalize_feature_group(
+    features: torch.Tensor | list[list[float]],
+    norm: str = FEATURE_NORM_NONE,
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Normalize one query's candidate feature matrix ``[K, D]``.
+
+    ``group_zscore`` z-scores every feature *within the candidate group*, so the
+    model sees "how does this candidate compare to its competitors" instead of
+    absolute magnitudes. Absolute magnitudes shift between wrapped modules (a
+    −3σ shift saturated every logit on qdrant_client.models — see
+    docs/TRM_TRANSFER_HANDOFF_2026-07-25.md), relative ones do not. A feature
+    that is constant across the group carries no ranking signal and becomes 0.
+
+    ``mask`` (``[K]``, 1 = real candidate) excludes padding rows from the
+    statistics; padded rows are zeroed in the output.
+
+    Training (research/trm/h2/train_unified.py) and inference (search_mixin)
+    both call this function — never reimplement it on one side.
+    """
+    x = torch.as_tensor(features, dtype=torch.float32)
+    if norm == FEATURE_NORM_NONE or x.numel() == 0:
+        return x
+    if norm != FEATURE_NORM_GROUP_ZSCORE:
+        raise ValueError(
+            f"unknown feature_norm {norm!r}; expected one of {FEATURE_NORMS}"
+        )
+    if x.dim() != 2:
+        raise ValueError(f"expected [K, D] feature matrix, got shape {tuple(x.shape)}")
+    if mask is None:
+        m = torch.ones(x.shape[0], dtype=torch.float32)
+    else:
+        m = torch.as_tensor(mask, dtype=torch.float32)
+    n = m.sum().clamp(min=1.0)
+    w = m.unsqueeze(-1)
+    mean = (x * w).sum(0, keepdim=True) / n
+    var = (((x - mean) ** 2) * w).sum(0, keepdim=True) / n
+    std = var.sqrt()
+    z = torch.where(
+        std > _ZSCORE_EPS, (x - mean) / std.clamp(min=_ZSCORE_EPS), torch.zeros_like(x)
+    )
+    return z * w
+
 
 def get_domain_defaults(domain_id: str = "gchat") -> dict:
     """Get pool vocab and component-to-pool mapping for a domain.
@@ -88,18 +139,26 @@ class UnifiedTRN(nn.Module):
         hidden: int = 64,
         n_pools: int = DEFAULT_N_POOLS,
         dropout: float = 0.15,
+        mode_flag: bool = False,
     ):
         super().__init__()
         self.structural_dim = structural_dim
         self.content_dim = content_dim
         self.hidden = hidden
         self.n_pools = n_pools
+        # With raw features, build mode's all-zero structural vector sat outside
+        # the search distribution (sims ~0.5) and implicitly told the backbone
+        # which mode it was in. Group z-scoring centres search features on 0,
+        # so the modes collide and pool accuracy collapses (97% -> 68%). The
+        # flag appends an explicit build/search bit to the structural input.
+        # Checkpoint key: ``mode_flag`` (absent == False, legacy shapes).
+        self.mode_flag = mode_flag
 
         enc_dim = 32
 
         # Separate input encoders (different scales/semantics)
         self.structural_enc = nn.Sequential(
-            nn.Linear(structural_dim, enc_dim),
+            nn.Linear(structural_dim + (1 if mode_flag else 0), enc_dim),
             nn.SiLU(),
         )
         self.content_enc = nn.Sequential(
@@ -169,6 +228,11 @@ class UnifiedTRN(nn.Module):
               build: pool_logits [B, n_pools]
               all: all of the above
         """
+        if self.mode_flag:
+            flag = structural_features.new_full(
+                (*structural_features.shape[:-1], 1), 1.0 if mode == "build" else 0.0
+            )
+            structural_features = torch.cat([structural_features, flag], dim=-1)
         s_enc = self.structural_enc(structural_features)  # [B, 32]
         c_enc = self.content_enc(content_embedding)  # [B, 32]
 

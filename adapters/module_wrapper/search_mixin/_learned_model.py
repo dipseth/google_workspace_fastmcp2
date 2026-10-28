@@ -198,6 +198,10 @@ def _load_learned_model(cls, domain: str | None = None):
             "feature_version", 5 if model_type == "unified" else 1
         )
         cls._learned_model_domain = ckpt.get("domain_id")
+        # Feature normalization the checkpoint was trained with. Must be applied
+        # to the candidate group at inference or the model sees a different
+        # feature space than it learned (legacy checkpoints have no key = raw).
+        cls._learned_feature_norm = ckpt.get("feature_norm", "none")
 
         # Defence in depth: resolution can hand back the right *path* and still
         # be the wrong model if the artifact itself was published under the
@@ -221,6 +225,7 @@ def _load_learned_model(cls, domain: str | None = None):
                 hidden=ckpt.get("hidden", 64),
                 n_pools=ckpt.get("n_pools", 5),
                 dropout=0.0,  # no dropout at inference
+                mode_flag=ckpt.get("mode_flag", False),
             )
             cls._learned_model_type = "unified"
 
@@ -252,7 +257,7 @@ def _load_learned_model(cls, domain: str | None = None):
             f"Loaded {cls._learned_model_type} scorer "
             f"from {checkpoint_path} "
             f"(domain={domain_str}, params={n_params}, "
-            f"V{cls._learned_feature_version})"
+            f"V{cls._learned_feature_version}, feature_norm={cls._learned_feature_norm})"
         )
         return model
     except ImportError as e:

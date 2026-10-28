@@ -160,6 +160,7 @@ def _load_domain_slot_model(domain_id: str):
             hidden=checkpoint.get("hidden", 64),
             n_pools=checkpoint.get("n_pools", 5),
             dropout=0.0,
+            mode_flag=checkpoint.get("mode_flag", False),
         )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
@@ -259,6 +260,7 @@ def _load_default_slot_model():
                 hidden=checkpoint.get("hidden", 64),
                 n_pools=checkpoint.get("n_pools", 5),
                 dropout=0.0,  # no dropout at inference
+                mode_flag=checkpoint.get("mode_flag", False),
             )
             model.load_state_dict(checkpoint["model_state_dict"])
             model.eval()

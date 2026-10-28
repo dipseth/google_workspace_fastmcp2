@@ -106,22 +106,17 @@ def _query_grouped_candidates(
     group_size: int = 10,
     query_content_minilm=None,
 ) -> list:
-    """Query Qdrant with grouped results, ensuring diversity across point types.
+    """Query Qdrant with RRF fusion, then cap results per point type.
 
-    Uses query_points_groups(group_by="type") to guarantee balanced
-    representation of classes, instance_patterns, etc. Combined with
-    prefetch + RRF fusion for multi-vector search.
+    Groups by payload ``type`` client-side (up to 5 types, ``group_size`` points
+    each) so classes, instance_patterns, etc. stay balanced. Server-side
+    ``query_points_groups`` with prefetch + RRF fusion drops and reorders hits:
+    on qdrant_client.models it kept the answer in 13/45 queries vs 17/45 for the
+    same fused ``query_points`` call, and its Top-1 varied between runs.
 
-    Returns a flat list of points (with .vector and .payload) from all groups.
+    Returns a flat list of points (with .vector and .payload), group by group.
     """
-    from qdrant_client.models import (
-        FieldCondition,
-        Filter,
-        Fusion,
-        FusionQuery,
-        MatchValue,
-        Prefetch,
-    )
+    from qdrant_client.models import Fusion, FusionQuery
 
     prefetch_list = self._build_prefetch_list(
         query_colbert,
@@ -133,57 +128,48 @@ def _query_grouped_candidates(
         query_content_minilm=query_content_minilm,
     )
 
-    try:
-        grouped = self.client.query_points_groups(
+    # Ids + payloads first: every prefetched point fits, so no type is crowded
+    # out before grouping. Vectors (ColBERT multivectors are large) are fetched
+    # only for the points kept, below.
+    results = self.client.query_points(
+        collection_name=self.collection_name,
+        prefetch=prefetch_list,
+        query=FusionQuery(fusion=Fusion.RRF),
+        limit=candidate_pool_size * len(prefetch_list),
+        with_payload=True,
+        with_vectors=False,
+    )
+
+    # Fused order is preserved; types are ordered by their best hit.
+    groups: Dict[str, list] = {}
+    for point in results.points:
+        group_type = str((point.payload or {}).get("type"))
+        bucket = groups.get(group_type)
+        if bucket is None:
+            if len(groups) >= 5:
+                continue
+            bucket = groups[group_type] = []
+        if len(bucket) < group_size:
+            bucket.append(point)
+
+    points = [p for bucket in groups.values() for p in bucket]
+    if points:
+        records = self.client.retrieve(
             collection_name=self.collection_name,
-            group_by="type",
-            prefetch=prefetch_list,
-            query=FusionQuery(fusion=Fusion.RRF),
-            limit=5,  # up to 5 type groups (class, instance_pattern, function, etc.)
-            group_size=group_size,  # points per group
-            with_payload=True,
+            ids=[p.id for p in points],
+            with_payload=False,
             with_vectors=True,
         )
-
-        # Flatten groups into a single point list
-        points = []
-        group_counts = {}
-        for group in grouped.groups:
-            group_type = str(group.id)
-            group_counts[group_type] = len(group.hits)
-            for hit in group.hits:
-                points.append(hit)
-
-        logger.info(
-            "Grouped query: %d points across %d groups: %s",
-            len(points),
-            len(group_counts),
-            group_counts,
-        )
-        return points
-
-    except Exception as e:
-        # Fallback: query_points_groups may not be available on older Qdrant
-        logger.warning(
-            "query_points_groups failed (%s), falling back to query_points", e
-        )
-        prefetch_list = self._build_prefetch_list(
-            query_colbert,
-            query_minilm,
-            candidate_pool_size,
-            include_classes=True,
-            content_feedback=content_feedback,
-            form_feedback=form_feedback,
-        )
-        results = self.client.query_points(
-            collection_name=self.collection_name,
-            prefetch=prefetch_list,
-            query=FusionQuery(fusion=Fusion.RRF),
-            limit=candidate_pool_size * 3,
-            with_payload=True,
-            with_vectors=True,
-        )
-        return results.points
+        vectors = {r.id: r.vector for r in records}
+        for p in points:
+            p.vector = vectors.get(p.id)
+    logger.info(
+        "Grouped query: %d points across %d groups: %s",
+        len(points),
+        len(groups),
+        {k: len(v) for k, v in groups.items()},
+    )
+    return points
 
 
 def _infer_component_paths(self, points) -> Optional[List[str]]:
@@ -596,6 +582,7 @@ def _categorize_scored_results(
         (class_results, pattern_results, relationship_results)
     """
     class_results = []
+    class_by_name: Dict[Any, Dict] = {}
     pattern_results = []
     relationship_results = []
 
@@ -632,7 +619,16 @@ def _categorize_scored_results(
 
         point_type = payload.get("type")
         if point_type == "class":
-            class_results.append(result)
+            # Nested copies of one class (e.g. DividerStyle under Card, CardWithId,
+            # dialog_action.Card) share a name and crowd out other components.
+            # Keep the best-scored copy; record the rest on it.
+            kept = class_by_name.get(result["name"])
+            if kept is None:
+                result["alt_full_paths"] = []
+                class_by_name[result["name"]] = result
+                class_results.append(result)
+            elif result["full_path"] != kept["full_path"]:
+                kept["alt_full_paths"].append(result["full_path"])
         elif point_type == "instance_pattern":
             if payload.get("content_feedback") == "positive":
                 pattern_results.append(result)
