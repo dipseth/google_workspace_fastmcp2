@@ -1,6 +1,6 @@
 # GridItemLayout
 
-**Symbol:** `γ`
+**Symbol:** `ǧ`
 
 ## Description
 

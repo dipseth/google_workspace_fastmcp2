@@ -8,6 +8,6 @@ Icon(alt_text: Optional[str] = None, image_type: Optional[card_framework.v2.enum
 
 ## Valid Children
 
-- `ι` ImageType
+- `ı` ImageType
 - `ĸ` KnownIcon
 - `ɯ` MaterialIcon

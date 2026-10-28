@@ -1,6 +1,6 @@
 # InputType
 
-**Symbol:** `ɪ`
+**Symbol:** `ι`
 
 ## Description
 

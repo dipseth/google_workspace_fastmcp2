@@ -12,4 +12,4 @@ https://developers.google.com/chat/api/reference/rest/v1/cards#cardheader
 
 ## Valid Children
 
-- `ι` ImageType
+- `ı` ImageType

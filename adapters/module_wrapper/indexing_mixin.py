@@ -8,6 +8,7 @@ for the ModuleWrapper system.
 import hashlib
 import importlib
 import inspect
+import sys
 from datetime import UTC, datetime
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -40,74 +41,10 @@ COMPONENT_SCROLL_BATCH = 1000
 # STANDARD LIBRARY DETECTION
 # =============================================================================
 
-# Common standard library modules to skip
-STD_LIB_PREFIXES = [
-    "builtins",
-    "collections",
-    "typing",
-    "types",
-    "functools",
-    "itertools",
-    "operator",
-    "re",
-    "os",
-    "sys",
-    "json",
-    "datetime",
-    "time",
-    "random",
-    "math",
-    "inspect",
-    "ast",
-    "copy",
-    "abc",
-    "enum",
-    "importlib",
-    "pathlib",
-    "io",
-    "warnings",
-    "uuid",
-    "logging",
-    "email",
-    "zipfile",
-    "textwrap",
-    "posixpath",
-    "token",
-    "tokenize",
-    "keyword",
-    "linecache",
-    "dis",
-    "socket",
-    "selectors",
-    "select",
-    "ssl",
-    "http",
-    "urllib",
-    "base64",
-    "struct",
-    "bisect",
-    "contextlib",
-    "hashlib",
-    "tempfile",
-    "quopri",
-    "binascii",
-    "stat",
-    "ipaddress",
-    "copyreg",
-    "errno",
-    "array",
-    "codecs",
-    "decimal",
-    "numbers",
-    "threading",
-    "zlib",
-    "bz2",
-    "lzma",
-    "shutil",
-    "fnmatch",
-    "posix",
-    "string",
-]
+# Standard library modules to skip: Python's own authoritative list, so a
+# stdlib module imported by a wrapped module (e.g. ``html`` → ``html.parser``)
+# is never indexed as one of its components.
+STD_LIB_PREFIXES = sorted(sys.stdlib_module_names)
 
 # Common third-party libraries to skip
 THIRD_PARTY_PREFIXES = [
@@ -215,9 +152,8 @@ class IndexingMixin:
         ):
             return False
 
-        for prefix in STD_LIB_PREFIXES:
-            if module_name == prefix or module_name.startswith(f"{prefix}."):
-                return True
+        if module_name.split(".", 1)[0] in sys.stdlib_module_names:
+            return True
 
         for prefix in THIRD_PARTY_PREFIXES:
             if module_name == prefix or module_name.startswith(f"{prefix}."):

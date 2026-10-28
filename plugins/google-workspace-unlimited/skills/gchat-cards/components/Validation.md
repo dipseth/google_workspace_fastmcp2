@@ -8,4 +8,4 @@ Validation(character_limit: Optional[int] = None, input_type: Optional[card_fram
 
 ## Valid Children
 
-- `ɪ` InputType
+- `ι` InputType

@@ -17,6 +17,6 @@ full details on what this should look like.
 - `◦` CardAction
 - `C_1` CardFixedFooter
 - `◆` CardHeader
-- `▲` DisplayStyle
-- `▼` DividerStyle
+- `◄` DisplayStyle
+- `▲` DividerStyle
 - `§` Section
