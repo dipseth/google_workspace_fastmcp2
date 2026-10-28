@@ -14,12 +14,13 @@ This module contains shared utility functions used across Gmail tools including:
 import base64
 import html
 import re
+from collections import deque
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import make_msgid
 from html.parser import HTMLParser
 
-from typing_extensions import Dict, List, Literal, Optional, Union
+from typing_extensions import Dict, Iterator, List, Literal, Optional, Union
 
 from config.enhanced_logging import setup_logger
 
@@ -295,18 +296,25 @@ def _decode_part(part: dict) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
+def _iter_parts(payload: dict) -> Iterator[dict]:
+    """Yield the payload and its MIME parts breadth-first.
+
+    Descends into ``multipart/*`` containers only, so attached emails
+    (``message/rfc822``) are not mistaken for the message's own body.
+    """
+    queue = deque([payload])
+    while queue:
+        part = queue.popleft()
+        yield part
+        if part.get("mimeType", "").startswith("multipart/"):
+            queue.extend(part.get("parts") or [])
+
+
 def _find_part_data(payload: dict, mime_type: str) -> str:
-    """Return the first decoded body of ``mime_type`` (BFS over MIME parts)."""
-    parts = [payload] if "parts" not in payload else payload.get("parts", [])
-    part_queue = list(parts)
-    while part_queue:
-        part = part_queue.pop(0)
+    """Return the first decoded body of ``mime_type``, or empty string."""
+    for part in _iter_parts(payload):
         if part.get("mimeType") == mime_type and part.get("body", {}).get("data"):
             return _decode_part(part)
-        if part.get("mimeType", "").startswith("multipart/") and "parts" in part:
-            part_queue.extend(part.get("parts", []))
-    if payload.get("mimeType") == mime_type and payload.get("body", {}).get("data"):
-        return _decode_part(payload)
     return ""
 
 
@@ -339,7 +347,7 @@ def _extract_attachment_metadata(payload: dict) -> List[dict]:
     """
     Extract attachment metadata from a Gmail message payload.
 
-    Uses BFS traversal of MIME parts (same pattern as _extract_message_body).
+    Walks MIME parts with :func:`_iter_parts`.
     Identifies parts that have a filename and an attachmentId.
 
     Args:
@@ -349,27 +357,17 @@ def _extract_attachment_metadata(payload: dict) -> List[dict]:
         List of dicts with keys: filename, mimeType, size, attachmentId
     """
     attachments = []
-    parts = [payload] if "parts" not in payload else payload.get("parts", [])
-
-    part_queue = list(parts)
-    while part_queue:
-        part = part_queue.pop(0)
-        filename = part.get("filename")
+    for part in _iter_parts(payload):
         body = part.get("body", {})
-        attachment_id = body.get("attachmentId")
-
-        if filename and attachment_id:
+        if part.get("filename") and body.get("attachmentId"):
             attachments.append(
                 {
-                    "filename": filename,
+                    "filename": part["filename"],
                     "mimeType": part.get("mimeType", "application/octet-stream"),
                     "size": body.get("size", 0),
-                    "attachmentId": attachment_id,
+                    "attachmentId": body["attachmentId"],
                 }
             )
-        elif part.get("mimeType", "").startswith("multipart/") and "parts" in part:
-            part_queue.extend(part.get("parts", []))
-
     return attachments
 
 
@@ -682,6 +680,9 @@ _INVISIBLE_CHARS = re.compile(r"[\u034f\u00ad\u200b-\u200d\u2060\ufeff]")
 
 class _HtmlTextExtractor(HTMLParser):
     """Turn HTML into readable text the way a mail client would show it.
+
+    Not ``BeautifulSoup.get_text()``: that keeps ``<style>`` text and hidden
+    preheaders, drops link URLs and image alt text, and flattens ``<pre>``.
 
     Skips non-content elements and anything hidden with ``display:none`` /
     ``visibility:hidden`` / ``hidden`` (e.g. preheaders), keeps image alt

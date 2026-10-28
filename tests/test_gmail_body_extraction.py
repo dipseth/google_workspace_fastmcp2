@@ -11,7 +11,11 @@ truth; text/plain is the fallback when the HTML has no readable text.
 import base64
 from pathlib import Path
 
-from gmail.utils import _extract_message_body, _html_to_plain_text
+from gmail.utils import (
+    _extract_attachment_metadata,
+    _extract_message_body,
+    _html_to_plain_text,
+)
 
 ARTIFACTS = Path(__file__).parent / "artifacts"
 
@@ -172,3 +176,62 @@ def test_unknown_charset_falls_back_to_utf8():
 def test_block_inside_list_item_keeps_bullet_on_line():
     html = "<ul><li><p>one</p></li><li>two</li></ul><p>after</p>"
     assert _html_to_plain_text(html) == "• one\n\n• two\n\nafter"
+
+
+# --- shared MIME walker (_iter_parts) ---
+
+
+def _pdf(name: str, att_id: str) -> dict:
+    return {
+        "mimeType": "application/pdf",
+        "filename": name,
+        "body": {"attachmentId": att_id, "size": 10},
+    }
+
+
+def test_attachment_metadata_found_in_nested_multiparts():
+    payload = {
+        "mimeType": "multipart/mixed",
+        "parts": [
+            {
+                "mimeType": "multipart/related",
+                "parts": [
+                    _alternative("hi", DESIGNED_HTML),
+                    {
+                        "mimeType": "image/png",
+                        "filename": "logo.png",
+                        "body": {"attachmentId": "img1", "size": 5},
+                    },
+                ],
+            },
+            _pdf("report.pdf", "a1"),
+        ],
+    }
+    found = _extract_attachment_metadata(payload)
+    assert [a["filename"] for a in found] == ["report.pdf", "logo.png"]
+    assert found[0] == {
+        "filename": "report.pdf",
+        "mimeType": "application/pdf",
+        "size": 10,
+        "attachmentId": "a1",
+    }
+
+
+def test_attached_email_is_not_read_as_body():
+    attached = {
+        "mimeType": "message/rfc822",
+        "filename": "fwd.eml",
+        "body": {"attachmentId": "eml1", "size": 99},
+        "parts": [
+            {"mimeType": "text/html", "body": {"data": _b64("<p>inner email</p>")}}
+        ],
+    }
+    payload = {
+        "mimeType": "multipart/mixed",
+        "parts": [
+            {"mimeType": "text/plain", "body": {"data": _b64("outer body")}},
+            attached,
+        ],
+    }
+    assert _extract_message_body(payload) == "outer body"
+    assert [a["filename"] for a in _extract_attachment_metadata(payload)] == ["fwd.eml"]
