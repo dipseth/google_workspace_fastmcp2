@@ -830,7 +830,9 @@ def _reroute_orphan_params(parse_result, normalized_params: dict) -> dict:
 
     Two matching tiers:
       1. Component-level (preferred): each orphan is scored against each
-         deficit class's content prototype, so classes sharing a pool
+         deficit class — by the learned placement head on the email
+         checkpoint when it carries one (trained on real composed emails),
+         else by the class's content prototype — so classes sharing a pool
          (header vs footer, both chrome) are told apart.
       2. Pool-level (fallback): TRM pool routing via
          ``EmailBuilder.reassign_slots``; within a pool, consumption order

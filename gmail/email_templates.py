@@ -382,9 +382,12 @@ def to_jinja_literal(value: Any) -> str:
 
     ``json.dumps`` output is *almost* valid Jinja — the differences are
     ``null`` → ``none`` and that strings must not be interpreted as template
-    syntax. Emitting each scalar ourselves (strings via ``json.dumps``, which
-    Jinja's lexer decodes with the same escape rules) sidesteps both problems
-    and keeps ``{{``/``{%`` sequences inside content harmless.
+    syntax. Emitting each scalar ourselves (strings via ``json.dumps``, whose
+    quote/backslash/control escapes Jinja's lexer decodes the same way)
+    sidesteps both problems and keeps ``{{``/``{%`` sequences inside content
+    harmless. Non-ASCII is written as-is: with ``ensure_ascii`` an emoji becomes
+    a ``\\ud83d\\udc7b`` surrogate pair, which Jinja decodes as two lone
+    surrogates that no UTF-8 encoder will accept.
     """
     if value is None:
         return "none"
@@ -395,7 +398,7 @@ def to_jinja_literal(value: Any) -> str:
     if isinstance(value, (int, float)):
         return repr(value)
     if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=True)
+        return json.dumps(value, ensure_ascii=False)
     if isinstance(value, dict):
         inner = ", ".join(
             f"{to_jinja_literal(str(k))}: {to_jinja_literal(v)}"
@@ -404,7 +407,15 @@ def to_jinja_literal(value: Any) -> str:
         return "{" + inner + "}"
     if isinstance(value, (list, tuple)):
         return "[" + ", ".join(to_jinja_literal(v) for v in value) + "]"
-    return json.dumps(str(value), ensure_ascii=True)
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _repair_surrogates(text: str) -> str:
+    """Join surrogate halves into real characters (templates saved before the
+    ``ensure_ascii=False`` fix render an emoji as two lone surrogates)."""
+    if not any("\ud800" <= ch <= "\udfff" for ch in text):
+        return text
+    return text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
 
 
 def build_template_macro(
@@ -553,14 +564,17 @@ def load_email_template(name: str) -> LoadedTemplate:
     meta = json.loads(str(macro(mode="meta")))
     kind = meta.get("kind", "blocks")
     loaded = LoadedTemplate(
-        name=slug, kind=kind, subject=str(macro(mode="subject")), meta=meta
+        name=slug,
+        kind=kind,
+        subject=_repair_surrogates(str(macro(mode="subject"))),
+        meta=meta,
     )
     if kind == "blocks":
-        dsl_and_subject = str(macro(mode="dsl"))
+        dsl_and_subject = _repair_surrogates(str(macro(mode="dsl")))
         loaded.dsl = meta.get("dsl") or dsl_and_subject.split(" ", 1)[0]
         loaded.params = json.loads(str(macro(mode="params")))
     else:
-        loaded.html = str(macro(mode="html"))
+        loaded.html = _repair_surrogates(str(macro(mode="html")))
     return loaded
 
 
