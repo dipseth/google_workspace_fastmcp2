@@ -85,3 +85,65 @@ def test_no_allowlist_allows_installed_packages(monkeypatch):
 
 def test_field_signature():
     assert field_signature(Condition) == {"key": "str", "match": "Match"}
+
+
+ENTRIES = [
+    {"name": "NoulQuestion", "description": "A yes/no question"},
+    {"name": "ChoiceQuestion", "description": "Pick one option"},
+]
+
+
+def test_jev_rerank_off_without_key(monkeypatch):
+    from tools.module_tools import jev_rerank
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert jev_rerank("pick one", ENTRIES) is None
+
+
+def test_jev_rerank_reads_choice_probabilities(monkeypatch):
+    import httpx
+
+    from tools.module_tools import jev_rerank
+
+    sent = {}
+
+    def fake_post(url, json, headers, timeout):
+        sent.update(url=url, body=json)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "answers": {
+                    "component": {
+                        "type": "choice",
+                        "choice": "ChoiceQuestion",
+                        "confidence": 0.9,
+                        "probabilities": {"NoulQuestion": 0.1, "ChoiceQuestion": 0.9},
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert jev_rerank("pick one", ENTRIES) == [0.1, 0.9]
+    q = sent["body"]["questions"]["component"]
+    assert q["type"] == "choice"
+    assert q["criteria"] == {
+        "NoulQuestion": "A yes/no question",
+        "ChoiceQuestion": "Pick one option",
+    }
+    assert sent["url"].endswith("/v1/systemone")
+
+
+def test_jev_rerank_error_keeps_pool_order(monkeypatch):
+    import httpx
+
+    from tools.module_tools import jev_rerank
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    monkeypatch.setattr(httpx, "post", boom)
+    assert jev_rerank("pick one", ENTRIES) is None
