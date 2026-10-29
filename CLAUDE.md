@@ -24,6 +24,13 @@
 - Offline/local runs: point slot assignment at a file with `UNIFIED_TRN_CHECKPOINT_<DOMAIN>=…` (artifact paths take precedence when present).
 - The email checkpoint carries `placement_head` (learned item→block placement); build it with `research/trm/email/build_placement_head.py` (research is gitignored and never imported by production).
 
+## Bring-your-own-module tools
+
+- `wrap_module` / `search_module` / `build_module_object` ([tools/module_tools.py](tools/module_tools.py)) are registered only with `MODULE_TOOLS_ENABLED=true`. Standard-library modules are refused, `MODULE_TOOLS_ALLOWED` (comma-separated prefixes) narrows what can be wrapped, and building is limited to data classes (pydantic models, dataclasses, enums).
+- `search_module` reranks its top-25 pool with TypeSafe Jev when `TYPESAFE_API_KEY` is set (`MODULE_TOOLS_RERANK=pool` turns it off); errors fall back to pool order.
+- Collections are `mcp_module_v2_<module>`; bump `_INDEX_VERSION` when what gets indexed changes. Class points carry a `description` vector only in collections created since 3.5.0 — older collections keep working without it until recreated.
+- **Never index research modules into the cloud Qdrant cluster.** ColBERT multivectors are ~100 KB/point; TRM research filled the 16 GiB cluster (2026-10-29) and a full disk blocks even deletes. Research wrappers default to embedded Qdrant (`research/trm/qdrant_local`).
+
 ## Python version
 
 - `requires-python = ">=3.11,<3.13"`; `.python-version` pins **3.12**. Keep the pin — Glama auto-detects the Docker Python version from it and previously picked an incompatible 3.14 when the file was absent.
