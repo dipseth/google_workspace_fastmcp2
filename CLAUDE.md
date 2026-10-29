@@ -16,6 +16,14 @@
 - `buildSteps`: `uv sync --compile-bytecode`, then `uv run --no-sync python -c 'import server' || true` to warm imports at build time (~12s cold start, measured).
 - Set `QDRANT_AUTO_LAUNCH=false` in hosted env vars (default `true` tries to launch Qdrant via Docker, which doesn't exist in the container).
 
+## Learned model artifacts
+
+- Checkpoints ship via `MODEL_ARTIFACT_URI` (JSON map `{"gchat": gs://…, "email": gs://…}`); servers download them at startup into `credentials/model_cache/<domain>/`.
+- **A cached artifact is never re-checked against the bucket** — the checksum only compares the local file with its own registry entry. After re-publishing, delete `credentials/model_cache/<domain>/best_model_unified.pt` (or the deployment's `MODEL_ARTIFACT_CACHE_DIR` copy) on any host that already has it; fresh containers pick it up automatically.
+- Before overwriting a published checkpoint, copy it aside in the bucket (e.g. `best_model_unified.pre-<change>-<date>.pt`).
+- Offline/local runs: point slot assignment at a file with `UNIFIED_TRN_CHECKPOINT_<DOMAIN>=…` (artifact paths take precedence when present).
+- The email checkpoint carries `placement_head` (learned item→block placement); build it with `research/trm/email/build_placement_head.py` (research is gitignored and never imported by production).
+
 ## Python version
 
 - `requires-python = ">=3.11,<3.13"`; `.python-version` pins **3.12**. Keep the pin — Glama auto-detects the Docker Python version from it and previously picked an incompatible 3.14 when the file was absent.

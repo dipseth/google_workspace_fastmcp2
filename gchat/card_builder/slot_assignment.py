@@ -705,13 +705,16 @@ def score_items_for_components(
     Resolves the ambiguity pool-level routing cannot: two demanded
     components sharing a pool (e.g. HeaderBlock and FooterBlock, both
     chrome) are indistinguishable to the pool head, so which one consumes
-    an item is decided by ordering accidents. Each (item, component) score
-    is the cosine between the item's text embedding and the component's
-    content prototype — the mean embedding of its harvested real-content
-    exemplars and templates, carried on checkpoint metadata.
+    an item is decided by ordering accidents. When the domain checkpoint
+    carries a ``placement_head`` (an MLP trained on real composed emails, see
+    ``_placement_head_scores``) each (item, component) score is its
+    log-probability; otherwise it is the cosine between the item's text
+    embedding and the component's content prototype — the mean embedding of
+    its harvested real-content exemplars and templates, carried on checkpoint
+    metadata. On real emails: head 78% vs prototypes 45% (held-out families).
 
-    (The model's content/form heads were measured at chance on this task —
-    per-component score bias swamps them — so prototypes, not heads.)
+    (The UnifiedTRN content/form heads were measured at chance on this task —
+    per-component score bias swamps them — hence a dedicated head.)
 
     Returns an [n_items][n_components] matrix (rows follow ``items``,
     columns follow ``components``), or None when component-level scoring is

@@ -717,3 +717,42 @@ async def test_compose_template_tolerates_stringified_params(store, monkeypatch)
         assert data["success"] is False
         assert "email_params" in data["error"]
         assert len(calls) == 2  # the two successful drafts above; no third
+
+
+def test_emoji_survives_save_and_load(store):
+    """Non-BMP characters (emoji) must come back as real characters, not lone
+    surrogates — the tool result is UTF-8 JSON and rejects surrogates."""
+    source = et.source_from_mime(
+        _mime("<p>Costumes 👻 and candy 🍬</p>", subject="Halloween Shop 👻 is open"),
+        {"type": "message", "id": "m-emoji"},
+    )
+    et.save_email_template("halloween", source)
+    loaded = et.load_email_template("halloween")
+    assert loaded.subject == "Halloween Shop 👻 is open"
+    assert loaded.html == "<p>Costumes 👻 and candy 🍬</p>"
+    (loaded.subject + loaded.html).encode("utf-8")  # no surrogates
+    detail = et.template_detail("halloween")
+    json.dumps(detail, ensure_ascii=False).encode("utf-8")
+
+
+def test_legacy_ascii_escaped_template_is_repaired(store, tmp_path):
+    """Templates written before the fix stored emoji as \\ud83d\\udc7b escapes."""
+    macro = et.build_template_macro(
+        "legacy_emoji",
+        {
+            "name": "legacy_emoji",
+            "kind": "html",
+            "subject": "Hi 👻",
+            "placeholders": [],
+        },
+        subject="Hi 👻",
+        html="<p>Boo 👻</p>",
+    )
+    legacy = macro.replace("👻", "\\ud83d\\udc7b")
+    manager, _ = et._get_store()
+    manager.add_dynamic_macro(
+        macro_name="legacy_emoji", macro_content=legacy, persist_to_file=False
+    )
+    loaded = et.load_email_template("legacy_emoji")
+    assert loaded.subject == "Hi 👻"
+    assert loaded.html == "<p>Boo 👻</p>"
