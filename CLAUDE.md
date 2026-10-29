@@ -31,6 +31,13 @@
 - `execute` in [tools/code_mode.py](tools/code_mode.py) replaces FastMCP's own, so upstream Code Mode changes never arrive by upgrading. On each bump, diff `fastmcp/experimental/transforms/code_mode.py` between the two versions and port what applies, then run `tests/test_code_mode.py`.
 - Skills are served by `GeneratedSkillsProvider` ([skills/skills_provider.py](skills/skills_provider.py)), which reads only the folders the server generated. They are listed through the MCP Skills extension (`skills/list`) and readable as `skill://` resources, with Code Mode on or off (before FastMCP 4.2.2 a server with transforms listed none).
 
+## Bring-your-own-module tools
+
+- `wrap_module` / `search_module` / `build_module_object` ([tools/module_tools.py](tools/module_tools.py)) are registered only with `MODULE_TOOLS_ENABLED=true`. Standard-library modules are refused, `MODULE_TOOLS_ALLOWED` (comma-separated prefixes) narrows what can be wrapped, and building is limited to data classes (pydantic models, dataclasses, enums).
+- `search_module` reranks its top-25 pool with TypeSafe Jev when `TYPESAFE_API_KEY` is set (`MODULE_TOOLS_RERANK=pool` turns it off); errors fall back to pool order.
+- Collections are `mcp_module_v2_<module>`; bump `_INDEX_VERSION` when what gets indexed changes. Class points carry a `description` vector only in collections created since 3.7.0 — older collections keep working without it until recreated.
+- **Never index research modules into the cloud Qdrant cluster.** ColBERT multivectors are ~100 KB/point; TRM research filled the 16 GiB cluster (2026-10-29) and a full disk blocks even deletes. Research wrappers default to embedded Qdrant (`research/trm/qdrant_local`).
+
 ## Python version
 
 - `requires-python = ">=3.11,<3.13"`; `.python-version` pins **3.12**. Keep the pin — Glama auto-detects the Docker Python version from it and previously picked an incompatible 3.14 when the file was absent.
