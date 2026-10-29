@@ -347,3 +347,22 @@ def _collection_has_content_vector(self) -> bool:
     except Exception:
         self.__class__._has_content_vector = False
     return self.__class__._has_content_vector
+
+
+def _collection_has_vector(self, name: str) -> bool:
+    """Whether this wrapper's collection defines the named vector ``name``.
+
+    Cached per (instance, collection): wrappers for different modules share the
+    class, so a class-level cache would leak one collection's schema to another.
+    """
+    cache = self.__dict__.setdefault("_named_vector_cache", {})
+    key = (self.collection_name, name)
+    if key not in cache:
+        try:
+            vectors = self.client.get_collection(
+                self.collection_name
+            ).config.params.vectors
+            cache[key] = isinstance(vectors, dict) and name in vectors
+        except Exception:
+            cache[key] = False
+    return cache[key]

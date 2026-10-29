@@ -326,6 +326,7 @@ class ModuleWrapper(
         max_depth: int = 2,
         auto_initialize: bool = True,
         skip_standard_library: bool = True,
+        own_members_only: bool = False,
         include_modules: Optional[List[str]] = None,
         exclude_modules: Optional[List[str]] = None,
         force_reindex: bool = False,
@@ -399,6 +400,7 @@ class ModuleWrapper(
             skip_standard_library=skip_standard_library,
             include_modules=include_modules,
             exclude_modules=exclude_modules,
+            own_members_only=own_members_only,
             force_reindex=force_reindex,
             clear_collection=clear_collection,
             enable_colbert=enable_colbert,
@@ -620,6 +622,9 @@ class ModuleWrapper(
                 and hasattr(obj, "__name__")
                 and not self._should_include_module(obj.__name__, 0)
             ):
+                continue
+
+            if self._is_foreign_root_member(obj):
                 continue
 
             component = self._create_component(name, obj, self.module_name)

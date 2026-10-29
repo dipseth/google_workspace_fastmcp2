@@ -4,7 +4,7 @@
 
 ## Description
 
-SelectionItems(items: List[card_framework.v2.widgets.selection_item.SelectionItem] = <factory>)
+Fields: items (list[SelectionItem]).
 
 ## Valid Children
 

@@ -4,4 +4,4 @@
 
 ## Description
 
-SlashCommand(command_id: 'str' = None)
+Fields: command_id (str).

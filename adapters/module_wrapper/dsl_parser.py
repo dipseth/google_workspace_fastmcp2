@@ -932,8 +932,12 @@ class DSLParser:
             if token.type == "param_close":
                 return params, pos + 1
 
-            # Expect identifier = value
-            if token.type == "identifier":
+            # Expect identifier = value (a quoted key works for map keys)
+            if token.type == "identifier" or (
+                token.type == "string"
+                and pos + 1 < len(tokens)
+                and tokens[pos + 1].type == "equals"
+            ):
                 key = token.value
                 pos += 1
 
@@ -967,6 +971,7 @@ class DSLParser:
         - Primitives: string, number, boolean, null
         - Component nodes: symbol{...} (recursive)
         - Arrays: [value, value, ...]
+        - Maps: {key=value, "quoted key"=value} with no symbol in front -> dict
         """
         if pos >= len(tokens):
             return None, pos
@@ -996,6 +1001,10 @@ class DSLParser:
         if token.type == "open":
             items, pos = self._parse_param_array(tokens, pos + 1, depth)
             return items, pos
+
+        # Map value {...}: a params block with no component in front
+        if token.type == "param_open":
+            return self._parse_params(tokens, pos + 1, depth + 1)
 
         # Component node (symbol + { or symbol + [)
         if token.type in ("symbol", "component_name"):

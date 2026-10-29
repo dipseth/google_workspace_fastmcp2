@@ -4,4 +4,4 @@
 
 ## Description
 
-SpaceDataSource(default_to_current_space: 'bool' = False)
+Fields: default_to_current_space (bool).

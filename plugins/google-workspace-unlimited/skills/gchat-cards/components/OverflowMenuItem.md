@@ -4,7 +4,7 @@
 
 ## Description
 
-OverflowMenuItem(start_icon: Optional[card_framework.v2.widgets.icon.Icon] = None, text: Optional[str] = None, on_click: Optional[card_framework.v2.widget.Widget] = None, disabled: Optional[bool] = None)
+Fields: start_icon (Icon); text (str); on_click (Widget); disabled (bool).
 
 ## Valid Children
 

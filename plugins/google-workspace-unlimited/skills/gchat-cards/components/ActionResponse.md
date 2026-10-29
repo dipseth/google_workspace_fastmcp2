@@ -4,7 +4,7 @@
 
 ## Description
 
-ActionResponse(type: 'ResponseType' = None, url: 'str' = None, dialog_action: 'DialogAction' = None, updated_widget: 'UpdatedWidget' = None)
+Fields: type (ResponseType); url (str); dialog_action (DialogAction); updated_widget (UpdatedWidget).
 
 ## Valid Children
 

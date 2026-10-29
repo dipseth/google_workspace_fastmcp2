@@ -4,7 +4,7 @@
 
 ## Description
 
-ImageCropStyle(type: 'ImageCropType' = None, aspect_ratio: 'float' = None)
+Fields: type (ImageCropType); aspect_ratio (float).
 
 ## Valid Children
 

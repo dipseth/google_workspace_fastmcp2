@@ -68,6 +68,7 @@ from ._hybrid_multidim import search_hybrid_multidim
 from ._hybrid_recursive import search_hybrid_recursive
 from ._learned_model import (
     _collection_has_content_vector,
+    _collection_has_vector,
     _ensure_learned_dag,
     _load_learned_model,
     _resolve_checkpoint_path,
@@ -149,6 +150,7 @@ SearchMixin._resolve_checkpoint_path = _resolve_checkpoint_path
 SearchMixin._load_learned_model = _load_learned_model
 SearchMixin._ensure_learned_dag = _ensure_learned_dag
 SearchMixin._collection_has_content_vector = _collection_has_content_vector
+SearchMixin._collection_has_vector = _collection_has_vector
 
 # Hybrid learned
 SearchMixin.search_hybrid_learned = search_hybrid_learned

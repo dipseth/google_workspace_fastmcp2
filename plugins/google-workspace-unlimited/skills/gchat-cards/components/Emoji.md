@@ -4,7 +4,7 @@
 
 ## Description
 
-Emoji(unicode: str = None, custom_emoji: card_framework.v2.emoji.CustomEmoji = None)
+Fields: unicode (str); custom_emoji (CustomEmoji).
 
 ## Valid Children
 

@@ -76,6 +76,7 @@ from resources.workspace_resources import setup_workspace_resources
 from sheets.sheets_tools import setup_sheets_tools
 from slides.slides_tools import setup_slides_tools
 from tools.dynamic_instructions import update_mcp_instructions
+from tools.module_tools import setup_module_tools
 from tools.server_tools import setup_server_tools
 from tools.template_macro_tools import setup_template_macro_tools
 from tools.ui_apps import setup_ui_apps, wire_dashboard_to_list_tools
@@ -413,6 +414,9 @@ setup_chat_tools(mcp)
 
 # Register Card Tools with ModuleWrapper integration
 setup_card_tools(mcp)
+
+# Bring-your-own-module tools (off unless MODULE_TOOLS_ENABLED=true)
+setup_module_tools(mcp)
 
 # Setup Skills Provider for FastMCP (if enabled)
 if settings.enable_skills_provider:

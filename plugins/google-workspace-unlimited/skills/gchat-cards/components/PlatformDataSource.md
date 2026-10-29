@@ -4,7 +4,7 @@
 
 ## Description
 
-PlatformDataSource(common_data_source: 'CommonDataSource' = None, host_app_data_source: 'HostAppDataSourceMarkup' = None)
+Fields: common_data_source (CommonDataSource); host_app_data_source (HostAppDataSourceMarkup).
 
 ## Valid Children
 

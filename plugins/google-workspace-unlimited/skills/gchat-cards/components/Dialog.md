@@ -4,7 +4,7 @@
 
 ## Description
 
-Dialog(body: 'Card' = None)
+Fields: body (Card).
 
 ## Valid Children
 

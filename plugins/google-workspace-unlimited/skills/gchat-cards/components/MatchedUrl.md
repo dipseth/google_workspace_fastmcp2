@@ -4,4 +4,4 @@
 
 ## Description
 
-MatchedUrl(url: 'str' = None)
+Fields: url (str).

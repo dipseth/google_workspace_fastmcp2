@@ -101,6 +101,7 @@ class IndexingMixin:
     _MIXIN_PROVIDES = frozenset(
         {
             "_index_module_components",
+            "_is_foreign_root_member",
             "_load_components_from_collection",
             "_create_component",
             "_index_nested_components",
@@ -195,6 +196,15 @@ class IndexingMixin:
                     return False
 
         return True
+
+    def _is_foreign_root_member(self, obj: Any) -> bool:
+        """With ``own_members_only``: a class/function imported from another package
+        (pydantic.BaseModel, typing.Annotated) is not part of the module's surface."""
+        if not getattr(self, "own_members_only", False):
+            return False
+        if not (inspect.isclass(obj) or inspect.isfunction(obj)):
+            return False
+        return not self._should_include_module(getattr(obj, "__module__", "") or "", 0)
 
     def _should_skip_object(self, name: str, obj: Any) -> bool:
         """
@@ -363,6 +373,13 @@ class IndexingMixin:
                     if self._should_skip_object(name, obj):
                         continue
 
+                    # Inherited members (BaseModel.model_dump, ...) belong to the
+                    # base class, not this module's surface.
+                    if getattr(self, "own_members_only", False) and name not in vars(
+                        parent.obj
+                    ):
+                        continue
+
                     # Create component
                     component = self._create_component(
                         name=name,
@@ -436,6 +453,9 @@ class IndexingMixin:
 
                     # Skip problematic objects
                     if self._should_skip_object(sub_name, sub_obj):
+                        continue
+
+                    if self._is_foreign_root_member(sub_obj):
                         continue
 
                     # Create component
@@ -546,6 +566,9 @@ class IndexingMixin:
                     and hasattr(obj, "__name__")
                     and not self._should_include_module(obj.__name__, 0)
                 ):
+                    continue
+
+                if self._is_foreign_root_member(obj):
                     continue
 
                 # Create component

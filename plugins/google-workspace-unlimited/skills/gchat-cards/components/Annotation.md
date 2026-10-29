@@ -4,7 +4,7 @@
 
 ## Description
 
-Annotation(type: 'AnnotationType' = None, startIndex: 'int' = None, length: 'int' = None, user_mention: 'UserMentionMetadata' = None, slash_command: 'SlashCommandMetadata' = None)
+Fields: type (AnnotationType); startIndex (int); length (int); user_mention (UserMentionMetadata); slash_command (SlashCommandMetadata).
 
 ## Valid Children
 

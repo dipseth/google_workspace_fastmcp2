@@ -4,7 +4,7 @@
 
 ## Description
 
-DeletionMetadata(deletion_type: 'DeletionType' = None)
+Fields: deletion_type (DeletionType).
 
 ## Valid Children
 

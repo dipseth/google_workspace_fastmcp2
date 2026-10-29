@@ -4,4 +4,4 @@
 
 ## Description
 
-QuotedMessageMetadata(name: 'str' = None, last_update_time: 'str' = None)
+Fields: name (str); last_update_time (str).

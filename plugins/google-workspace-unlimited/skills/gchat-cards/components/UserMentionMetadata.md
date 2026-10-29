@@ -4,7 +4,7 @@
 
 ## Description
 
-UserMentionMetadata(user: 'User' = None, type: 'UserMentionMetadataType' = None)
+Fields: user (User); type (UserMentionMetadataType).
 
 ## Valid Children
 

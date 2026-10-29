@@ -325,6 +325,7 @@ class ModuleWrapperBase:
             "skip_standard_library",
             "include_modules",
             "exclude_modules",
+            "own_members_only",
             "force_reindex",
             "clear_collection",
             "enable_colbert",
@@ -370,6 +371,7 @@ class ModuleWrapperBase:
         force_reindex: bool = False,
         clear_collection: bool = False,
         enable_colbert: bool = False,
+        own_members_only: bool = False,
         colbert_model: str = "colbert-ir/colbertv2.0",
         colbert_collection_name: Optional[str] = None,
         priority_overrides: Optional[Dict[str, int]] = None,
@@ -437,6 +439,9 @@ class ModuleWrapperBase:
         self.skip_standard_library = skip_standard_library
         self.include_modules = include_modules or []
         self.exclude_modules = exclude_modules or []
+        # Root members imported from outside include_modules (pydantic.BaseModel,
+        # typing.Annotated) are not the module's own surface; skip them when set.
+        self.own_members_only = own_members_only
         self.force_reindex = force_reindex
         self.clear_collection = clear_collection
 

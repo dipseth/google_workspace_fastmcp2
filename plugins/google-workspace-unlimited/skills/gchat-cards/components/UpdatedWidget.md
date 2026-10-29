@@ -4,7 +4,7 @@
 
 ## Description
 
-UpdatedWidget(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, widget: 'str' = None, suggestions: 'SelectionItems' = None)
+Fields: widget (str); suggestions (SelectionItems).
 
 ## Valid Children
 

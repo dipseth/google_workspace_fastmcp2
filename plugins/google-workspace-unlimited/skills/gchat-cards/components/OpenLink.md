@@ -4,4 +4,4 @@
 
 ## Description
 
-OpenLink(url: str = None, open_as: str = None, on_close: str = None)
+Fields: url (str); open_as (str); on_close (str).

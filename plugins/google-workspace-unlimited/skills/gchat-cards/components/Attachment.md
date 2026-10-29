@@ -4,7 +4,7 @@
 
 ## Description
 
-Attachment(name: 'str' = None, content_name: 'str' = None, content_type: 'str' = None, thumbnail_uri: 'str' = None, download_uri: 'str' = None, source: 'Source' = None, attachment_data_ref: 'AttachmentDataRef' = None, drive_data_ref: 'DriveDataRef' = None)
+Fields: name (str); content_name (str); content_type (str); thumbnail_uri (str); download_uri (str); source (Source); attachment_data_ref (AttachmentDataRef); drive_data_ref (DriveDataRef).
 
 ## Valid Children
 
