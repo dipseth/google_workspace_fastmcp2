@@ -701,6 +701,17 @@ class DSLParser:
                     j += 1
                 word = s[i:j]
 
+                # A word followed by "=" is a parameter key, whatever its
+                # length or spelling: `n=100` must not become a symbol, and
+                # `date=` must not resolve to the `date` component.
+                peek = j
+                while peek < len(s) and s[peek] in " \t":
+                    peek += 1
+                if peek < len(s) and s[peek] == "=":
+                    tokens.append(DSLToken(type="identifier", value=word, position=i))
+                    i = j
+                    continue
+
                 # Multi-char words are always identifiers/keywords, not symbols
                 if len(word) > 1:
                     if word in ("true", "True"):
@@ -717,17 +728,9 @@ class DSLParser:
                         sym = self._symbol_mapping[word]
                         tokens.append(DSLToken(type="symbol", value=sym, position=i))
                     else:
-                        peek = j
-                        while peek < len(s) and s[peek] in " \t":
-                            peek += 1
-                        if peek < len(s) and s[peek] == "=":
-                            tokens.append(
-                                DSLToken(type="identifier", value=word, position=i)
-                            )
-                        else:
-                            tokens.append(
-                                DSLToken(type="component_name", value=word, position=i)
-                            )
+                        tokens.append(
+                            DSLToken(type="component_name", value=word, position=i)
+                        )
                     i = j
                     continue
                 # Single char — fall through to symbol/confusable checks below
