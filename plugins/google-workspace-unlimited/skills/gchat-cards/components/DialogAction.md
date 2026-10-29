@@ -4,7 +4,7 @@
 
 ## Description
 
-DialogAction(action_status: 'ActionStatus' = None, dialog: 'Dialog' = None)
+Fields: action_status (ActionStatus); dialog (Dialog).
 
 ## Valid Children
 

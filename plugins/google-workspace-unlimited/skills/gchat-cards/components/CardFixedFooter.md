@@ -4,7 +4,7 @@
 
 ## Description
 
-CardFixedFooter(primary_button: Optional[card_framework.v2.widgets.button.Button] = None, secondary_button: Optional[card_framework.v2.widgets.button.Button] = None)
+Fields: primary_button (Button); secondary_button (Button).
 
 ## Valid Children
 

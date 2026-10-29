@@ -4,4 +4,4 @@
 
 ## Description
 
-AttachmentDataRef(resource_name: 'str' = None)
+Fields: resource_name (str).

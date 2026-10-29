@@ -4,7 +4,7 @@
 
 ## Description
 
-OverflowMenu(items: List[card_framework.v2.widgets.overflow_menu.OverflowMenuItem] = None)
+Fields: items (list[OverflowMenuItem]).
 
 ## Valid Children
 

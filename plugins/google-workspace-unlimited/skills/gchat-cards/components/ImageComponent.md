@@ -4,7 +4,7 @@
 
 ## Description
 
-ImageComponent(image_uri: 'str' = None, alt_text: 'str' = None, crop_style: 'ImageCropStyle' = None, border_style: 'BorderStyle' = None)
+Fields: image_uri (str); alt_text (str); crop_style (ImageCropStyle); border_style (BorderStyle).
 
 ## Valid Children
 

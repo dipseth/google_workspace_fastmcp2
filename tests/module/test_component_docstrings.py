@@ -57,3 +57,17 @@ def test_function_docstring_unchanged():
         """Does a thing."""
 
     assert describe_component(f) == "Does a thing."
+
+
+@dataclasses.dataclass
+class _Base:
+    _Base__hidden: int = 0
+
+
+@dataclasses.dataclass
+class OnlyPrivate(_Base):
+    pass
+
+
+def test_private_fields_not_described():
+    assert describe_component(OnlyPrivate) == ""

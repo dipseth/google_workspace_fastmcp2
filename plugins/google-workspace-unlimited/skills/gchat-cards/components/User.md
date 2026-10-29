@@ -4,7 +4,7 @@
 
 ## Description
 
-User(name: str = None, display_name: str = None, domain_id: str = None, type: card_framework.v2.user.User.UserType = None, is_anonymous: bool = None)
+Fields: name (str); display_name (str); domain_id (str); type (UserType); is_anonymous (bool).
 
 ## Valid Children
 

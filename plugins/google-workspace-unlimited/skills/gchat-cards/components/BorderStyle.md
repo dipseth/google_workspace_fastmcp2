@@ -4,7 +4,7 @@
 
 ## Description
 
-BorderStyle(type: 'BorderType' = None, stroke_color: 'Color' = None, corner_radius: 'int' = None)
+Fields: type (BorderType); stroke_color (Color); corner_radius (int).
 
 ## Valid Children
 

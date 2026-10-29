@@ -4,7 +4,7 @@
 
 ## Description
 
-Suggestions(items: List[card_framework.v2.widgets.suggestions.SuggestionItem] = None)
+Fields: items (list[SuggestionItem]).
 
 ## Valid Children
 

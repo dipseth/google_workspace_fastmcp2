@@ -4,7 +4,7 @@
 
 ## Description
 
-CustomEmoji(name: str = None, uid: str = None, emoji_name: str = None, temporary_image_uri: str = None, payload: card_framework.v2.emoji.CustomEmojiPayload = None)
+Fields: name (str); uid (str); emoji_name (str); temporary_image_uri (str); payload (CustomEmojiPayload).
 
 ## Valid Children
 

@@ -4,7 +4,7 @@
 
 ## Description
 
-ChatClientDataSourceMarkup(space_data_source: 'SpaceDataSource' = None)
+Fields: space_data_source (SpaceDataSource).
 
 ## Valid Children
 

@@ -4,4 +4,4 @@
 
 ## Description
 
-CustomEmojiPayload(file_content: str = None, filename: str = None)
+Fields: file_content (str); filename (str).

@@ -4,4 +4,4 @@
 
 ## Description
 
-SelectionItem(text: str = None, value: str = None, selected: bool = None, start_icon_uri: str = None, bottom_text: str = None)
+Fields: text (str); value (str); selected (bool); start_icon_uri (str); bottom_text (str).

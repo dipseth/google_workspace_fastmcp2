@@ -4,7 +4,7 @@
 
 ## Description
 
-Column(horizontal_size_style: 'Optional[Column.HorizontalSizeStyle]' = None, horizontal_alignment: 'Optional[Column.HorizontalAlignment]' = None, vertical_alignment: 'Optional[Column.VerticalAlignment]' = None, widgets: 'Widget' = <factory>)
+Fields: horizontal_size_style (Optional[Column.HorizontalSizeStyle]); horizontal_alignment (Optional[Column.HorizontalAlignment]); vertical_alignment (Optional[Column.VerticalAlignment]); widgets (Widget).
 
 ## Valid Children
 

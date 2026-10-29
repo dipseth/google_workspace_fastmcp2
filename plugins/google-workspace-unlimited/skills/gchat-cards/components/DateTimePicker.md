@@ -4,7 +4,7 @@
 
 ## Description
 
-DateTimePicker(_Widget__horizontal_alignment: 'HorizontalAlignment' = None, name: 'str' = None, label: 'Optional[str]' = None, type_: 'DateTimePicker.Type' = None, value_ms_epoch: 'Optional[str]' = None, timezone_offset_date: 'Optional[int]' = None, on_change_action: 'Optional[Action]' = None)
+Fields: name (str); label (Optional[str]); type_ (DateTimePicker.Type); value_ms_epoch (Optional[str]); timezone_offset_date (Optional[int]); on_change_action (Optional[Action]).
 
 ## Valid Children
 

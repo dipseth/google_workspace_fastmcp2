@@ -4,4 +4,4 @@
 
 ## Description
 
-SuggestionItem(text: str = None)
+Fields: text (str).

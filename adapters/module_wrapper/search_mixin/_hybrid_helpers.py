@@ -43,6 +43,17 @@ def _build_prefetch_list(
         )
     )
 
+    # Prefetch 1b: Description (classes by what they are for), when indexed
+    if include_classes and query_minilm and self._collection_has_vector("description"):
+        prefetch_list.append(
+            Prefetch(
+                query=query_minilm,
+                using="description",
+                limit=candidate_pool_size,
+                filter=comp_filter,
+            )
+        )
+
     # Prefetch 2: Inputs (instance patterns + content feedback filter)
     inp_conditions = [
         FieldCondition(key="type", match=MatchValue(value="instance_pattern"))

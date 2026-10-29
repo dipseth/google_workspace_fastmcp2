@@ -4,4 +4,4 @@
 
 ## Description
 
-Color(red: Optional[float] = None, green: Optional[float] = None, blue: Optional[float] = None, alpha: Optional[float] = None)
+Fields: red (float); green (float); blue (float); alpha (float).

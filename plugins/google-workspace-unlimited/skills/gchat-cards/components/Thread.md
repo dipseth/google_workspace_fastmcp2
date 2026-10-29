@@ -4,4 +4,4 @@
 
 ## Description
 
-Thread(name: 'str' = None)
+Fields: name (str).

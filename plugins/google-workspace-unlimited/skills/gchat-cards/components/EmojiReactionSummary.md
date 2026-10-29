@@ -4,7 +4,7 @@
 
 ## Description
 
-EmojiReactionSummary(emoji: card_framework.v2.emoji.Emoji = None, reaction_count: int = None)
+Fields: emoji (Emoji); reaction_count (int).
 
 ## Valid Children
 

@@ -4,4 +4,4 @@
 
 ## Description
 
-ActionParameter(key: 'str' = None, value: 'str' = None)
+Fields: key (str); value (str).

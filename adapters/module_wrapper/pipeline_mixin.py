@@ -17,6 +17,7 @@ import inspect
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
+from adapters.module_wrapper.docstrings import description_text
 from adapters.module_wrapper.ric_provider import IntrospectionProvider, RICTextProvider
 from adapters.module_wrapper.types import (
     COLBERT_DIM as _COLBERT_DIM,
@@ -490,9 +491,9 @@ class PipelineMixin:
             else:
                 return True
 
-        logger.info(f"Creating {target_name} with four named vectors...")
+        logger.info(f"Creating {target_name} with five named vectors...")
 
-        # Create collection with all four vectors
+        # Create collection with all five vectors
         self.client.create_collection(
             collection_name=target_name,
             vectors_config={
@@ -519,6 +520,12 @@ class PipelineMixin:
                 ),
                 "content": VectorParams(
                     size=CONTENT_DIM,
+                    distance=Distance.COSINE,
+                    hnsw_config=HnswConfigDiff(m=32, ef_construct=200),
+                ),
+                # MiniLM over a class's name + description (class points only).
+                "description": VectorParams(
+                    size=RELATIONSHIPS_DIM,
                     distance=Distance.COSINE,
                     hnsw_config=HnswConfigDiff(m=32, ef_construct=200),
                 ),
@@ -721,16 +728,27 @@ class PipelineMixin:
                     "encrypted": False,
                 }
 
-                point = PointStruct(
-                    id=point_id,
-                    vector={
-                        "components": comp_vec,
-                        "inputs": inputs_vec,
-                        "relationships": rel_vec,
-                        "content": content_vec,
-                    },
-                    payload=payload,
-                )
+                vectors = {
+                    "components": comp_vec,
+                    "inputs": inputs_vec,
+                    "relationships": rel_vec,
+                    "content": content_vec,
+                }
+                # Dense description vector: what the class is for, so a request
+                # phrased as a need finds it without knowing its name.
+                if component.component_type == "class":
+                    desc_emb = list(
+                        self._relationships_embedder.embed(
+                            [description_text(component.name, component.docstring)]
+                        )
+                    )[0]
+                    vectors["description"] = (
+                        desc_emb.tolist()
+                        if hasattr(desc_emb, "tolist")
+                        else list(desc_emb)
+                    )
+
+                point = PointStruct(id=point_id, vector=vectors, payload=payload)
                 points.append(point)
                 component_count += 1
 

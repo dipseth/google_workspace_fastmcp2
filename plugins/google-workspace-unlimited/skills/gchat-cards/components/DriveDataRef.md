@@ -4,4 +4,4 @@
 
 ## Description
 
-DriveDataRef(drive_file_id: 'str' = None)
+Fields: drive_file_id (str).

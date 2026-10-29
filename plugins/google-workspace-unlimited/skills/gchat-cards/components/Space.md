@@ -4,7 +4,7 @@
 
 ## Description
 
-Space(name: 'str' = None, type: 'str' = None, spaceType: 'SpaceType' = None, singleUserBotDm: 'bool' = None, threaded: 'bool' = None, displayName: 'str' = None, spaceDetails: 'SpaceDetail' = None)
+Fields: name (str); type (str); spaceType (SpaceType); singleUserBotDm (bool); threaded (bool); displayName (str); spaceDetails (SpaceDetail).
 
 ## Valid Children
 

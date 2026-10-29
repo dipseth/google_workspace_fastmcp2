@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import inspect
+import re
 import types
 import typing
 from typing import Any
@@ -68,7 +69,10 @@ def _structural_doc(cls: type) -> str:
     model_fields = getattr(cls, "model_fields", None)
     if isinstance(model_fields, dict) and model_fields:
         parts = []
-        for name, field in list(model_fields.items())[:_MAX_FIELDS]:
+        public = [(n, f) for n, f in model_fields.items() if not n.startswith("_")]
+        if not public:
+            return ""
+        for name, field in public[:_MAX_FIELDS]:
             part = f"{name} ({_type_name(getattr(field, 'annotation', None))})"
             desc = (getattr(field, "description", None) or "").strip()
             if desc:
@@ -77,7 +81,10 @@ def _structural_doc(cls: type) -> str:
         return "Fields: " + "; ".join(parts) + "."
 
     if dataclasses.is_dataclass(cls):
-        fields = dataclasses.fields(cls)[:_MAX_FIELDS]
+        fields = [f for f in dataclasses.fields(cls) if not f.name.startswith("_")]
+        if not fields:
+            return ""
+        fields = fields[:_MAX_FIELDS]
         return (
             "Fields: "
             + "; ".join(f"{f.name} ({_type_name(f.type)})" for f in fields)
@@ -94,3 +101,14 @@ def describe_component(obj: Any) -> str:
         return inspect.getdoc(obj) or ""
     except Exception:
         return ""
+
+
+def split_camel(name: str) -> str:
+    """``HnswConfigDiff`` -> ``Hnsw Config Diff`` (names carry meaning for dense models)."""
+    return " ".join(re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+", name))
+
+
+def description_text(name: str, docstring: str, max_chars: int = 500) -> str:
+    """Text embedded into a class point's ``description`` vector."""
+    doc = " ".join((docstring or "").split())[:max_chars]
+    return f"{split_camel(name)}. {doc}".strip()

@@ -4,7 +4,7 @@
 
 ## Description
 
-SlashCommandMetadata(bot: 'User' = None, type: 'SlashCommandMetadataType' = None, command_name: 'str' = None, command_id: 'str' = None, triggers_dialog: 'bool' = None)
+Fields: bot (User); type (SlashCommandMetadataType); command_name (str); command_id (str); triggers_dialog (bool).
 
 ## Valid Children
 

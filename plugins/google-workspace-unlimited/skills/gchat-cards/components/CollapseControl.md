@@ -4,7 +4,7 @@
 
 ## Description
 
-CollapseControl(horizontal_alignment: card_framework.v2.enums.HorizontalAlignment = None, expand_button: card_framework.v2.widgets.button.Button = None, collapse_button: card_framework.v2.widgets.button.Button = None)
+Fields: horizontal_alignment (HorizontalAlignment); expand_button (Button); collapse_button (Button).
 
 ## Valid Children
 

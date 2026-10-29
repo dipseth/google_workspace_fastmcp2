@@ -29,3 +29,13 @@ def test_symbol_after_equals_still_builds_nested_node():
     assert name == "Filter"
     assert params["must"][0].component_name == "Plan"
     assert params["must"][0].params == {"n": 1}
+
+
+def test_bare_braces_after_equals_are_a_map():
+    name, params = _params(
+        'ƒ{must={billing=¶{n=1}, "free text"="yes", true="t", false="f"}}'
+    )
+    m = params["must"]
+    assert set(m) == {"billing", "free text", "true", "false"}
+    assert m["billing"].component_name == "Plan" and m["billing"].params == {"n": 1}
+    assert m["free text"] == "yes" and m["true"] == "t" and m["false"] == "f"

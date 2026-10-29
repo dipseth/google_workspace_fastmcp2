@@ -192,6 +192,27 @@ def search_hybrid(
                 )
             )
 
+        # Prefetch 1b: Component classes by description, when the collection has it.
+        # Embeds the bare query: component_paths enrichment is for relationships.
+        if include_classes and self._collection_has_vector("description"):
+            desc_query = self._embed_with_minilm(description)
+            if desc_query:
+                prefetch_list.append(
+                    models.Prefetch(
+                        query=desc_query,
+                        using="description",
+                        filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="type",
+                                    match=models.MatchValue(value="class"),
+                                )
+                            ]
+                        ),
+                        limit=limit * 2,
+                    )
+                )
+
         # Prefetch 2: Instance patterns by inputs (with optional content_feedback filter)
         inputs_filter_conditions = [
             models.FieldCondition(

@@ -4,7 +4,7 @@
 
 ## Description
 
-HostAppDataSourceMarkup(chat_data_source: 'ChatClientDataSourceMarkup' = None)
+Fields: chat_data_source (ChatClientDataSourceMarkup).
 
 ## Valid Children
 

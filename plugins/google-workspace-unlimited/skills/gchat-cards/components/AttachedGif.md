@@ -4,4 +4,4 @@
 
 ## Description
 
-AttachedGif(uri: 'str' = None)
+Fields: uri (str).

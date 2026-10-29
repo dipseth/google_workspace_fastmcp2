@@ -4,7 +4,7 @@
 
 ## Description
 
-AccessoryWidget(button_list: 'ButtonList' = None)
+Fields: button_list (ButtonList).
 
 ## Valid Children
 
