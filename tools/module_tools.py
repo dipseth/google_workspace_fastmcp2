@@ -144,6 +144,54 @@ def _class_entry(wrapper, name: str, score: Optional[float] = None) -> Dict[str,
     return entry
 
 
+_RERANK_POOL = 25
+
+
+def jev_rerank(query: str, entries: List[Dict[str, Any]]) -> Optional[List[float]]:
+    """Probability per entry that it is what ``query`` asks for, from TypeSafe's Jev.
+
+    One Choice question over the candidate pool, each option described by its class
+    description. On the intent benchmark (unseen module, no training) this took
+    top-1 from 16.7% (pool order) to 50.7%. Returns None when not configured or on
+    any error, so callers keep pool order.
+    """
+    import httpx
+
+    key = os.getenv("TYPESAFE_API_KEY")
+    if not key or os.getenv("MODULE_TOOLS_RERANK", "jev").lower() != "jev":
+        return None
+    criteria = {e["name"]: (e.get("description") or e["name"])[:400] for e in entries}
+    if len(criteria) < 2:
+        return None
+    body = {
+        "model": os.getenv("TYPESAFE_MODEL", "jev-latest"),
+        "state": {"request": query},
+        "questions": {
+            "component": {
+                "type": "choice",
+                "instructions": {
+                    "question": "Which component best fulfils the developer's request?",
+                    "inspect": "request",
+                },
+                "criteria": criteria,
+            }
+        },
+    }
+    try:
+        r = httpx.post(
+            os.getenv("TYPESAFE_BASE_URL", "https://api.typesafe.ai") + "/v1/systemone",
+            json=body,
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        probs = r.json()["answers"]["component"]["probabilities"]
+        return [float(probs.get(e["name"], 0.0)) for e in entries]
+    except Exception as e:
+        logger.warning(f"Jev rerank failed, keeping pool order: {e}")
+        return None
+
+
 def setup_module_tools(mcp) -> None:
     if not module_tools_enabled():
         logger.info("⏭️ Module tools off (set MODULE_TOOLS_ENABLED=true to enable)")
@@ -197,7 +245,8 @@ def setup_module_tools(mcp) -> None:
         name="search_module",
         description=(
             "Find classes in a wrapped module by describing what you need. Returns "
-            "each class's DSL symbol, fields and a DSL starter."
+            "each class's DSL symbol, fields and a DSL starter. When TYPESAFE_API_KEY "
+            "is set, the candidate pool is reranked by TypeSafe's Jev."
         ),
         tags={"module", "search", "dsl"},
         annotations={
@@ -225,15 +274,27 @@ def setup_module_tools(mcp) -> None:
         except ImportError as e:
             return {"module": module_name, "error": f"Import failed: {e}"}
         classes, _patterns, _rels = await asyncio.to_thread(
-            wrapper.search_hybrid, query, None, limit
+            wrapper.search_hybrid, query, None, max(limit, _RERANK_POOL)
         )
-        seen, results = set(), []
+        seen, pool = set(), []
         for hit in classes:
             name = hit.get("name")
             if name and name not in seen:
                 seen.add(name)
-                results.append(_class_entry(wrapper, name, hit.get("score")))
-        return {"module": module_name, "query": query, "results": results}
+                pool.append(_class_entry(wrapper, name, hit.get("score")))
+        reranked_by = "pool"
+        probs = await asyncio.to_thread(jev_rerank, query, pool)
+        if probs is not None:
+            for entry, p in zip(pool, probs):
+                entry["probability"] = round(p, 4)
+            pool.sort(key=lambda e: -e["probability"])
+            reranked_by = "jev"
+        return {
+            "module": module_name,
+            "query": query,
+            "ranked_by": reranked_by,
+            "results": pool[:limit],
+        }
 
     @mcp.tool(
         name="build_module_object",
