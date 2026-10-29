@@ -621,6 +621,79 @@ def _component_content_prototypes(
     return protos
 
 
+def placement_item_text(item: Any) -> str:
+    """Item text for placement: text fields first, then the content of text-less
+    items (an image's alt text or URL, a link target, table headers)."""
+    text = _extract_item_text(item)
+    if text or not isinstance(item, dict):
+        return text
+    for key in ("alt", "src", "url", "href"):
+        val = item.get(key)
+        if isinstance(val, str) and val:
+            return val
+    headers = item.get("headers")
+    if isinstance(headers, list) and headers:
+        return " | ".join(map(str, headers))
+    return ""
+
+
+def placement_shape_features(text: str) -> List[float]:
+    """Position-free text shape: length, link count, markup density, bare URL.
+
+    Shared by the placement-head trainer (research/trm/email) and inference so
+    the two cannot drift.
+    """
+    import re
+
+    t = text or ""
+    return [
+        min(len(t), 2000) / 2000,
+        min(t.count("<a ") + t.count("http"), 10) / 10,
+        min(len(re.findall(r"<[a-z]+", t)), 30) / 30,
+        float(t.startswith("http")),
+    ]
+
+
+def _placement_head_scores(
+    items: List[Any], components: List[str], domain_id: Optional[str], wrapper: Any
+) -> Optional[List[List[float]]]:
+    """Log-probabilities from the checkpoint's learned placement head, if any.
+
+    The head (``placement_head`` on the domain checkpoint) is a small MLP over
+    MiniLM(item text) + placement_shape_features, trained on real composed
+    emails (each item labelled with the block it was sent in). Returns
+    [n_items][n_components] (components the head never saw score -1e9), or None
+    when the checkpoint has no head or knows none of the components.
+    """
+    import torch
+
+    entry = _domain_model_cache.get(domain_id) if domain_id else None
+    head = entry[1].get("placement_head") if entry else None
+    if not head:
+        return None
+    blocks = list(head["blocks"])
+    # Blocks the head never saw (content-less Divider/Spacer) can't take content:
+    # score them out rather than abandoning the whole email.
+    if not any(c in blocks for c in components):
+        return None
+    texts = [placement_item_text(it) for it in items]
+    if not any(texts):
+        return None
+    emb = _embed_texts([(t or " ")[:1000] for t in texts], wrapper)
+    if emb is None:
+        return None
+    emb = emb / emb.norm(dim=1, keepdim=True).clamp_min(1e-9)
+    shape = torch.tensor([placement_shape_features(t) for t in texts])
+    x = torch.cat([emb, shape], dim=1)
+    h = torch.relu(x @ head["w1"].T + head["b1"])
+    logp = torch.log_softmax(h @ head["w2"].T + head["b2"], dim=-1)
+    floor = torch.full((len(texts),), -1e9)
+    return torch.stack(
+        [logp[:, blocks.index(c)] if c in blocks else floor for c in components],
+        dim=1,
+    ).tolist()
+
+
 def score_items_for_components(
     items: List[Any],
     components: List[str],
@@ -659,6 +732,13 @@ def score_items_for_components(
         knowledge = _model_domain_config_for(domain_id) or domain
         if getattr(knowledge, "domain_id", None) != domain_id:
             knowledge = domain
+
+        learned = _placement_head_scores(items, components, domain_id, wrapper)
+        if learned is not None:
+            logger.debug(
+                f"🧠 Learned placement: {len(items)} items × {len(components)} components"
+            )
+            return learned
 
         protos = _component_content_prototypes(knowledge, wrapper)
         if not protos:
