@@ -22,6 +22,7 @@ from adapters.module_wrapper.types import (
 from config.enhanced_logging import setup_logger
 
 from .core import ModuleComponent
+from .docstrings import describe_component
 
 logger = setup_logger()
 
@@ -294,7 +295,7 @@ class IndexingMixin:
             # Get docstring safely
             docstring = ""
             try:
-                docstring = inspect.getdoc(obj) or ""
+                docstring = describe_component(obj)
             except Exception as e:
                 logger.debug(f"Error getting docstring for {name}: {e}")
 
