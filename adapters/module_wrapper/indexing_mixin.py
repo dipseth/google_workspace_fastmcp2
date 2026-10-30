@@ -204,7 +204,11 @@ class IndexingMixin:
             return False
         if not (inspect.isclass(obj) or inspect.isfunction(obj)):
             return False
-        return not self._should_include_module(getattr(obj, "__module__", "") or "", 0)
+        home = getattr(obj, "__module__", "") or ""
+        # "Is this the module's own?" — not "should we crawl it?": crawl rules skip
+        # THIRD_PARTY_PREFIXES (e.g. qdrant_client.http) even inside the package.
+        owners = self.include_modules or [self.module.__name__.split(".")[0]]
+        return not any(home == p or home.startswith(f"{p}.") for p in owners)
 
     def _should_skip_object(self, name: str, obj: Any) -> bool:
         """

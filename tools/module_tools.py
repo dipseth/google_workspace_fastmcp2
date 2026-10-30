@@ -29,7 +29,7 @@ logger = setup_logger()
 
 _REGISTRY_PREFIX = "byo:"
 # Bump when what gets indexed changes, so old collections are not reused.
-_INDEX_VERSION = "v2"
+_INDEX_VERSION = "v3"
 
 
 def module_tools_enabled() -> bool:
@@ -60,23 +60,49 @@ def collection_for(module_name: str) -> str:
     return f"mcp_module_{_INDEX_VERSION}_" + module_name.replace(".", "_")
 
 
+def max_components() -> int:
+    return int(os.getenv("MODULE_TOOLS_MAX_COMPONENTS", "3000"))
+
+
+class ModuleTooLarge(ValueError):
+    """Wrapping would index more components than MODULE_TOOLS_MAX_COMPONENTS."""
+
+
 def _create_wrapper(module_name: str):
+    """Index only the module's own top-level surface, after a size check.
+
+    Every indexed component carries two ColBERT multivectors (~100 KB), so a
+    full crawl of a large SDK (openai.types: 41k components) can fill a small
+    Qdrant cluster. Nested members (methods, class attributes) are not indexed:
+    search and building work on classes.
+    """
     from adapters.module_wrapper import ModuleWrapper
     from config.settings import settings
 
-    return ModuleWrapper(
+    wrapper = ModuleWrapper(
         module_or_name=module_name,
         qdrant_url=settings.qdrant_url,
         qdrant_api_key=settings.qdrant_api_key,
         collection_name=collection_for(module_name),
-        auto_initialize=True,
-        index_nested=True,
+        auto_initialize=False,
+        index_nested=False,
         index_private=False,
         max_depth=2,
         skip_standard_library=True,
         include_modules=[module_name.split(".")[0]],
         own_members_only=True,
     )
+    wrapper._introspect_module()  # in-memory only: nothing written yet
+    n, cap = len(wrapper.components), max_components()
+    if n > cap:
+        raise ModuleTooLarge(
+            f"{module_name} has {n} components to index (limit {cap}); wrap a "
+            "narrower submodule or raise MODULE_TOOLS_MAX_COMPONENTS"
+        )
+    wrapper.components.clear()
+    wrapper.root_components.clear()
+    wrapper.initialize()
+    return wrapper
 
 
 def get_byo_wrapper(module_name: str):
@@ -225,6 +251,8 @@ def setup_module_tools(mcp) -> None:
             wrapper = await asyncio.to_thread(get_byo_wrapper, module_name)
         except ImportError as e:
             return {"module": module_name, "error": f"Import failed: {e}"}
+        except ModuleTooLarge as e:
+            return {"module": module_name, "error": str(e)}
         classes = [
             c.name for c in wrapper.components.values() if c.component_type == "class"
         ]
@@ -273,6 +301,8 @@ def setup_module_tools(mcp) -> None:
             wrapper = await asyncio.to_thread(get_byo_wrapper, module_name)
         except ImportError as e:
             return {"module": module_name, "error": f"Import failed: {e}"}
+        except ModuleTooLarge as e:
+            return {"module": module_name, "error": str(e)}
         classes, _patterns, _rels = await asyncio.to_thread(
             wrapper.search_hybrid, query, None, max(limit, _RERANK_POOL)
         )
@@ -328,6 +358,8 @@ def setup_module_tools(mcp) -> None:
             wrapper = await asyncio.to_thread(get_byo_wrapper, module_name)
         except ImportError as e:
             return {"module": module_name, "error": f"Import failed: {e}"}
+        except ModuleTooLarge as e:
+            return {"module": module_name, "error": str(e)}
         builder = DSLObjectBuilder(wrapper, data_only=True)
         parsed = builder.parse_dsl(dsl)
         if not parsed.root_nodes:

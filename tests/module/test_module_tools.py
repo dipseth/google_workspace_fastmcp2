@@ -147,3 +147,11 @@ def test_jev_rerank_error_keeps_pool_order(monkeypatch):
     monkeypatch.setenv("TYPESAFE_API_KEY", "k")
     monkeypatch.setattr(httpx, "post", boom)
     assert jev_rerank("pick one", ENTRIES) is None
+
+
+def test_wrap_refuses_modules_over_the_component_cap(monkeypatch):
+    from tools.module_tools import ModuleTooLarge, _create_wrapper
+
+    monkeypatch.setenv("MODULE_TOOLS_MAX_COMPONENTS", "5")
+    with pytest.raises(ModuleTooLarge, match="limit 5"):
+        _create_wrapper("pydantic")  # fails before anything touches Qdrant
