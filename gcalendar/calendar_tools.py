@@ -834,11 +834,24 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             calendar_service = await _get_calendar_service_with_fallback(
                 user_google_email
             )
-            updated = await asyncio.to_thread(
-                lambda: calendar_service.calendarList()
-                .patch(calendarId=calendar_id, body=body)
-                .execute()
-            )
+
+            def patch_calendar_list_entry() -> Dict[str, Any]:
+                # calendarList.patch rejects the 'primary' alias ("Invalid
+                # resource id value"), so look up the calendar's real id first.
+                target_id = calendar_id
+                if target_id == "primary":
+                    target_id = (
+                        calendar_service.calendars()
+                        .get(calendarId="primary")
+                        .execute()["id"]
+                    )
+                return (
+                    calendar_service.calendarList()
+                    .patch(calendarId=target_id, body=body)
+                    .execute()
+                )
+
+            updated = await asyncio.to_thread(patch_calendar_list_entry)
         except HttpError as e:
             return failure(f"Failed to modify calendar: {e}")
         except Exception as e:

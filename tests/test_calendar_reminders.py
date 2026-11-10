@@ -76,6 +76,9 @@ def service():
     svc.events.return_value.patch.side_effect = echo
     svc.events.return_value.insert.side_effect = echo
     svc.calendarList.return_value.patch.side_effect = echo
+    svc.calendars.return_value.get.return_value.execute.return_value = {
+        "id": "user@example.com"
+    }
     return svc
 
 
@@ -163,8 +166,9 @@ async def test_modify_calendar_changes_only_what_is_passed(client, service):
             "default_reminders": [{"method": "popup", "minutes": 30}],
         },
     )
+    # calendarList.patch rejects the 'primary' alias, so the real id is sent
     assert service.calendarList.return_value.patch.call_args.kwargs == {
-        "calendarId": "primary",
+        "calendarId": "user@example.com",
         "body": {"defaultReminders": [{"method": "popup", "minutes": 30}]},
     }
     assert result.structured_content["fieldsModified"] == ["default_reminders"]
