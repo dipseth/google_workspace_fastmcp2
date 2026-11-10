@@ -448,14 +448,13 @@ if settings.enable_skills_provider:
             enabled_modules=skill_modules,
             skills_root=settings.skills_directory_path,
             auto_regenerate=settings.skills_auto_regenerate,
-            supporting_files=settings.skills_supporting_files_mode,
         )
         if skills_path:
             logger.info(f"✅ Skills Provider enabled: {skills_path}")
         else:
             logger.warning("⚠️ Skills Provider setup returned no path")
     except ImportError as e:
-        logger.warning(f"⚠️ Skills Provider not available (FastMCP 3.0+ required): {e}")
+        logger.warning(f"⚠️ Skills Provider not available: {e}")
     except Exception as e:
         logger.error(f"❌ Failed to setup Skills Provider: {e}")
 else:

@@ -2,7 +2,7 @@
 Skills Provider Setup for FastMCP
 
 Provides setup function to register skill documents generated from ModuleWrapper
-instances with FastMCP's SkillsDirectoryProvider.
+instances with a FastMCP skill catalog provider.
 
 Usage:
     from skills.skills_provider import setup_skills_provider
@@ -28,7 +28,11 @@ Usage:
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+import anyio
+from fastmcp.skills import Skill
+from fastmcp.skills.provider import SkillCatalogProvider
 
 from config.enhanced_logging import setup_logger
 
@@ -108,13 +112,45 @@ def _get_skill_title(module_name: str) -> str:
     return SKILL_TITLES.get(module_name, module_name.replace("_", " ").title())
 
 
+def _read_skills(skill_dirs: List[Path]) -> Dict[str, Skill]:
+    return {d.name: Skill.from_directory(d) for d in skill_dirs}
+
+
+class GeneratedSkillsProvider(SkillCatalogProvider):
+    """Serve the skill folders this server generated, and nothing beside them.
+
+    The skills root defaults to ~/.claude/skills, which also holds the user's
+    own skills; a directory scan would publish those too. This provider reads
+    only the folders it is given.
+
+    With reload=True the folders are re-read on each request, so a skill
+    regenerated at runtime is served without a restart. A folder that fails to
+    read mid-rewrite leaves the last good set in place.
+    """
+
+    def __init__(self, skill_dirs: List[Path], *, reload: bool = False) -> None:
+        self._skill_dirs = list(skill_dirs)
+        self._reload = reload
+        self._last_good = _read_skills(self._skill_dirs)
+        super().__init__(self._last_good)
+
+    async def load_skills(self) -> Dict[str, Skill]:
+        if self._reload:
+            try:
+                self._last_good = await anyio.to_thread.run_sync(
+                    _read_skills, self._skill_dirs
+                )
+            except (OSError, ValueError) as exc:
+                logger.error(f"Keeping the last valid skills; {exc}")
+        return self._last_good
+
+
 def setup_skills_provider(
     mcp: "FastMCP",
     wrappers: List["ModuleWrapper"],
     enabled_modules: Optional[List[str]] = None,
     skills_root: Optional[Path] = None,
     auto_regenerate: bool = True,
-    supporting_files: str = "resources",
 ) -> Optional[Path]:
     """
     Register skills provider with dynamic skill generation.
@@ -122,19 +158,15 @@ def setup_skills_provider(
     This function:
     1. Generates skill documents from each enabled ModuleWrapper
     2. Writes them to the skills directory
-    3. Registers a SkillsDirectoryProvider with FastMCP
+    3. Registers a provider that serves exactly those skills
 
     Args:
         mcp: FastMCP server instance
         wrappers: List of ModuleWrapper instances to generate skills for
         enabled_modules: Module names to enable (None = all). Default: ["card_framework"]
         skills_root: Base directory for skills (default: ~/.claude/skills)
-        auto_regenerate: If True, regenerate skills on each startup
-        supporting_files: How non-main skill files are surfaced to clients.
-            "resources" (default) registers one concrete Resource per file so
-            every file appears in resources/list. "template" registers a single
-            ResourceTemplate at skill://{skill_name}/{path} — clients must know
-            the path to read (files are not listed individually).
+        auto_regenerate: If True, regenerate skills on each startup, and
+            re-read them from disk on each request
 
     Returns:
         Path to skills root directory, or None if no skills were generated
@@ -150,17 +182,6 @@ def setup_skills_provider(
             enabled_modules=["card_framework"],
         )
     """
-    try:
-        from fastmcp.server.providers.skills import (
-            SkillsDirectoryProvider,
-        )
-    except ImportError:
-        logger.warning(
-            "FastMCP skills provider not available. "
-            "Upgrade to FastMCP 3.0.0+ to enable skills."
-        )
-        return None
-
     from adapters.module_wrapper.skill_types import (
         SkillGeneratorConfig,
     )
@@ -170,7 +191,7 @@ def setup_skills_provider(
     skills_root.mkdir(parents=True, exist_ok=True)
 
     enabled = enabled_modules or ["card_framework"]  # Currently only gchat
-    skills_generated = False
+    skill_dirs: List[Path] = []
 
     for wrapper in wrappers:
         module_name = getattr(wrapper, "module_name", "")
@@ -187,7 +208,7 @@ def setup_skills_provider(
         # Check if we need to regenerate
         if skill_dir.exists() and not auto_regenerate:
             logger.info(f"Skills directory exists, skipping: {skill_dir}")
-            skills_generated = True
+            skill_dirs.append(skill_dir)
             continue
 
         # Generate skills using wrapper's SkillsMixin
@@ -203,7 +224,7 @@ def setup_skills_provider(
             )
 
             wrapper.export_skills_to_directory(skill_dir, config)
-            skills_generated = True
+            skill_dirs.append(skill_dir)
 
             logger.info(f"Generated skills for {module_name} -> {skill_dir}")
 
@@ -224,31 +245,20 @@ def setup_skills_provider(
             None,
         )
         if card_w and email_w:
-            write_server_skill(skills_root, card_w, email_w)
-            skills_generated = True
+            skill_dirs.append(write_server_skill(skills_root, card_w, email_w))
     except Exception:
         logger.exception("Failed to generate server skill")
 
-    if not skills_generated:
+    if not skill_dirs:
         logger.warning("No skills were generated")
         return None
 
-    # Add single provider for all generated skills
     try:
-        if supporting_files not in ("resources", "template"):
-            logger.warning(
-                f"Invalid supporting_files={supporting_files!r}, falling back to 'resources'"
-            )
-            supporting_files = "resources"
-
-        provider = SkillsDirectoryProvider(
-            roots=skills_root,
-            reload=auto_regenerate,  # Re-scan on each request if regenerating
-            supporting_files=supporting_files,
-        )
+        provider = GeneratedSkillsProvider(skill_dirs, reload=auto_regenerate)
         mcp.add_provider(provider)
         logger.info(
-            f"Skills provider registered: {skills_root} (supporting_files={supporting_files})"
+            f"Skills provider registered: {skills_root} "
+            f"({', '.join(d.name for d in skill_dirs)})"
         )
     except Exception:
         logger.exception("Failed to register skills provider")

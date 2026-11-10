@@ -178,7 +178,7 @@ All environment variables are **optional** — the server starts with sensible d
 | `MINIMAL_TOOLS_STARTUP` | `true` | Start with only 5 protected tools enabled |
 | `MINIMAL_STARTUP_SERVICES` | _(empty)_ | Comma-separated services to enable at startup (e.g., `drive,gmail`) |
 | `ENABLE_CODE_MODE` | `true` | Code Mode (default) — replaces the full tool catalog with 7 meta-tools + sandboxed `execute`; set `false` for the classic catalog |
-| `ENABLE_SKILLS_PROVIDER` | `false` | Enable FastMCP SkillsDirectoryProvider for dynamic skill generation |
+| `ENABLE_SKILLS_PROVIDER` | `false` | Generate skill documents and serve them over MCP |
 | `SKILLS_DIRECTORY` | `~/.claude/skills` | Directory for generated skill documents |
 | `RESPONSE_LIMIT_MAX_SIZE` | `500000` | Max tool response size in bytes (0 = disabled) |
 | `RESPONSE_LIMIT_TOOLS` | _(empty)_ | Comma-separated tool names to limit (empty = all) |
@@ -514,7 +514,7 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
 
 ### 📚 Skills Provider
 
-When enabled via `ENABLE_SKILLS_PROVIDER=true`, GoogleUnlimited generates **skill documents** from ModuleWrapper instances and serves them via FastMCP's `SkillsDirectoryProvider`. Skills provide structured knowledge that LLMs can reference for complex multi-step tasks.
+When enabled via `ENABLE_SKILLS_PROVIDER=true`, GoogleUnlimited generates **skill documents** from ModuleWrapper instances and serves them over MCP as `skill://` resources. With Code Mode off they are also listed through the MCP Skills extension (`skills/list`); FastMCP 4.2 does not yet run that extension on a server with transforms. Skills provide structured knowledge that LLMs can reference for complex multi-step tasks.
 
 **Currently supported modules:**
 - `card_framework` → `gchat-cards` skill (Google Chat card DSL reference, component hierarchy, examples)
