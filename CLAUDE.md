@@ -2,7 +2,8 @@
 
 ## Release / deployment pattern
 
-- **A release is a version bump merged to `main`.** [.github/workflows/publish.yml](.github/workflows/publish.yml) runs on every push to `main` and publishes to PyPI **only if** `version` in `pyproject.toml` differs from the previous commit (`HEAD~1`). No tags involved.
+- **A release is a version bump merged to `main`.** [.github/workflows/publish.yml](.github/workflows/publish.yml) runs on every push to `main` and publishes to PyPI **only if** `version` in `pyproject.toml` differs from the previous commit (`HEAD~1`). You never push a tag to trigger a release.
+- **The same workflow then tags and releases.** After the PyPI upload it pushes an annotated tag `vX.Y.Z` and creates a GitHub Release with generated notes. If one of those steps fails, PyPI already has the version, so don't re-run the job (`uv publish` would fail on the existing files). Finish by hand instead: `git tag -a vX.Y.Z <merge-sha> -m vX.Y.Z && git push upstream vX.Y.Z`, then `gh release create vX.Y.Z --title vX.Y.Z --generate-notes --verify-tag`. This happened for 3.5.0, when GitHub rejected the tag push with a server error.
 - **Every PR that should ship must bump the version** in *both* places, kept in sync:
   - `pyproject.toml` → `version = "X.Y.Z"`
   - `uv.lock` → the `google-workspace-unlimited` package entry's `version`
