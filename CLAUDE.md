@@ -24,6 +24,11 @@
 - Offline/local runs: point slot assignment at a file with `UNIFIED_TRN_CHECKPOINT_<DOMAIN>=…` (artifact paths take precedence when present).
 - The email checkpoint carries `placement_head` (learned item→block placement); build it with `research/trm/email/build_placement_head.py` (research is gitignored and never imported by production).
 
+## FastMCP pin
+
+- FastMCP is pinned to a 4.2 prerelease (`==4.2.0a4`). `fastmcp-slim` and `fastmcp-tasks` are named in `dependencies` only because uv/uvx refuse a prerelease they reach transitively; move all three together, and drop the two extra lines once the pin is a final release.
+- Skills are served by `GeneratedSkillsProvider` ([skills/skills_provider.py](skills/skills_provider.py)), which reads only the folders the server generated. The MCP Skills extension (`skills/list`) returns nothing while Code Mode is on — FastMCP 4.2 skips it on servers with transforms; `skill://` resources work either way.
+
 ## Python version
 
 - `requires-python = ">=3.11,<3.13"`; `.python-version` pins **3.12**. Keep the pin — Glama auto-detects the Docker Python version from it and previously picked an incompatible 3.14 when the file was absent.

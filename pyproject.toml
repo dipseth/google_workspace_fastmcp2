@@ -77,7 +77,12 @@ classifiers = [
 ]
 dependencies = [
     # Core MCP Framework
-    "fastmcp[anthropic,tasks,code-mode,apps]>=4.1.4",
+    "fastmcp[anthropic,tasks,code-mode,apps]==4.2.0a4",
+    # FastMCP 4.2 is a prerelease and pins its split packages exactly. uv and
+    # uvx only accept a prerelease for packages named here, so name them too.
+    # Drop these two lines once the pin above is a final release.
+    "fastmcp-slim==4.2.0a4",
+    "fastmcp-tasks==4.2.0a4",
     # Google APIs
     "google-api-python-client>=2.168.0",
     "google-auth-httplib2>=0.2.0",
