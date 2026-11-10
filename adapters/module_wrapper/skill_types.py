@@ -2,7 +2,7 @@
 Skill Document Types for ModuleWrapper SkillsMixin
 
 Defines dataclasses for skill documents and manifests that are generated
-by the SkillsMixin and consumed by FastMCP's SkillsDirectoryProvider.
+by the SkillsMixin and served by skills/skills_provider.py.
 
 These types are 100% generic - no module-specific code.
 

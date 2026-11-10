@@ -4,7 +4,7 @@ Skills Provider Package
 Provides FastMCP skill document generation and provider setup for ModuleWrapper.
 
 This package enables dynamic skill generation from wrapped Python modules,
-exposing skill documents via FastMCP's SkillsDirectoryProvider.
+exposing skill documents as MCP resources and Skills extension entries.
 
 Usage:
     from skills import setup_skills_provider
