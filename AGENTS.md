@@ -130,6 +130,7 @@ return {"messages_found": len(messages), "event_created": event}
 | `modify_event` | Update an existing event |
 | `delete_event` | Delete an event |
 | `create_calendar` | Create a new calendar |
+| `modify_calendar` | Change a calendar's default reminders and email notifications |
 | `bulk_calendar_operations` | Batch create/modify/delete events |
 | `move_events_between_calendars` | Move events across calendars |
 

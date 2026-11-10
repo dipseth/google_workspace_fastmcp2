@@ -88,6 +88,7 @@
     "events",
     "location",
     "recurrence",
+    "reminders",
     "start_time",
     "summary",
     "timezone",
@@ -492,6 +493,12 @@
     "tool_names",
     "user_google_email"
   ],
+  "modify_calendar": [
+    "calendar_id",
+    "default_reminders",
+    "notifications",
+    "user_google_email"
+  ],
   "modify_event": [
     "attendees",
     "calendar_id",
@@ -501,6 +508,7 @@
     "event_id",
     "location",
     "recurrence",
+    "reminders",
     "start_time",
     "summary",
     "timezone",

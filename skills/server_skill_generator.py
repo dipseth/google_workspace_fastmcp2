@@ -365,7 +365,7 @@ to see currently active tools.
 | **Gmail** | `compose_dynamic_email`, `search_gmail_messages`, `send_gmail_message`, `draft_gmail_message`, `reply_to_gmail_message`, `list_gmail_labels`, `manage_gmail_label`, `list_gmail_filters`, `create_gmail_filter`, `manage_gmail_allow_list` |
 | **Chat** | `send_dynamic_card`, `list_spaces`, `list_messages`, `send_message`, `search_messages` |
 | **Chat Cards** | `send_simple_card`, `send_rich_card`, `send_enhanced_card`, `send_interactive_card`, `send_smart_card`, `preview_card_from_description`, `validate_card`, `find_card_templates`, `save_card_template` |
-| **Calendar** | `list_calendars`, `list_events`, `create_event`, `modify_event`, `delete_event`, `get_event`, `create_calendar`, `bulk_calendar_operations`, `move_events_between_calendars` |
+| **Calendar** | `list_calendars`, `list_events`, `create_event`, `modify_event`, `delete_event`, `get_event`, `create_calendar`, `modify_calendar`, `bulk_calendar_operations`, `move_events_between_calendars` |
 | **Docs** | `search_docs`, `get_doc_content`, `list_docs_in_folder`, `create_doc` |
 | **Sheets** | `list_spreadsheets`, `get_spreadsheet_info`, `read_sheet_values`, `modify_sheet_values`, `batch_modify_sheet_values`, `create_spreadsheet`, `create_sheet`, `format_sheet_range`, `batch_update_sheet` |
 | **Slides** | `create_presentation`, `get_presentation_info`, `add_slide`, `update_slide_content`, `export_and_download_presentation` |

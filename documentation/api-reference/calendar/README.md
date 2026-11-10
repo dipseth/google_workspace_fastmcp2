@@ -21,6 +21,7 @@ Complete API documentation for all Google Calendar tools in the FastMCP Google M
 |-----------|-------------|
 | [`list_calendars`](#list_calendars) | List all accessible calendars |
 | [`create_calendar`](#create_calendar) | Create new Google Calendar |
+| [`modify_calendar`](#modify_calendar) | Change a calendar's default reminders and email notifications |
 | [`list_events`](#list_events) | Get events from calendar with time range |
 | [`create_event`](#create_event) | Create single or multiple events (bulk support) |
 | [`modify_event`](#modify_event) | Update existing event properties |
@@ -139,6 +140,51 @@ personal = await create_calendar(
 ```
 
 ---
+
+## modify_calendar
+
+Changes the authenticated user's notification settings for one calendar. These settings belong to the user's own view of the calendar; other people sharing it are not affected. Read the current values with `list_calendars` (`defaultReminders`, `notifications`).
+
+### Parameters
+
+| Parameter | Type | Required | Description | Default |
+|-----------|------|----------|-------------|---------|
+| `user_google_email` | string | Yes | User's Google email address | - |
+| `calendar_id` | string | No | Calendar to change | `primary` |
+| `default_reminders` | array | No | Reminders for events that follow the calendar default: up to 5 of `{method: 'popup' \| 'email', minutes: 0-40320}`. Replaces the current list; `[]` removes them | unchanged |
+| `notifications` | array | No | Event types to email the user about: `eventCreation`, `eventChange`, `eventCancellation`, `eventResponse`, `agenda`. Replaces the current list; `[]` turns all off | unchanged |
+
+### Example Usage
+
+```python
+# Popup 30 minutes before, plus an email the day before, on every event
+await modify_calendar(
+    user_google_email="user@gmail.com",
+    default_reminders=[
+        {"method": "popup", "minutes": 30},
+        {"method": "email", "minutes": 1440},
+    ],
+)
+
+# Only email me about cancellations and the daily agenda
+await modify_calendar(
+    user_google_email="user@gmail.com",
+    calendar_id="team@group.calendar.google.com",
+    notifications=["eventCancellation", "agenda"],
+)
+```
+
+### Reminders on a single event
+
+`create_event` and `modify_event` take a `reminders` parameter (also available per event in bulk `events`): `'default'` to follow the calendar's default reminders, `[]` for none, or up to 5 `{method, minutes}` entries. `get_event` and `list_events` return each event's `reminders`.
+
+```python
+await modify_event(
+    user_google_email="user@gmail.com",
+    event_id="abc123",
+    reminders=[{"method": "popup", "minutes": 10}],
+)
+```
 
 ## list_events
 

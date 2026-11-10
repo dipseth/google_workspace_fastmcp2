@@ -24,22 +24,28 @@ from config.enhanced_logging import setup_logger
 from tools.common_types import UserGoogleEmailCalendar
 
 from .calendar_types import (
+    REMINDERS_DESCRIPTION,
     BulkCreateEventResponse,
     BulkEventResult,
     BulkOperationResult,
     BulkOperationsResponse,
     CalendarInfo,
     CalendarListResponse,
+    CalendarNotificationType,
     CreateCalendarResponse,
     CreateEventResponse,
     DeleteEventResponse,
     EventData,
     EventInfo,
     EventListResponse,
+    EventReminder,
+    EventReminders,
     GetEventResponse,
+    ModifyCalendarResponse,
     ModifyEventResponse,
     MoveEventResult,
     MoveEventsResponse,
+    reminders_body,
 )
 
 logger = setup_logger()
@@ -54,6 +60,7 @@ __all__ = [
     "delete_event",
     "get_event",
     "create_calendar",
+    "modify_calendar",
     "bulk_calendar_operations",
     "move_events_between_calendars",
     "setup_calendar_tools",
@@ -146,6 +153,12 @@ def _correct_time_format_for_api(
         f"Localized naive {param_name} '{time_str}' to '{formatted}' (tz={tz_name})."
     )
     return formatted
+
+
+def _notification_types(calendar_list_entry: Dict[str, Any]) -> List[str]:
+    """Event types a calendarList entry emails the user about."""
+    settings_ = calendar_list_entry.get("notificationSettings") or {}
+    return [n.get("type", "") for n in settings_.get("notifications", [])]
 
 
 # ============================================================================
@@ -364,6 +377,8 @@ async def _batch_create_events(
                 ]
             if event_data.get("recurrence"):
                 event_body["recurrence"] = event_data["recurrence"]
+            if event_data.get("reminders") is not None:
+                event_body["reminders"] = reminders_body(event_data["reminders"])
 
             # Handle attachments
             if event_data.get("attachments") and drive_service:
@@ -512,6 +527,9 @@ async def list_calendars(
                 "timeZone": cal.get("timeZone"),
                 "backgroundColor": cal.get("backgroundColor"),
                 "foregroundColor": cal.get("foregroundColor"),
+                "accessRole": cal.get("accessRole"),
+                "defaultReminders": cal.get("defaultReminders", []),
+                "notifications": _notification_types(cal),
             }
             calendars.append(calendar_info)
 
@@ -553,7 +571,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="list_calendars",
-        description="Retrieves a list of calendars accessible to the authenticated user",
+        description="Retrieves a list of calendars accessible to the authenticated user, including each calendar's default reminders and email notification settings",
         tags={"calendar", "list", "google"},
         annotations={
             "title": "List Google Calendars",
@@ -722,6 +740,139 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 message=f"❌ {error_msg}",
                 error=error_msg,
             )
+
+    @mcp.tool(
+        name="modify_calendar",
+        description="Changes the authenticated user's notification settings for one calendar: the default reminders applied to its events, and which event changes Google emails them about. Use list_calendars to read the current settings, and modify_event to change reminders on a single event. Only the parameters you pass are changed.",
+        tags={"calendar", "modify", "update", "reminders", "notifications", "google"},
+        annotations={
+            "title": "Modify Calendar Notification Settings",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    )
+    async def modify_calendar(
+        calendar_id: Annotated[
+            str,
+            Field(
+                default="primary",
+                description="Calendar ID to change. Use 'primary' for the user's main calendar",
+            ),
+        ] = "primary",
+        default_reminders: Annotated[
+            Optional[List[EventReminder]],
+            Field(
+                default=None,
+                max_length=5,
+                description="Reminders applied to every event on this calendar that follows the calendar default, e.g. [{'method': 'popup', 'minutes': 30}]. Replaces the current list; [] removes all default reminders; omit to leave unchanged",
+            ),
+        ] = None,
+        notifications: Annotated[
+            Optional[List[CalendarNotificationType]],
+            Field(
+                default=None,
+                description="Event types to email the user about: 'eventCreation' (new invitations), 'eventChange', 'eventCancellation', 'eventResponse' (guest RSVPs), 'agenda' (daily agenda). Replaces the current list; [] turns all of them off; omit to leave unchanged",
+            ),
+        ] = None,
+        user_google_email: UserGoogleEmailCalendar = None,
+    ) -> ModifyCalendarResponse:
+        """
+        Changes default reminders and email notifications for one calendar.
+
+        These settings belong to the authenticated user's view of the calendar
+        (their calendarList entry); other people sharing it are not affected.
+
+        Returns:
+            ModifyCalendarResponse: The calendar's settings after the change.
+        """
+        logger.info(
+            f"[modify_calendar] Invoked. Email: '{user_google_email}', Calendar: {calendar_id}"
+        )
+
+        def failure(error_msg: str) -> ModifyCalendarResponse:
+            logger.error(f"[modify_calendar] {error_msg}")
+            return ModifyCalendarResponse(
+                success=False,
+                calendarId=calendar_id,
+                summary=None,
+                defaultReminders=[],
+                notifications=[],
+                fieldsModified=[],
+                userEmail=user_google_email or "",
+                message=f"❌ {error_msg}",
+                error=error_msg,
+            )
+
+        if not user_google_email:
+            return failure(
+                "user_google_email is required but was not provided (received None or empty string)"
+            )
+
+        body: Dict[str, Any] = {}
+        fields_modified: List[str] = []
+        if default_reminders is not None:
+            body["defaultReminders"] = [
+                {"method": r.method, "minutes": r.minutes} for r in default_reminders
+            ]
+            fields_modified.append("default_reminders")
+        if notifications is not None:
+            body["notificationSettings"] = {
+                "notifications": [
+                    {"type": kind, "method": "email"}
+                    for kind in dict.fromkeys(notifications)
+                ]
+            }
+            fields_modified.append("notifications")
+        if not body:
+            return failure(
+                "Nothing to change: pass default_reminders and/or notifications"
+            )
+
+        try:
+            calendar_service = await _get_calendar_service_with_fallback(
+                user_google_email
+            )
+
+            def patch_calendar_list_entry() -> Dict[str, Any]:
+                # calendarList.patch rejects the 'primary' alias ("Invalid
+                # resource id value"), so look up the calendar's real id first.
+                target_id = calendar_id
+                if target_id == "primary":
+                    target_id = (
+                        calendar_service.calendars()
+                        .get(calendarId="primary")
+                        .execute()["id"]
+                    )
+                return (
+                    calendar_service.calendarList()
+                    .patch(calendarId=target_id, body=body)
+                    .execute()
+                )
+
+            updated = await asyncio.to_thread(patch_calendar_list_entry)
+        except HttpError as e:
+            return failure(f"Failed to modify calendar: {e}")
+        except Exception as e:
+            return failure(f"Unexpected error: {str(e)}")
+
+        message = (
+            f"✅ Updated {', '.join(fields_modified)} on calendar "
+            f"'{updated.get('summary', calendar_id)}' for {user_google_email}"
+        )
+        logger.info(f"[modify_calendar] {message}")
+        return ModifyCalendarResponse(
+            success=True,
+            calendarId=updated.get("id", calendar_id),
+            summary=updated.get("summary"),
+            defaultReminders=updated.get("defaultReminders", []),
+            notifications=_notification_types(updated),
+            fieldsModified=fields_modified,
+            userEmail=user_google_email,
+            message=message,
+            error=None,
+        )
 
     @mcp.tool(
         name="list_events",
@@ -931,6 +1082,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     ),
                     "attendees": attendee_emails,
                     "attachments": item.get("attachments"),
+                    "reminders": item.get("reminders"),
                 }
                 events.append(event_info)
 
@@ -1009,7 +1161,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Optional[Union[List[EventData], str]],
             Field(
                 default=None,
-                description="Array of event objects for bulk creation (or JSON string that will be parsed). Each event should contain: summary (required), start_time (required), end_time (required), and optional fields like description, location, attendees, timezone, attachments. When provided, uses bulk mode and ignores legacy single-event parameters",
+                description="Array of event objects for bulk creation (or JSON string that will be parsed). Each event should contain: summary (required), start_time (required), end_time (required), and optional fields like description, location, attendees, timezone, attachments, reminders. When provided, uses bulk mode and ignores legacy single-event parameters",
             ),
         ] = None,
         # Legacy single-event parameters (backward compatibility)
@@ -1088,6 +1240,14 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 default=None,
                 description="List of Google Drive file URLs (e.g., 'https://drive.google.com/file/d/FILE_ID') or direct file IDs to attach to the event. Files must be accessible to the calendar owner (legacy mode only)",
                 max_length=25,
+            ),
+        ] = None,
+        reminders: Annotated[
+            Optional[EventReminders],
+            Field(
+                default=None,
+                description=REMINDERS_DESCRIPTION
+                + " Omit to follow the calendar default. Legacy mode only; in bulk mode set 'reminders' on each event",
             ),
         ] = None,
     ) -> Union[CreateEventResponse, BulkCreateEventResponse]:
@@ -1233,6 +1393,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                             "timezone": event.timezone,
                             "recurrence": event.recurrence,
                             "attachments": event.attachments,
+                            "reminders": event.reminders,
                         }
                     )
 
@@ -1387,6 +1548,8 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                     event_body["attendees"] = [{"email": email} for email in attendees]
                 if recurrence:
                     event_body["recurrence"] = recurrence
+                if reminders is not None:
+                    event_body["reminders"] = reminders_body(reminders)
 
                 if attachments:
                     # Accept both file URLs and file IDs. If a URL, extract the fileId.
@@ -1534,7 +1697,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
 
     @mcp.tool(
         name="modify_event",
-        description="Modifies an existing event in Google Calendar. TIMEZONE: Always pass the timezone parameter or include UTC offsets in start_time/end_time to avoid time offset issues. Uses PATCH semantics — only specified fields are changed, unspecified fields (including recurrence rules) are preserved.",
+        description="Modifies an existing event in Google Calendar. TIMEZONE: Always pass the timezone parameter or include UTC offsets in start_time/end_time to avoid time offset issues. Uses PATCH semantics — only specified fields are changed, unspecified fields (including recurrence rules) are preserved. Set 'reminders' to change the event's notifications.",
         tags={"calendar", "event", "modify", "update", "google"},
         annotations={
             "title": "Modify Calendar Event",
@@ -1604,6 +1767,14 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             Field(
                 default=None,
                 description="STRONGLY RECOMMENDED when using naive datetimes. IANA timezone name (e.g., 'America/New_York', 'America/Chicago'). Naive datetimes in start_time/end_time will be interpreted in this timezone. Without this, the server's DEFAULT_TIMEZONE setting is used.",
+            ),
+        ] = None,
+        reminders: Annotated[
+            Optional[EventReminders],
+            Field(
+                default=None,
+                description=REMINDERS_DESCRIPTION
+                + " Replaces the event's current reminders; omit to leave them unchanged",
             ),
         ] = None,
     ) -> ModifyEventResponse:
@@ -1718,6 +1889,9 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             if recurrence is not None:
                 event_body["recurrence"] = recurrence
                 fields_modified.append("recurrence")
+            if reminders is not None:
+                event_body["reminders"] = reminders_body(reminders)
+                fields_modified.append("reminders")
             if (
                 timezone is not None
                 and "start" not in event_body
@@ -2790,6 +2964,7 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
                 ),
                 attendees=attendee_emails,
                 attachments=event.get("attachments"),
+                reminders=event.get("reminders"),
                 calendarId=calendar_id,
                 userEmail=user_google_email or "",
                 message=f"Successfully retrieved event '{event.get('summary', 'No Title')}' (ID: {event_id})",
@@ -2846,5 +3021,5 @@ def setup_calendar_tools(mcp: FastMCP) -> None:
             )
 
     # Log successful setup
-    tool_count = 9  # Total number of Calendar tools (added create_calendar)
+    tool_count = 10  # Total number of Calendar tools
     logger.info(f"Successfully registered {tool_count} Google Calendar tools")
