@@ -65,6 +65,7 @@ class ToolOptimizationHelper:
         "calendar": [
             "list_calendars",
             "create_calendar",
+            "modify_calendar",
             "list_events",
             "create_event",
             "modify_event",
@@ -188,7 +189,12 @@ class ToolOptimizationHelper:
         },
         "calendar": {
             "List/Get": ["list_calendars", "list_events", "get_event"],
-            "Create/Modify": ["create_calendar", "create_event", "modify_event"],
+            "Create/Modify": [
+                "create_calendar",
+                "modify_calendar",
+                "create_event",
+                "modify_event",
+            ],
             "Delete/Bulk": [
                 "delete_event",
                 "bulk_calendar_operations",

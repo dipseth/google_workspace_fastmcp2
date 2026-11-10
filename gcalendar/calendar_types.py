@@ -10,7 +10,15 @@ import re
 from datetime import timedelta
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
-from typing_extensions import Annotated, List, NotRequired, Optional, TypedDict
+from typing_extensions import (
+    Annotated,
+    List,
+    Literal,
+    NotRequired,
+    Optional,
+    TypedDict,
+    Union,
+)
 
 # ---------------------------------------------------------------------------
 # Duration parsing  (accepts str, int/float seconds, or existing timedelta)
@@ -88,6 +96,66 @@ def resolve_end_time(start_time: str, dur: timedelta) -> str:
     return end_dt.strftime("%Y-%m-%dT%H:%M:%S") + suffix
 
 
+# ---------------------------------------------------------------------------
+# Reminders and notifications
+# ---------------------------------------------------------------------------
+class EventReminder(BaseModel):
+    """One reminder: how it is delivered and how long before the event starts."""
+
+    method: Annotated[
+        Literal["popup", "email"],
+        Field(description="'popup' for an on-screen notification, 'email' for mail"),
+    ]
+    minutes: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=40320,
+            description="Minutes before the event start (0 to 40320, i.e. up to 4 weeks)",
+        ),
+    ]
+
+
+#: Reminders for one event: the string 'default' to follow the calendar's
+#: default reminders, or a list of up to 5 reminders ([] for none).
+EventReminders = Union[
+    Literal["default"], Annotated[List[EventReminder], Field(max_length=5)]
+]
+
+REMINDERS_DESCRIPTION = (
+    "Reminders for the event. Pass 'default' to follow the calendar's default "
+    "reminders, [] for no reminders, or up to 5 entries such as "
+    "[{'method': 'popup', 'minutes': 10}, {'method': 'email', 'minutes': 1440}]. "
+    "Reminders are private to the authenticated user; attendees keep their own."
+)
+
+#: Events on a calendar that Google can email the user about.
+CalendarNotificationType = Literal[
+    "eventCreation",
+    "eventChange",
+    "eventCancellation",
+    "eventResponse",
+    "agenda",
+]
+
+
+def reminders_body(reminders: EventReminders) -> dict:
+    """Build the Calendar API `reminders` object for an event.
+
+    `overrides` is always sent: a patch that only flips `useDefault` leaves the
+    old overrides in place, and the API rejects defaults combined with overrides.
+    """
+    if reminders == "default":
+        return {"useDefault": True, "overrides": []}
+    return {
+        "useDefault": False,
+        "overrides": [
+            {"method": reminder.method, "minutes": reminder.minutes}
+            for reminder in reminders
+        ],
+    }
+
+
 class CalendarInfo(TypedDict):
     """Structure for a single calendar entry."""
 
@@ -98,6 +166,11 @@ class CalendarInfo(TypedDict):
     timeZone: Optional[str]
     backgroundColor: Optional[str]
     foregroundColor: Optional[str]
+    accessRole: NotRequired[Optional[str]]
+    # Reminders applied to events that use the calendar default
+    defaultReminders: NotRequired[List[dict]]  # [{method, minutes}]
+    # Event types the user is emailed about (see CalendarNotificationType)
+    notifications: NotRequired[List[str]]
 
 
 class EventInfo(TypedDict):
@@ -117,6 +190,9 @@ class EventInfo(TypedDict):
     organizer: Optional[str]
     attendees: Optional[List[str]]  # List of email addresses
     attachments: Optional[List[dict]]
+    reminders: NotRequired[
+        Optional[dict]
+    ]  # {useDefault, overrides: [{method, minutes}]}
 
 
 class CalendarListResponse(TypedDict):
@@ -251,6 +327,9 @@ class GetEventResponse(TypedDict):
     organizer: Optional[str]
     attendees: Optional[List[str]]
     attachments: Optional[List[dict]]
+    reminders: NotRequired[
+        Optional[dict]
+    ]  # {useDefault, overrides: [{method, minutes}]}
     calendarId: str
     userEmail: str
     message: str
@@ -309,6 +388,9 @@ class EventData(BaseModel):
             description="List of Google Drive file URLs or file IDs to attach to the event",
         ),
     ] = None
+    reminders: Annotated[
+        Optional[EventReminders], Field(None, description=REMINDERS_DESCRIPTION)
+    ] = None
 
     @model_validator(mode="after")
     def _resolve_end_time(self) -> "EventData":
@@ -359,6 +441,20 @@ class CreateCalendarResponse(TypedDict):
     timeZone: Optional[str]
     location: Optional[str]
     htmlLink: Optional[str]
+    userEmail: str
+    message: str
+    error: NotRequired[Optional[str]]
+
+
+class ModifyCalendarResponse(TypedDict):
+    """Response structure for modify_calendar tool."""
+
+    success: bool
+    calendarId: str
+    summary: Optional[str]
+    defaultReminders: List[dict]  # [{method, minutes}] after the change
+    notifications: List[str]  # notification types enabled after the change
+    fieldsModified: List[str]
     userEmail: str
     message: str
     error: NotRequired[Optional[str]]
