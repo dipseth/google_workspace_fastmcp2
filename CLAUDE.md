@@ -27,8 +27,9 @@
 
 ## FastMCP pin
 
-- FastMCP is pinned to a 4.2 prerelease (`==4.2.0a4`). `fastmcp-slim` and `fastmcp-tasks` are named in `dependencies` only because uv/uvx refuse a prerelease they reach transitively; move all three together, and drop the two extra lines once the pin is a final release.
-- Skills are served by `GeneratedSkillsProvider` ([skills/skills_provider.py](skills/skills_provider.py)), which reads only the folders the server generated. The MCP Skills extension (`skills/list`) returns nothing while Code Mode is on — FastMCP 4.2 skips it on servers with transforms; `skill://` resources work either way.
+- FastMCP is pinned exactly (`fastmcp[...]==4.2.3`); it pins `fastmcp-slim` and `fastmcp-tasks` to the same version itself. Don't release with a prerelease pin: uv and uvx accept a prerelease only for a package the installer names, so 3.5.0 and 3.6.0 (pinned to `4.2.0a4`) could not be resolved from PyPI and a plain `uvx google-workspace-unlimited` fell back to 3.4.0. Naming the split packages in our own `dependencies` only helped `uv sync` inside this repo.
+- `execute` in [tools/code_mode.py](tools/code_mode.py) replaces FastMCP's own, so upstream Code Mode changes never arrive by upgrading. On each bump, diff `fastmcp/experimental/transforms/code_mode.py` between the two versions and port what applies, then run `tests/test_code_mode.py`.
+- Skills are served by `GeneratedSkillsProvider` ([skills/skills_provider.py](skills/skills_provider.py)), which reads only the folders the server generated. They are listed through the MCP Skills extension (`skills/list`) and readable as `skill://` resources, with Code Mode on or off (before FastMCP 4.2.2 a server with transforms listed none).
 
 ## Python version
 

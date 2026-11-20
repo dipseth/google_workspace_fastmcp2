@@ -6,7 +6,10 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp_types import PromptReference, ResourceTemplateReference
 
+from prompts.gchat_prompts import setup_gchat_prompts
+from prompts.gsheets_prompts import setup_gsheets_prompts
 from resources import completions
+from resources.chat_digest_resources import setup_chat_digest_resources
 from resources.completions import setup_completions
 
 DIGEST = "chat://digest/space/{space_code}{?hours,limit}"
@@ -26,6 +29,11 @@ def mcp(monkeypatch):
         return list(SPACES)
 
     monkeypatch.setattr(completions, "_list_spaces", _spaces)
+    # FastMCP 4.2 answers completion only for a prompt or template the caller
+    # can see, so the real ones are registered here, under their real names.
+    setup_chat_digest_resources(server)
+    setup_gchat_prompts(server)
+    setup_gsheets_prompts(server)
     setup_completions(server)
     return server
 
@@ -93,6 +101,19 @@ async def test_unknown_reference_and_failures_are_empty(mcp, monkeypatch):
         ref = ResourceTemplateReference(uri=DIGEST)
         assert (
             await c.complete(ref, {"name": "space_code", "value": "A"})
+        ).values == []
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_the_server_does_not_serve_gets_no_completions():
+    """The handler knows the prompt; FastMCP 4.2 still answers nothing for it."""
+    server = FastMCP("handler-only")
+    setup_completions(server)
+
+    async with Client(server) as c:
+        ref = PromptReference(name="smart_contextual_chat_card")
+        assert (
+            await c.complete(ref, {"name": "card_purpose", "value": ""})
         ).values == []
 
 

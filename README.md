@@ -514,7 +514,7 @@ manage_tools(action="disable", tool_names=["send_gmail_message"], scope="global"
 
 ### 📚 Skills Provider
 
-When enabled via `ENABLE_SKILLS_PROVIDER=true`, GoogleUnlimited generates **skill documents** from ModuleWrapper instances and serves them over MCP as `skill://` resources. With Code Mode off they are also listed through the MCP Skills extension (`skills/list`); FastMCP 4.2 does not yet run that extension on a server with transforms. Skills provide structured knowledge that LLMs can reference for complex multi-step tasks.
+When enabled via `ENABLE_SKILLS_PROVIDER=true`, GoogleUnlimited generates **skill documents** from ModuleWrapper instances and serves them over MCP as `skill://` resources. They are also listed through the MCP Skills extension (`skills/list`), with Code Mode on or off. Skills provide structured knowledge that LLMs can reference for complex multi-step tasks.
 
 **Currently supported modules:**
 - `card_framework` → `gchat-cards` skill (Google Chat card DSL reference, component hierarchy, examples)

@@ -12,6 +12,7 @@ import os
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.experimental.transforms.code_mode import (
     CodeMode,
     GetSchemas,
@@ -1072,8 +1073,12 @@ def setup_code_mode(mcp: FastMCP) -> None:
     # ``max_feed_duration_secs`` and now measures only sandbox execution time,
     # excluding time spent inside external functions such as call_tool.
     max_duration = float(os.getenv("CODE_MODE_MAX_DURATION_SECS", "90"))
+    # Because that limit no longer counts time inside call_tool, FastMCP 4.2
+    # added a separate bound on the whole block. Off unless set, as upstream.
+    wall_clock = os.getenv("CODE_MODE_WALL_CLOCK_TIMEOUT_SECS")
     tasks_available = _ensure_tasks_extension(mcp)
     code_mode = CodeMode(
+        wall_clock_timeout_secs=float(wall_clock) if wall_clock else None,
         sandbox_provider=EnhancedSandboxProvider(
             limits={
                 "max_feed_duration_secs": max_duration,
@@ -1259,10 +1264,23 @@ def setup_code_mode(mcp: FastMCP) -> None:
             except Exception:
                 pass
 
-            raw = await transform.sandbox_provider.run(
+            # As in upstream's execute: the sandbox's own duration limit skips
+            # time spent awaiting call_tool, so the block as a whole is bounded
+            # on the wall clock when a limit is configured.
+            run = transform.sandbox_provider.run(
                 code,
                 external_functions={"call_tool": call_tool},
             )
+            timeout = transform.wall_clock_timeout_secs
+            if timeout is None:
+                raw = await run
+            else:
+                try:
+                    raw = await asyncio.wait_for(run, timeout)
+                except TimeoutError as exc:
+                    raise ToolError(
+                        f"Execution exceeded the wall-clock limit of {timeout} seconds."
+                    ) from exc
 
             if pending_input is not None:
                 # The ask is the legitimate result of this leg. It wins even if
