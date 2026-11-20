@@ -16,6 +16,12 @@ Covered references:
 - ``professional_chat_dashboard``, ``smart_contextual_sheets_card``,
   ``professional_sheets_dashboard`` — the documented example values.
 
+FastMCP 4.2 answers ``completion/complete`` only for a prompt or template the
+server serves to the caller; any other reference gets an empty list before
+this handler runs. ``server.py`` registers the digest template but neither
+``setup_gchat_prompts`` nor ``setup_gsheets_prompts``, so the prompt entries
+above answer nothing until those prompts are registered.
+
 Identity comes from the request token (``principal_email``); the OAuth-file
 fallback covers tokenless local runs. ``AuthMiddleware.on_call_tool`` does not
 run for ``completion/complete``, so nothing else resolves the user here.

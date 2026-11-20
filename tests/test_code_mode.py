@@ -1415,3 +1415,85 @@ class TestExecuteSuspendsForClientInput:
         assert getattr(params, "mode", None) == "form"
         assert "https://example.com/auth" in message
         assert len(rounds) == 2
+
+
+# =============================================================================
+# Wall-clock bound on a whole execute block
+# =============================================================================
+
+
+class TestExecuteWallClockLimit:
+    """The sandbox's duration limit skips time spent inside ``call_tool``.
+
+    FastMCP 4.2 bounds the whole block instead (``wall_clock_timeout_secs``),
+    in its own ``execute``. This server replaces that tool, so the bound has to
+    be applied here too or the setting does nothing.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _inline_execute(self, monkeypatch):
+        from fastmcp import Client
+
+        monkeypatch.setattr(Client, "_auto_internal_extensions", False)
+
+    @staticmethod
+    def _server():
+        import asyncio
+
+        from fastmcp import FastMCP
+
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        async def slow_tool() -> str:
+            """Take longer than any limit the tests set."""
+            await asyncio.sleep(5)
+            return "finished"
+
+        @mcp.tool
+        async def quick_tool() -> str:
+            """Return at once."""
+            return "finished"
+
+        setup_code_mode(mcp)
+        return mcp
+
+    @pytest.mark.asyncio
+    async def test_a_block_past_the_limit_is_stopped(self, monkeypatch):
+        from fastmcp import Client
+        from fastmcp.exceptions import ToolError
+
+        monkeypatch.setenv("CODE_MODE_WALL_CLOCK_TIMEOUT_SECS", "0.2")
+
+        async with Client(self._server()) as client:
+            with pytest.raises(ToolError, match="wall-clock limit of 0.2 seconds"):
+                await client.call_tool(
+                    "execute", {"code": "return await call_tool('slow_tool', {})"}
+                )
+
+    @pytest.mark.asyncio
+    async def test_a_block_within_the_limit_returns(self, monkeypatch):
+        from fastmcp import Client
+
+        monkeypatch.setenv("CODE_MODE_WALL_CLOCK_TIMEOUT_SECS", "30")
+
+        async with Client(self._server()) as client:
+            result = await client.call_tool(
+                "execute", {"code": "return await call_tool('quick_tool', {})"}
+            )
+
+        assert "finished" in result.content[0].text
+
+    def test_no_limit_unless_configured(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from tools.code_mode import setup_code_mode
+
+        monkeypatch.delenv("CODE_MODE_WALL_CLOCK_TIMEOUT_SECS", raising=False)
+        mock_mcp = MagicMock()
+        setup_code_mode(mock_mcp)
+
+        code_mode = mock_mcp.add_transform.call_args[0][0]
+        assert code_mode.wall_clock_timeout_secs is None

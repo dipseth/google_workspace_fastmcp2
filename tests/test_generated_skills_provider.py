@@ -77,3 +77,18 @@ def test_invalid_folder_fails_at_construction(tmp_path):
     (bad / "SKILL.md").write_text("no frontmatter")
     with pytest.raises(ValueError):
         GeneratedSkillsProvider([bad])
+
+
+async def test_skills_extension_lists_the_skill_with_code_mode_on(tmp_path):
+    """FastMCP before 4.2.2 returned nothing here on a server with transforms."""
+    from tools.code_mode import setup_code_mode
+
+    mcp = FastMCP("t")
+    mcp.add_provider(GeneratedSkillsProvider([_write_skill(tmp_path, "ours")]))
+    setup_code_mode(mcp)
+
+    async with Client(mcp, extensions=[SkillsClientExtension()]) as client:
+        skills = await client.list_skills()
+        content = await client.read_resource("skill://ours/SKILL.md")
+    assert [s.uri for s in skills] == ["skill://ours/SKILL.md"]
+    assert "Body." in content[0].text
