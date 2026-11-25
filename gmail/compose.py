@@ -1160,6 +1160,35 @@ def _build_email_spec_from_dsl(
     )
 
 
+def _send_authorization(
+    recipients_not_allowed: List[str], user_confirmed: bool
+) -> tuple[dict, str]:
+    """How a send beyond the allow list was authorized, for the tool result.
+
+    A send the user approved in the confirmation form and one the "allow"
+    fallback let through without asking both succeed with
+    ``elicitationRequired: true``. This returns the result fields and the
+    message note that tell them apart:
+
+    * ``userConfirmed`` — the user chose to send in the confirmation form.
+    * ``elicitationNotSupported`` — nobody was asked, as on the draft and block
+      fallbacks.
+
+    Both are empty when every recipient was on the allow list.
+    """
+    if not recipients_not_allowed:
+        return {}, ""
+    if user_confirmed:
+        return (
+            {"userConfirmed": True},
+            "\n\nℹ️ **User choice:** Send via elicitation prompt",
+        )
+    return (
+        {"elicitationNotSupported": True},
+        "\n\n⚠️ Sent without confirmation (GMAIL_ELICITATION_FALLBACK=allow)",
+    )
+
+
 def _is_elicitation_unsupported(elicit_error: Exception) -> bool:
     """True when ``elicit_error`` means elicitation cannot happen at all.
 
@@ -1467,6 +1496,7 @@ async def send_gmail_message(
 
     # STEP 2: Check allow list and trigger elicitation if needed
     allow_list = settings.get_gmail_allow_list()
+    user_confirmed = False
     recipients_not_allowed: List[str] = []
 
     if allow_list:
@@ -1735,6 +1765,7 @@ async def send_gmail_message(
                 elif user_choice == "send":
                     # Continue with sending
                     logger.info("User chose to send email")
+                    user_confirmed = True
                 else:
                     # Unexpected choice
                     logger.error(f"Unexpected user choice: {user_choice}")
@@ -1836,9 +1867,15 @@ async def send_gmail_message(
         # Get thread ID from the sent message
         thread_id = sent_message.get("threadId")
 
+        authorization, note = _send_authorization(
+            recipients_not_allowed if allow_list else [], user_confirmed
+        )
         return SendGmailMessageResponse(
             success=True,
-            message=f"✅ Email sent to {total_recipients} recipient(s)! Message ID: {message_id}",
+            message=(
+                f"✅ Email sent to {total_recipients} recipient(s)! "
+                f"Message ID: {message_id}{note}"
+            ),
             messageId=message_id,
             threadId=thread_id,
             recipientCount=total_recipients,
@@ -1846,8 +1883,10 @@ async def send_gmail_message(
             templateApplied=template_applied,
             templateName=template.name if template_applied and template else None,
             error=None,
+            action="sent",
             elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
             recipientsNotAllowed=recipients_not_allowed if allow_list else [],
+            **authorization,
         )
 
     except HttpError as e:
@@ -2714,6 +2753,7 @@ async def forward_gmail_message(
 
     # STEP 2: Check allow list and trigger elicitation if needed (same pattern as send_gmail_message)
     allow_list = settings.get_gmail_allow_list()
+    user_confirmed = False
 
     if allow_list:
         # Use consolidated function to resolve recipients and check allow list
@@ -3049,6 +3089,7 @@ async def forward_gmail_message(
                 elif user_choice == "send":
                     # Continue with forwarding
                     logger.info("User chose to forward email")
+                    user_confirmed = True
                 else:
                     # Unexpected choice
                     logger.error(f"Unexpected user choice: {user_choice}")
@@ -3256,8 +3297,12 @@ async def forward_gmail_message(
             html_preserved=html_preserved,
             userEmail=user_google_email or "",
             error=None,
+            action="forwarded",
             elicitationRequired=bool(recipients_not_allowed) if allow_list else False,
             recipientsNotAllowed=recipients_not_allowed if allow_list else [],
+            **_send_authorization(
+                recipients_not_allowed if allow_list else [], user_confirmed
+            )[0],
         )
 
     except Exception as e:

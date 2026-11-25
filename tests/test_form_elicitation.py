@@ -332,3 +332,25 @@ def test_plain_body_is_passed_through_and_capped(compose):
     assert compose._preview_excerpt("hi there", "plain") == "hi there"
     long = "x" * 400
     assert compose._preview_excerpt(long, "plain") == "x" * 300 + "... [truncated]"
+
+
+# ── How a send beyond the allow list was authorized ─────────────────
+
+
+def test_a_confirmed_send_says_the_user_approved_it(compose):
+    fields, note = compose._send_authorization(["x@example.com"], True)
+
+    assert fields == {"userConfirmed": True}
+    assert "Send via elicitation prompt" in note
+
+
+def test_an_allow_fallback_send_says_nobody_was_asked(compose):
+    fields, note = compose._send_authorization(["x@example.com"], False)
+
+    assert fields == {"elicitationNotSupported": True}
+    assert "without confirmation" in note
+
+
+def test_an_allow_listed_send_carries_no_marker(compose):
+    assert compose._send_authorization([], False) == ({}, "")
+    assert compose._send_authorization([], True) == ({}, "")
