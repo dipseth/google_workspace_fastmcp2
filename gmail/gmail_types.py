@@ -446,6 +446,8 @@ class SendGmailMessageResponse(TypedDict):
     action: NotRequired[str]  # "sent", "saved_draft", "blocked", etc.
     elicitationRequired: NotRequired[bool]
     elicitationNotSupported: NotRequired[bool]
+    # True when the user approved this send in the confirmation form
+    userConfirmed: NotRequired[bool]
     recipientsNotAllowed: NotRequired[List[str]]
     # Jinja2 template processing fields (from template middleware)
     jinjaTemplateApplied: NotRequired[bool]
@@ -536,6 +538,8 @@ class ForwardGmailMessageResponse(TypedDict):
     # Elicitation support fields
     elicitationRequired: NotRequired[bool]
     elicitationNotSupported: NotRequired[bool]
+    # True when the user approved this send in the confirmation form
+    userConfirmed: NotRequired[bool]
     recipientsNotAllowed: NotRequired[List[str]]
     action: NotRequired[str]  # "forwarded", "saved_draft", "blocked", etc.
     draftId: NotRequired[Optional[str]]  # Draft ID when saved as draft instead
