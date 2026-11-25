@@ -385,7 +385,11 @@ def setup_drive_tools(mcp: FastMCP) -> None:
                                 status="already_authenticated",
                                 message=(
                                     f"Valid credentials already exist for {user_google_email}. "
-                                    f"Status page opened in browser."
+                                    + (
+                                        "Status page opened in browser."
+                                        if browser_opened
+                                        else "Open the status link to review them."
+                                    )
                                 ),
                                 authUrl=status_url,
                                 clickableLink=f"[View credential status]({status_url})",

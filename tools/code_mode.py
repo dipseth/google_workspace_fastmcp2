@@ -27,6 +27,8 @@ from mcp.types import TextContent
 from pydantic import Field
 
 from config.enhanced_logging import setup_logger
+from tools.background_tasks import ensure_tasks_extension
+from tools.elicitation import TaskClientMiddleware, task_leg
 
 logger = setup_logger()
 
@@ -1027,33 +1029,6 @@ def get_discovery_tool_factories() -> list[Any]:
     ]
 
 
-def _ensure_tasks_extension(mcp: FastMCP) -> bool:
-    """Register the SEP-2663 tasks extension on *mcp* unless it already is.
-
-    A ``task=True`` tool cannot be served without it — FastMCP refuses the
-    connection at lifespan start — so the code that marks ``execute`` as
-    task-capable must also guarantee the extension. ``server.py`` registers
-    it first in production; this is idempotent so either order works, and a
-    bare ``FastMCP`` (tests, embedding) gets it here. Returns False when
-    ``fastmcp-tasks`` is not installed, in which case ``execute`` stays a
-    plain inline tool rather than breaking startup.
-    """
-    try:
-        from fastmcp_tasks import TasksExtension
-    except ImportError as exc:
-        logger.warning(
-            f"code_mode: fastmcp-tasks unavailable, execute runs inline: {exc}"
-        )
-        return False
-    try:
-        mcp.add_extension(TasksExtension())
-    except ValueError:
-        # Already registered (server.py does so first in production); FastMCP
-        # raises ValueError for a duplicate identifier.
-        pass
-    return True
-
-
 def setup_code_mode(mcp: FastMCP) -> None:
     """Register the CodeMode transform on *mcp*.
 
@@ -1076,7 +1051,11 @@ def setup_code_mode(mcp: FastMCP) -> None:
     # Because that limit no longer counts time inside call_tool, FastMCP 4.2
     # added a separate bound on the whole block. Off unless set, as upstream.
     wall_clock = os.getenv("CODE_MODE_WALL_CLOCK_TIMEOUT_SECS")
-    tasks_available = _ensure_tasks_extension(mcp)
+    tasks_available = ensure_tasks_extension(mcp)
+    if tasks_available:
+        # ``execute`` as a task runs in a worker with no session, so what its
+        # client can be asked has to be noted while the request is still live.
+        mcp.add_middleware(TaskClientMiddleware())
     code_mode = CodeMode(
         wall_clock_timeout_secs=float(wall_clock) if wall_clock else None,
         sandbox_provider=EnhancedSandboxProvider(
@@ -1208,7 +1187,8 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # here, abort the block, and return it once the sandbox unwinds.
             # On the client's re-run (same code plus inputResponses) the block
             # starts over and the nested tool reads the answer off the same
-            # request context, so nothing else has to change hands.
+            # request context — or, when the block runs as a task, off the
+            # leg that ``task_leg`` hands down below.
             pending_input: Any = None
 
             def _bridge(result: Any, tool_name: str) -> Any:
@@ -1267,20 +1247,25 @@ def setup_code_mode(mcp: FastMCP) -> None:
             # As in upstream's execute: the sandbox's own duration limit skips
             # time spent awaiting call_tool, so the block as a whole is bounded
             # on the wall clock when a limit is configured.
-            run = transform.sandbox_provider.run(
-                code,
-                external_functions={"call_tool": call_tool},
-            )
-            timeout = transform.wall_clock_timeout_secs
-            if timeout is None:
-                raw = await run
-            else:
-                try:
-                    raw = await asyncio.wait_for(run, timeout)
-                except TimeoutError as exc:
-                    raise ToolError(
-                        f"Execution exceeded the wall-clock limit of {timeout} seconds."
-                    ) from exc
+            # As a background task the block runs in a worker: the tools it
+            # calls can read neither the client's capabilities nor the answers
+            # this leg was re-entered with, so both are handed down here.
+            async with task_leg(ctx):
+                run = transform.sandbox_provider.run(
+                    code,
+                    external_functions={"call_tool": call_tool},
+                )
+                timeout = transform.wall_clock_timeout_secs
+                if timeout is None:
+                    raw = await run
+                else:
+                    try:
+                        raw = await asyncio.wait_for(run, timeout)
+                    except TimeoutError as exc:
+                        raise ToolError(
+                            "Execution exceeded the wall-clock limit of "
+                            f"{timeout} seconds."
+                        ) from exc
 
             if pending_input is not None:
                 # The ask is the legitimate result of this leg. It wins even if

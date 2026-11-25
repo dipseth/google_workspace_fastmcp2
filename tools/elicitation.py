@@ -24,12 +24,22 @@ One call per question type hides the split:
   answered inline, ``suspended`` on 2026-07-28, and a form carrying the link
   for clients that only declare form mode.
 
+A call that runs as a **background task** (SEP-2663) asks the same way — the
+returned ``InputRequiredResult`` parks the task in ``input_required`` until the
+client answers with ``tasks/update`` — but its worker has no session to read
+the client's capabilities from, and a tool it runs in-process has no request to
+read the answers from. Two halves bridge that: :func:`remember_task_client`
+notes, on the foreground leg, what the client can be asked, and
+:func:`task_leg` hands that note and the leg's answers to everything the worker
+runs.
+
 Every failure mode collapses to ``unsupported``, which means "fall back to what
 the caller did before". A client that never advertised the mode, a
-pre-2025-11-25 connection, no live session (background task, unit test), or an
-unexpected wire error all land there, so this module can only ever upgrade the
-experience — it cannot take the existing one away. ``start_google_auth`` and
-the Gmail send/forward confirmation are the current callers.
+pre-2025-11-25 connection, no live session (unit test, a task whose client was
+never noted), or an unexpected wire error all land there, so this module can
+only ever upgrade the experience — it cannot take the existing one away.
+``start_google_auth`` and the Gmail send/forward confirmation are the current
+callers.
 """
 
 from __future__ import annotations
@@ -37,10 +47,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Iterator, Literal, Optional
+from typing import Any, AsyncIterator, Iterator, Literal, Optional
+
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +85,101 @@ def suppress_elicitation() -> Iterator[None]:
         yield
     finally:
         _suppressed.reset(token)
+
+
+#: Session-state key the foreground leg writes and the worker reads. FastMCP
+#: restores the submitting request's session id inside a worker, so state under
+#: it is the one channel from the request that created a task to the legs that
+#: run it.
+TASK_CLIENT_STATE_KEY = "elicitation_task_client"
+
+
+@dataclass(frozen=True)
+class TaskLeg:
+    """What one leg of a background task knows that its tools cannot read.
+
+    ``form``/``url`` are the elicitation modes the submitting client declared;
+    ``input_responses`` are the answers this leg was re-entered with (None on
+    the first leg).
+    """
+
+    form: bool = False
+    url: bool = False
+    input_responses: Any = None
+
+
+_task_leg: ContextVar[Optional[TaskLeg]] = ContextVar(
+    "elicitation_task_leg", default=None
+)
+
+
+async def remember_task_client(ctx: Any, tool_name: str) -> None:
+    """Note what the client can be asked, when ``tool_name`` may run as a task.
+
+    Runs on the foreground leg, the only place the client's capabilities are
+    readable. Nothing is written unless the call can actually become a task
+    that asks: the request opted into the tasks extension, the tool is
+    task-capable, and the client declared an elicitation mode. Bookkeeping
+    only — a failure here never reaches the request, it just leaves the task
+    with today's fallback.
+    """
+    try:
+        from fastmcp.utilities.tasks import TASKS_EXTENSION_ID
+
+        if ctx is None or ctx.client_extension_settings(TASKS_EXTENSION_ID) is None:
+            return
+        tool = await ctx.fastmcp.get_tool(tool_name)
+        if tool is None or not tool.task_config.supports_tasks():
+            return
+        form = form_elicitation_supported(ctx)
+        url = url_elicitation_supported(ctx)
+        if form or url:
+            await ctx.set_state(TASK_CLIENT_STATE_KEY, {"form": form, "url": url})
+    except Exception as exc:
+        logger.debug(f"Could not note the task client for '{tool_name}': {exc}")
+
+
+class TaskClientMiddleware(Middleware):
+    """Calls :func:`remember_task_client` ahead of every ``tools/call``.
+
+    Middleware wraps the tasks extension's interceptor, so this runs in the
+    request that submits a task and never in the worker that executes it.
+    """
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        await remember_task_client(
+            context.fastmcp_context, getattr(context.message, "name", "")
+        )
+        return await call_next(context)
+
+
+@asynccontextmanager
+async def task_leg(ctx: Any) -> AsyncIterator[None]:
+    """Make this task leg's client and answers visible to the tools it runs.
+
+    A tool body that runs other tools in-process (Code Mode's ``execute``)
+    wraps that work in this. Outside a background task it does nothing, so the
+    caller need not check where it is running.
+    """
+    if ctx is None or not getattr(ctx, "is_background_task", False):
+        yield
+        return
+    client: dict[str, Any] = {}
+    try:
+        client = await ctx.get_state(TASK_CLIENT_STATE_KEY) or {}
+    except Exception as exc:
+        logger.debug(f"Could not read the task client: {exc}")
+    token = _task_leg.set(
+        TaskLeg(
+            form=bool(client.get("form")),
+            url=bool(client.get("url")),
+            input_responses=ctx.input_responses,
+        )
+    )
+    try:
+        yield
+    finally:
+        _task_leg.reset(token)
 
 
 Outcome = Literal["completed", "declined", "suspended", "unsupported"]
@@ -113,6 +220,9 @@ def _context() -> Any:
 
 def _is_modern(ctx: Any) -> bool:
     """True when the connection negotiated an era without a back-channel."""
+    if _task_leg.get() is not None:
+        # Tasks are only ever created on a 2026-07-28 connection.
+        return True
     try:
         from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
@@ -140,6 +250,9 @@ def url_elicitation_supported(ctx: Any = None) -> bool:
     dialog could draw one. So url mode needs the ``url`` sub-key, and a
     form-only client is served by :func:`form_elicitation_supported` instead.
     """
+    leg = _task_leg.get()
+    if leg is not None:
+        return leg.url
     ctx = ctx or _context()
     if ctx is None:
         return False
@@ -152,6 +265,9 @@ def form_elicitation_supported(ctx: Any = None) -> bool:
     An explicit ``form`` sub-key, or the bare declaration — which is what
     Claude Code sends, unconditionally.
     """
+    leg = _task_leg.get()
+    if leg is not None:
+        return leg.form
     ctx = ctx or _context()
     if ctx is None:
         return False
@@ -171,13 +287,15 @@ def answered_prompt(key: str, ctx: Any = None) -> Optional[Any]:
     ``accept``/``decline``/``cancel`` and, for a form prompt that was accepted,
     ``content`` holds the fields the user filled in.
     """
-    ctx = ctx or _context()
-    if ctx is None:
-        return None
-    try:
-        responses = ctx.input_responses
-    except Exception:
-        return None
+    leg = _task_leg.get()
+    if leg is not None:
+        responses = leg.input_responses
+    else:
+        ctx = ctx or _context()
+        try:
+            responses = ctx.input_responses if ctx is not None else None
+        except Exception:
+            responses = None
     if not responses:
         return None
     return responses.get(key)
