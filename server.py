@@ -329,13 +329,10 @@ _set_user_state_server(mcp)
 # create_gmail_filter) need it registered before the lifespan starts. The
 # backend defaults to memory:// (single process); set FASTMCP_DOCKET_URL=redis://…
 # when running replicas.
-try:
-    from fastmcp_tasks import TasksExtension
+from tools.background_tasks import ensure_tasks_extension
 
-    mcp.add_extension(TasksExtension())
+if ensure_tasks_extension(mcp):
     logger.info("🧵 Background tasks extension registered")
-except ImportError as e:
-    logger.warning(f"⚠️ fastmcp-tasks not installed; task=True tools run inline: {e}")
 
 if google_auth_provider:
     logger.info("🔐 FastMCP running with GoogleProvider OAuth 2.1")

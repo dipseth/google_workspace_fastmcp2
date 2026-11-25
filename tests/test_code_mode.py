@@ -1266,9 +1266,9 @@ class TestExecuteSuspendsForClientInput:
     tool reads the answer off the same request context.
 
     The in-memory client negotiates 2026-07-28, so this is the same wire shape
-    Claude Code sees. Claude Code negotiates no tasks, so the client's automatic
-    tasks extension is switched off: with it on, ``execute`` runs in a
-    background worker that has no session to elicit through.
+    Claude Code sees. The client's automatic tasks extension is switched off to
+    pin the inline path; ``TestExecuteAsksFromABackgroundTask`` covers a client
+    that opts into tasks.
     """
 
     @pytest.fixture(autouse=True)
@@ -1420,6 +1420,140 @@ class TestExecuteSuspendsForClientInput:
 # =============================================================================
 # Wall-clock bound on a whole execute block
 # =============================================================================
+
+
+class TestExecuteAsksFromABackgroundTask:
+    """The same ask, when the client opts into tasks and the block runs in a worker.
+
+    Claude declares the tasks extension and ``execute`` is task-capable, so its
+    blocks run as background tasks there. A worker has no session: what the
+    client can be asked is noted on the submitting request
+    (``TaskClientMiddleware``), and the answers a leg is re-entered with are
+    handed to the tools the block calls (``task_leg``). The ask parks the task
+    in ``input_required`` until the client answers with ``tasks/update``.
+
+    The in-memory client declares the tasks extension by default — the
+    behaviour under test — so nothing is switched off here. Each call records
+    whether it ran inside a task, so a test cannot pass on the inline path.
+    """
+
+    FORM = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"],
+    }
+
+    @classmethod
+    def _server(cls, in_task: list):
+        from typing import Any
+
+        from fastmcp import FastMCP
+
+        from tools import elicitation as oe
+        from tools.code_mode import setup_code_mode
+
+        mcp = FastMCP("test-server")
+
+        @mcp.tool
+        async def ask(kind: str) -> Any:
+            """Prompt once with a link or a form, then report the answer."""
+            from fastmcp_tasks.context import get_task_context
+
+            in_task.append(get_task_context() is not None)
+            if kind == "link":
+                answer = oe.answered_oauth_prompt()
+                if answer is not None:
+                    return f"answered:{answer.action}"
+                prompt = await oe.prompt_for_oauth(
+                    "Finish OAuth", "https://example.com/auth"
+                )
+            else:
+                answer = oe.answered_prompt("confirm")
+                if answer is not None:
+                    return f"answered:{answer.action}:{answer.content}"
+                prompt = oe.prompt_for_form("confirm", "Send it?", cls.FORM)
+            if prompt.outcome == "suspended":
+                return prompt.suspend
+            return f"fallback:{prompt.outcome}"
+
+        setup_code_mode(mcp)
+        return mcp
+
+    @staticmethod
+    def _handler(action: str, seen: list):
+        from fastmcp.client.elicitation import ElicitResult
+
+        async def handler(message, response_type, params, context):
+            seen.append(getattr(params, "mode", None))
+            content = {"ok": True} if action == "accept" else None
+            return ElicitResult(action=action, content=content)
+
+        return handler
+
+    @staticmethod
+    async def _run(client, kind: str) -> str:
+        result = await client.call_tool(
+            "execute", {"code": f"return await call_tool('ask', {{'kind': '{kind}'}})"}
+        )
+        return result.content[0].text
+
+    @pytest.mark.asyncio
+    async def test_a_link_prompt_round_trips_through_the_task(self):
+        from fastmcp import Client
+
+        in_task: list = []
+        seen: list = []
+        async with Client(
+            self._server(in_task), elicitation_handler=self._handler("accept", seen)
+        ) as client:
+            text = await self._run(client, "link")
+
+        assert text == "answered:accept"
+        assert seen == ["url"]
+        assert in_task == [True, True]  # asked on one leg, answered on the next
+
+    @pytest.mark.asyncio
+    async def test_a_form_prompt_round_trips_through_the_task(self):
+        from fastmcp import Client
+
+        in_task: list = []
+        seen: list = []
+        async with Client(
+            self._server(in_task), elicitation_handler=self._handler("accept", seen)
+        ) as client:
+            text = await self._run(client, "form")
+
+        assert text == "answered:accept:{'ok': True}"
+        assert seen == ["form"]
+        assert in_task == [True, True]
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_reaches_the_tool(self):
+        from fastmcp import Client
+
+        in_task: list = []
+        seen: list = []
+        async with Client(
+            self._server(in_task), elicitation_handler=self._handler("decline", seen)
+        ) as client:
+            text = await self._run(client, "link")
+
+        assert text == "answered:decline"
+        assert in_task == [True, True]
+
+    @pytest.mark.asyncio
+    async def test_a_client_that_cannot_be_asked_keeps_the_fallback(self):
+        """Tasks without elicitation: nothing is asked, so the task cannot stall."""
+        from fastmcp import Client
+
+        in_task: list = []
+        async with Client(self._server(in_task)) as client:
+            link = await self._run(client, "link")
+            form = await self._run(client, "form")
+
+        assert link == "fallback:unsupported"
+        assert form == "fallback:unsupported"
+        assert in_task == [True, True]  # one leg each, no re-entry
 
 
 class TestExecuteWallClockLimit:
